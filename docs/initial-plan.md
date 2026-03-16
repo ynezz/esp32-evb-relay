@@ -302,11 +302,13 @@ stacks.
 **Trigger:** tag push matching `v*`.
 
 Extracts version from the tag (`${GITHUB_REF_NAME#v}`) and coordinates four
-jobs:
+jobs. Each job starts with `actions/checkout@v5` using `fetch-depth: 0` so tag
+history is available to GoReleaser and `git-cliff`:
 
 1. **`firmware`** — build versioned firmware binary
    - Uses `espressif/esp-idf-ci-action@v1` with
-     `cmake -DPROJECT_VER=X.Y.Z` to embed the version in the binary
+     `path: firmware`, command: `idf.py -DPROJECT_VER=X.Y.Z build`
+     to embed the version in the binary
    - Renames output to `esp32-evb-relay-vX.Y.Z.bin`
    - Generates `esp32-evb-relay-vX.Y.Z.bin.sha256` checksum
    - Uploads both as workflow artifacts
@@ -319,6 +321,7 @@ jobs:
 
 3. **`changelog`** — generate release notes
    - Installs `git-cliff` and runs `git-cliff --latest --strip header`
+     against the full fetched tag history
    - Uploads the changelog text as a workflow artifact
 
 4. **`release`** — assemble final GitHub Release
@@ -418,11 +421,12 @@ commit_parsers = [
 
 **Single source of truth:** the git tag `vX.Y.Z`.
 
-- **Firmware:** The release workflow passes `-DPROJECT_VER=X.Y.Z` to CMake,
-  which populates `esp_app_desc_t.version`. This version surfaces in
+- **Firmware:** The release workflow runs
+  `idf.py -DPROJECT_VER=X.Y.Z build`, which sets `PROJECT_VER` and populates
+  `esp_app_desc_t.version`. This version surfaces in
   `GET /api/v1/status` and the mDNS `fw_version` TXT record.
-  `firmware/version.txt` contains `0.0.0-dev` as a local dev fallback for
-  builds outside the release pipeline.
+  `firmware/version.txt` contains `0.0.0-dev` as a local dev fallback when
+  `PROJECT_VER` is not injected by the release pipeline.
 
 - **CLI:** GoReleaser injects the version via ldflags into `main.version`,
   `main.commit`, and `main.date`. The `--version` flag reads these values.
