@@ -6,7 +6,7 @@ Build a networked relay controller for Olimex ESP32-EVB + MOD-IO expansion. The 
 
 **Hardware:**
 - ESP32-EVB: 2 onboard relays (GPIO32, GPIO33), Ethernet (LAN8710A), UEXT I2C (SDA=GPIO13, SCL=GPIO16)
-- MOD-IO (I2C slave 0x58): 4 relays, 4 digital inputs, 4 analog inputs (1-byte, 8-bit samples over I2C)
+- MOD-IO (I2C slave 0x58): 4 relays, 4 digital inputs, 4 analog inputs (10-bit samples read over I2C)
 - Serial: host-specific USB serial device (for example `/dev/tty.usbserial-*`)
 
 ---
@@ -74,9 +74,9 @@ esp32-evb-relay/
 ### Step 4 — `mod_io` component
 - Uses ESP-IDF v5.x `i2c_master` API (not deprecated `i2c_cmd_link`)
 - I2C protocol:
-  - `0x41` + bitmask → set relay outputs (bits 0-3)
-  - `0x42` → read digital inputs (1 byte)
-  - `0x43-0x46` → read analog inputs 0-3 (1 byte each, 8-bit samples)
+  - `0x10` + bitmask → set relay outputs (bits 0-3)
+  - `0x20` → read digital inputs (1 byte)
+  - `0x30-0x33` → select analog inputs 0-3, then read back a 16-bit value carrying the 10-bit sample
 - There is no separate relay-state readback command in the Olimex firmware, and the write command always sends the full 4-bit relay bitmap
 - Keep the relay bitmap in RAM for normal uptime, but after an ESP32 reboot or MOD-IO reattach mark MOD-IO relay state as `unknown` until a deliberate boot policy applies or a client sends a bulk `PUT /api/v1/relays/modio`
 - Do not write every relay toggle to NVS just to simulate readback; that would create flash wear without making the state authoritative
@@ -90,7 +90,7 @@ esp32-evb-relay/
 - Relay setters publish `relay_changed` events into the same internal event queue; `input_monitor` should not invent relay events
 - Also monitors onboard button (GPIO34 interrupt → `button` event on the same internal event queue)
 - Debounce the onboard button in software before emitting `button` events so one press does not fan out into multiple spurious notifications
-- Analog inputs: configurable threshold for change detection on 8-bit samples (avoid noise-triggered events)
+- Analog inputs: configurable threshold for change detection on 10-bit samples (avoid noise-triggered events)
 - If MOD-IO probing starts succeeding after an absence/error period, publish a presence change, reset relay sync to `unknown`, and resume normal sampling
 
 ### Step 4c — `device_config` component
