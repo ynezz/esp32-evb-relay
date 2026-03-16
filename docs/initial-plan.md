@@ -177,14 +177,14 @@ register long-running tasks with the task WDT
 ```
 evb-relay relay list                    # Relay states + MOD-IO sync metadata
 evb-relay relay on onboard:1            # Target format: <group>:<id>
-evb-relay relay off modio:3
+evb-relay relay off modio:3             # Works once MOD-IO sync state is known
 evb-relay relay toggle onboard:2
 evb-relay relay set onboard:1=on modio:1=off modio:2=off modio:3=on modio:4=off   # Multi-target; also the safe way to re-establish a full MOD-IO bitmap
 
-evb-relay input digital                 # All digital inputs (one-shot)
-evb-relay input digital 2               # Single digital input
-evb-relay input analog                  # All analog inputs (one-shot)
-evb-relay input analog 2                # Single analog input
+evb-relay input digital                 # Latest sampled digital snapshot
+evb-relay input digital 2               # One digital input from the latest sampled snapshot
+evb-relay input analog                  # Latest sampled analog snapshot
+evb-relay input analog 2                # One analog input from the latest sampled snapshot
 evb-relay input watch                   # SSE stream — prints events as they arrive
 
 evb-relay status                        # Device health
