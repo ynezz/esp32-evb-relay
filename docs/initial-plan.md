@@ -89,7 +89,7 @@ esp32-evb-relay/
 ### Step 4c — `device_config` component
 - NVS-backed source of truth for `api_token`, `poll_interval_ms`, `hostname`, `modio_boot_policy`, and future WiFi credentials
 - Centralizes validation, defaults, and persistence so `auth`, `network`, `input_monitor`, and `rest_api` do not each manage their own ad hoc NVS keys
-- `modio_boot_policy` should be explicit and low-churn, for example `all_off` (apply `0000` on boot and mark state synchronized) or `leave_unchanged` (do not touch hardware on boot, but report MOD-IO relay state as unknown until the client performs a bulk set)
+- `modio_boot_policy` should be explicit and low-churn, and should default to `leave_unchanged` so an ESP32 reboot does not silently toggle attached loads; `all_off` is an explicit opt-in if fail-safe-off behavior is desired
 - Secrets are write-only at the API layer: never echo `api_token` or raw WiFi credentials back from `GET /api/v1/config`; expose redacted metadata instead
 - Returns metadata about whether a config change is applied live or requires a restart/rebind
 
