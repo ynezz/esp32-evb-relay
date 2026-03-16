@@ -44,8 +44,22 @@ esp32-evb-relay/
 │   ├── main.go
 │   ├── .goreleaser.yaml             # GoReleaser v2 config (Step 17)
 │   ├── cmd/                         # Commands: relay, input, status, ota, discover
-│   ├── client/                      # HTTP client wrapper
-│   └── internal/                    # Output formatters, mDNS discovery
+│   ├── client/                      # HTTP client wrapper + device context extraction
+│   │   ├── client.go                # Base URL, auth, timing, header extraction
+│   │   └── errors.go                # Structured APIError, exit code classification
+│   └── internal/
+│       ├── exitcodes/
+│       │   └── codes.go             # Exit code constants (0-7)
+│       ├── format/
+│       │   └── output.go            # Human output: table, json, plain
+│       ├── robot/
+│       │   ├── envelope.go          # Robot envelope struct, Wrap()
+│       │   ├── errors.go            # Error → remediation mapping
+│       │   ├── context.go           # DeviceContext from response headers
+│       │   ├── capabilities.go      # --robot-capabilities introspection
+│       │   └── stream.go            # NDJSON writer for watch streams
+│       └── toon/
+│           └── encoder.go           # Minimal TOON output encoder
 └── scripts/
     ├── flash.sh
     └── provision.sh
@@ -147,6 +161,20 @@ Base: `http://<host>/api/v1`
 - Cap SSE fan-out to a small fixed number of clients and drop stale subscribers on backpressure instead of letting one slow client exhaust MCU resources
 - Heartbeat every 30s to detect stale connections
 
+**Response headers** — every `rest_api` HTTP response includes device context
+headers so agents can build `device_context` without a sidecar `/api/v1/status`
+call:
+
+```
+X-FW-Version: 0.3.1
+X-ModIO-Present: true
+X-ModIO-Sync: synchronized|unknown|absent
+```
+
+Add a post-handler hook or helper that injects these headers on every response.
+`X-ModIO-Present` and `X-ModIO-Sync` are read from `mod_io` component state;
+`X-FW-Version` is read from `esp_app_desc_t.version`.
+
 Error format: `{"error": {"code": "RELAY_NOT_FOUND", "message": "...", "status": 404}}`
 - MOD-IO-specific endpoints return `503 MODIO_NOT_PRESENT` when the daughterboard is absent; do not fabricate zeroed input or relay state
 - If MOD-IO relay state is unknown after boot or reattach, `GET /api/v1/relays/modio` and single-relay `PUT /api/v1/relays/modio/{id}` return `409 MODIO_STATE_UNKNOWN`; clients must use bulk `PUT /api/v1/relays/modio` to establish a full bitmap first
@@ -177,12 +205,45 @@ register long-running tasks with the task WDT
 
 ### Step 10 — Scaffold Go project
 - `go.mod` with `github.com/spf13/cobra`, `github.com/hashicorp/mdns`, `github.com/BurntSushi/toml`
-- Global flags: `--host/-H`, `--api-token/-k`, `--format/-f` (table/json/plain), `--timeout/-t`
-- Config file: `os.UserConfigDir()/evb-relay/config.toml` so the CLI uses the platform-native config directory on Linux, macOS, and Windows; env var `EVB_RELAY_API_TOKEN` override
+- Config file: `os.UserConfigDir()/evb-relay/config.toml` so the CLI uses the platform-native config directory on Linux, macOS, and Windows
 
-### Step 11 — `client/client.go`
+**Global flags:**
+
+| Flag | Env Var | Description |
+|------|---------|-------------|
+| `--host/-H` | `EVB_RELAY_HOST` | Device IP or hostname |
+| `--api-key/-k` | `EVB_RELAY_API_KEY` | API authentication token |
+| `--format/-f` | — | Output format: table/json/plain (default: table) |
+| `--timeout/-t` | `EVB_RELAY_TIMEOUT` | HTTP timeout (e.g., 5s, 10s; default: 10s) |
+| `--robot` | `EVB_RELAY_ROBOT=1` | Activate robot mode (TOON envelope, no color, stderr=NDJSON) |
+| `--robot-capabilities` | — | Introspection: dump full CLI contract as JSON, exit. No `--host` needed. |
+
+**Format matrix:**
+
+| Mode | Default format | Output | Envelope? |
+|------|---------------|--------|-----------|
+| `--robot` | TOON | TOON envelope + data | yes |
+| `--robot --format json` | JSON | JSON envelope + data | yes |
+| `--format json` | JSON | raw API response | no |
+| `--format table` | table | human-aligned columns | no |
+| `--format plain` | plain | bare values, one/line | no |
+| (default) | table | human-aligned columns | no |
+
+**Config precedence (highest → lowest):**
+1. CLI flags (`--host`, `--api-key`, `--robot`, `--format`, `--timeout`)
+2. Environment variables (`EVB_RELAY_HOST`, `EVB_RELAY_API_KEY`, `EVB_RELAY_ROBOT`, `EVB_RELAY_TIMEOUT`)
+3. Config file (`~/.config/evb-relay/config.toml`)
+
+### Step 11 — `client/` package
 - HTTP client wrapper: base URL, auth header injection, timeout, error handling
 - Maps HTTP errors to structured Go errors
+- Captures request timing (start/end) for `elapsed_ms` in robot envelopes
+- Extracts `DeviceContext` from response headers: `X-ModIO-Sync`,
+  `X-FW-Version`, `X-ModIO-Present`
+- Returns structured `APIError` with code, message, HTTP status for the robot
+  error classification pipeline
+- `client/errors.go`: error classification and exit code mapping based on
+  `APIError.Code` and HTTP status fallback
 
 ### Step 12 — Commands
 ```
@@ -190,7 +251,8 @@ evb-relay relay list                    # Relay states + MOD-IO sync metadata
 evb-relay relay on onboard:1            # Target format: <group>:<id>
 evb-relay relay off modio:3             # Works once MOD-IO sync state is known
 evb-relay relay toggle onboard:2
-evb-relay relay set onboard:1=on modio:1=off modio:2=off modio:3=on modio:4=off   # Multi-target; also the safe way to re-establish a full MOD-IO bitmap
+evb-relay relay set onboard:1=on modio:all=off   # Multi-target with :all shorthand
+evb-relay relay set modio:1=on modio:2=off modio:3=on modio:4=off   # Explicit per-relay
 
 evb-relay input digital                 # Latest sampled digital snapshot
 evb-relay input digital 2               # One digital input from the latest sampled snapshot
@@ -206,14 +268,325 @@ evb-relay ota flash <firmware.bin>      # OTA update
 evb-relay completion bash|zsh|fish|powershell  # Shell completions
 ```
 
-If the firmware reports `MODIO_STATE_UNKNOWN` after boot, use `evb-relay relay set ...` with all four MOD-IO relays once before relying on single-relay `on`/`off` commands.
+If the firmware reports `MODIO_STATE_UNKNOWN` after boot, use `evb-relay relay set modio:all=off` to establish sync before relying on single-relay `on`/`off` commands.
 
-### Step 13 — Output formats
+#### Step 12a — `modio:all` and `onboard:all` shorthand
+
+`relay set` expands `modio:all` and `onboard:all` **before** API calls:
+
+```bash
+evb-relay relay set modio:all=off
+# expands to: modio:1=off modio:2=off modio:3=off modio:4=off
+
+evb-relay relay set onboard:all=on
+# expands to: onboard:1=on onboard:2=on
+```
+
+Relay count (4 MOD-IO, 2 onboard) is hardcoded in the CLI to match the hardware spec. Batch results in robot mode report per-target success/failure:
+
+```
+results
+target	state	ok	error
+onboard:1	true	true	-
+modio:1	false	true	-
+modio:2	false	true	-
+modio:3	false	true	-
+modio:4	false	true	-
+
+all_ok=true
+```
+
+On partial failure: `exit_code=1`, `error.code=PARTIAL_FAILURE`, per-target `ok=false` + `error` on failed targets, `all_ok=false`.
+
+#### Step 12b — TOON encoder
+
+Minimal Go TOON encoder, output-only (~200-300 lines). TOON is a compact text
+format that uses 30-60% fewer tokens than JSON while remaining
+machine-readable.
+
+**Capabilities:**
+- Flat key=value pairs (envelope header fields)
+- Tabular uniform arrays (relay lists, input arrays)
+- Nested objects (status, config) as prefixed key=value
+- Type handling: null, bool, number, string
+- No TOON parser needed (output-only)
+
+**API:**
+```go
+package toon
+
+func Encode(w io.Writer, v any) error
+func EncodeTable(w io.Writer, name string, rows []map[string]any, cols []string) error
+```
+
+#### Step 12c — Robot envelope
+
+Every `--robot` response wraps output in a structured envelope.
+
+**Success envelope (TOON):**
+```
+v=1
+command=relay list
+elapsed_ms=42
+exit_code=0
+host=192.168.1.50
+modio_present=true
+modio_sync=unknown
+firmware_version=0.3.1
+next=evb-relay relay set modio:all=off
+
+relays
+group	id	state	sync
+onboard	1	true	-
+onboard	2	false	-
+modio	1	true	synchronized
+modio	2	false	synchronized
+modio	3	null	unknown
+modio	4	null	unknown
+```
+
+**Success envelope (JSON, via `--robot --format json`):**
+```json
+{
+  "v": 1,
+  "command": "relay list",
+  "timestamp": "2026-03-16T14:22:03.412Z",
+  "elapsed_ms": 42,
+  "exit_code": 0,
+  "host": "192.168.1.50",
+  "data": {
+    "relays": [
+      {"group": "onboard", "id": 1, "state": true},
+      {"group": "onboard", "id": 2, "state": false},
+      {"group": "modio", "id": 1, "state": true, "sync": "synchronized"},
+      {"group": "modio", "id": 2, "state": false, "sync": "synchronized"},
+      {"group": "modio", "id": 3, "state": null, "sync": "unknown"},
+      {"group": "modio", "id": 4, "state": null, "sync": "unknown"}
+    ]
+  },
+  "device_context": {
+    "modio_present": true,
+    "modio_sync": "unknown",
+    "firmware_version": "0.3.1"
+  },
+  "warnings": [],
+  "next": ["evb-relay relay set modio:all=off"]
+}
+```
+
+**Error envelope (TOON):**
+```
+v=1
+command=relay on modio:3
+elapsed_ms=52
+exit_code=6
+host=192.168.1.50
+modio_present=true
+modio_sync=unknown
+firmware_version=0.3.1
+
+error_code=MODIO_STATE_UNKNOWN
+error_message=MOD-IO relay state is unknown after boot. Set all 4 relays first.
+error_http_status=409
+error_retryable=false
+error_remediation=evb-relay relay set modio:all=off
+
+next=evb-relay relay set modio:all=off
+```
+
+**Error envelope (JSON):**
+```json
+{
+  "v": 1,
+  "command": "relay on modio:3",
+  "elapsed_ms": 52,
+  "exit_code": 6,
+  "host": "192.168.1.50",
+  "error": {
+    "code": "MODIO_STATE_UNKNOWN",
+    "message": "MOD-IO relay state is unknown after boot. Set all 4 relays first.",
+    "http_status": 409,
+    "retryable": false,
+    "remediation": "evb-relay relay set modio:all=off"
+  },
+  "device_context": {
+    "modio_present": true,
+    "modio_sync": "unknown",
+    "firmware_version": "0.3.1"
+  },
+  "next": ["evb-relay relay set modio:all=off"]
+}
+```
+
+**Remediation table (built into CLI):**
+
+| API Error | Exit Code | Remediation Command |
+|-----------|-----------|---------------------|
+| `MODIO_STATE_UNKNOWN` (409) | 6 | `evb-relay relay set modio:all=off` |
+| `MODIO_NOT_PRESENT` (503) | 7 | *(none — hardware)* |
+| `MODIO_SAMPLE_UNAVAILABLE` (503) | 7 | *(retryable: true, wait for poll cycle)* |
+| `RELAY_NOT_FOUND` (404) | 4 | *(none — bad ID)* |
+| `AUTH_REQUIRED`/`AUTH_INVALID` (401/403) | 3 | `evb-relay config show` |
+| Network timeout | 2 | `evb-relay discover` |
+
+`device_context` is populated from firmware response headers (`X-ModIO-Sync`,
+`X-FW-Version`, `X-ModIO-Present`). If firmware doesn't provide headers yet,
+the field is null/omitted.
+
+**Output flow** — each command handler:
+
+```go
+func runRelayOn(cmd *cobra.Command, args []string) error {
+    result, deviceCtx, err := client.SetRelay(target, true)
+
+    if robotMode {
+        return robot.Wrap(cmd, os.Stdout, robot.WrapOpts{
+            Data:          result,
+            DeviceContext: deviceCtx,
+            Err:           err,
+            Format:        robotFormat, // "toon" or "json"
+        })
+    }
+
+    // Human output path (table/json/plain)
+    return format.Output(os.Stdout, result, outputFormat)
+}
+```
+
+`robot.Wrap()` handles: building the envelope (command, timing, exit code,
+device context), error → remediation mapping, populating `next` suggestions,
+marshaling to TOON or JSON, and setting the process exit code.
+
+#### Step 12d — `--robot-capabilities` introspection
+
+`evb-relay --robot-capabilities` — always JSON (even if TOON is default in
+robot mode, capabilities is complex/nested and JSON is better here). No
+`--host` required.
+
+```json
+{
+  "v": 1,
+  "cli_version": "0.3.1",
+  "envelope_version": 1,
+  "default_robot_format": "toon",
+  "commands": [
+    {
+      "name": "relay list",
+      "description": "List all relay states with MOD-IO sync metadata",
+      "args": [],
+      "flags": [],
+      "output_fields": ["relays[].group", "relays[].id", "relays[].state", "relays[].sync"],
+      "errors": ["MODIO_NOT_PRESENT"],
+      "example": "evb-relay --robot relay list"
+    }
+  ],
+  "exit_codes": {
+    "0": "success",
+    "1": "general error",
+    "2": "network error",
+    "3": "auth error",
+    "4": "not found",
+    "5": "bad argument",
+    "6": "state error (MOD-IO sync)",
+    "7": "hardware unavailable"
+  },
+  "error_codes": {
+    "MODIO_STATE_UNKNOWN": {"exit_code": 6, "retryable": false, "remediation": "evb-relay relay set modio:all=off"},
+    "MODIO_NOT_PRESENT": {"exit_code": 7, "retryable": false, "remediation": null},
+    "MODIO_SAMPLE_UNAVAILABLE": {"exit_code": 7, "retryable": true, "remediation": null},
+    "RELAY_NOT_FOUND": {"exit_code": 4, "retryable": false, "remediation": null},
+    "AUTH_REQUIRED": {"exit_code": 3, "retryable": false, "remediation": "evb-relay config show"},
+    "AUTH_INVALID": {"exit_code": 3, "retryable": false, "remediation": "evb-relay config show"},
+    "PARTIAL_FAILURE": {"exit_code": 1, "retryable": false, "remediation": null}
+  },
+  "state_machine": {
+    "modio_sync_states": ["unknown", "synchronized", "absent"],
+    "transitions": {
+      "unknown -> synchronized": "Bulk set all 4 MOD-IO relays via: evb-relay relay set modio:all=off",
+      "absent -> unknown": "MOD-IO physically connected, device detects presence on next poll",
+      "synchronized -> unknown": "ESP32 reboots or MOD-IO reconnects",
+      "* -> absent": "MOD-IO physically disconnected"
+    },
+    "boot_hint": "After boot with modio_boot_policy=leave_unchanged, run: evb-relay relay set modio:all=off"
+  },
+  "environment_variables": {
+    "EVB_RELAY_HOST": "Device IP or hostname",
+    "EVB_RELAY_API_KEY": "API authentication token",
+    "EVB_RELAY_ROBOT": "Set to 1 to enable robot mode",
+    "EVB_RELAY_TIMEOUT": "HTTP timeout (e.g., 5s, 10s)"
+  }
+}
+```
+
+Generated from cobra command tree — command metadata is annotated on each cobra
+command, then the capabilities handler walks the tree and emits the JSON. Not
+hand-maintained.
+
+#### Step 12e — NDJSON watch stream
+
+`evb-relay --robot input watch` produces NDJSON (one JSON object per line), not
+the standard envelope.
+
+**Stream header (first line):**
+```json
+{"v":1,"stream":"events","host":"192.168.1.50","started_at":"2026-03-16T14:22:03.000Z"}
+```
+
+**Event lines:**
+```json
+{"event":"digital_input","data":{"id":2,"state":true,"ts_ms":12345},"received_at":"2026-03-16T14:22:03.412Z"}
+{"event":"relay_changed","data":{"group":"modio","id":1,"state":false,"ts_ms":12350},"received_at":"2026-03-16T14:22:04.001Z"}
+{"event":"heartbeat","data":{"ts_ms":42345},"received_at":"2026-03-16T14:22:33.412Z"}
+```
+
+**Stream end (on clean disconnect):**
+```json
+{"event":"stream_end","reason":"client_disconnect","received_at":"2026-03-16T14:22:35.000Z"}
+```
+
+Why NDJSON for streams (not TOON): TOON requires knowing the full table schema
+upfront. SSE events have different shapes (`digital_input` vs `relay_changed`
+vs `heartbeat`). NDJSON is the right format for heterogeneous unbounded
+streams.
+
+### Step 13 — Output formats and exit codes
+
+**Human formats** (no envelope):
 - **table** (default): aligned columns via `text/tabwriter`
 - **json**: raw API response
 - **plain**: bare values, one per line (for piping)
 
-Exit codes: 0=success, 1=general, 2=network, 3=auth, 4=not found, 5=bad argument
+**Robot formats** (wrapped in envelope):
+- **toon** (default in `--robot`): TOON envelope + data (30-60% fewer tokens than JSON)
+- **json** (`--robot --format json`): JSON envelope + data
+
+**Exit codes:**
+
+| Code | Name | Meaning | Agent response |
+|------|------|---------|---------------|
+| 0 | success | Command completed | Read `data` |
+| 1 | general | Unexpected error / partial failure | Parse `error`, log, escalate |
+| 2 | network | Connection/timeout | Retry, run `discover` |
+| 3 | auth | 401/403 | Check API key |
+| 4 | not_found | 404 | Fix target identifier |
+| 5 | bad_arg | Invalid CLI usage | Fix invocation |
+| 6 | state | 409 MODIO_STATE_UNKNOWN | Run `error.remediation` command |
+| 7 | hardware | 503 MODIO_NOT_PRESENT/SAMPLE_UNAVAILABLE | Check physical hardware, wait, or skip |
+
+**Per-command output schemas (data field):**
+
+| Command | Schema |
+|---------|--------|
+| `relay list` | `relays[]: {group, id, state: bool\|null, sync: string}` |
+| `relay on/off/toggle` | `relay: {group, id, state: bool}` |
+| `relay set` (batch) | `results[]: {target, state, ok: bool, error: string\|null}`, `all_ok: bool` |
+| `input digital` | `inputs[]: {id, state: bool}`, `sample_ts_ms`, `sample_age_ms` |
+| `input analog` | `inputs[]: {id, value: int}`, `sample_ts_ms`, `sample_age_ms` |
+| `status` | `uptime_seconds`, `firmware_version`, `free_heap_bytes`, `network.*`, `modio.*`, `relays.*` |
+| `config show` | `config: {poll_interval_ms, hostname, modio_boot_policy, api_token_set}` |
+| `config set` | `changes[]: {key, old, new, live: bool}`, `restart_required: bool` |
+| `discover` | `devices[]: {hostname, ip, port, txt}` |
+| `ota flash` | `uploaded_bytes`, `firmware_file`, `reboot_in_seconds` |
 
 ---
 
@@ -397,7 +770,7 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X main.version={{.Version}}
+      - -X github.com/puvvadi/esp32-evb-relay/cli/cmd.Version={{.Version}}
       - -X main.commit={{.Commit}}
       - -X main.date={{.CommitDate}}
     mod_timestamp: "{{ .CommitTimestamp }}"
@@ -486,9 +859,9 @@ commit_parsers = [
   `firmware/version.txt` contains `0.0.0-dev` as a local dev fallback when
   `PROJECT_VER` is not injected by the release pipeline.
 
-- **CLI:** GoReleaser injects the version via ldflags into `main.version`,
-  `main.commit`, and a commit-derived `main.date`. The `--version` flag reads
-  these values.
+- **CLI:** GoReleaser injects the version via ldflags into `cmd.Version`,
+  `main.commit`, and a commit-derived `main.date`. The `--version` flag and
+  `--robot-capabilities` both read `cmd.Version`.
 
 - **Semver policy:**
   - **Major** — breaking REST API changes, breaking CLI interface changes
@@ -562,6 +935,8 @@ is intentionally app-only.
 
 ## Verification
 
+### Firmware
+
 1. **Build firmware**: `cd firmware && idf.py set-target esp32 && idf.py build`
 2. **Flash**: `cd firmware && idf.py -p <serial-port> flash monitor`
 3. **Verify boot**: serial console shows init sequence, prints the first-boot API token if one was generated, and reports an Ethernet IP
@@ -569,7 +944,24 @@ is intentionally app-only.
 5. **Test API**: `curl -H "Authorization: Bearer <token>" http://<ip>/api/v1/status` returns JSON
 6. **Test relays**: `curl -X PUT -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d '{"state":true}' http://<ip>/api/v1/relays/onboard/1` — hear relay click
 7. **Test MOD-IO sync model**: with `modio_boot_policy=leave_unchanged`, `GET /api/v1/relays/modio` returns `409 MODIO_STATE_UNKNOWN` after boot; `PUT /api/v1/relays/modio` with all 4 states establishes sync, after which `GET` returns the authoritative 4-relay bitmap
-8. **Build CLI**: `cd cli && go build -o evb-relay .`
-9. **CLI test**: `./cli/evb-relay --host <ip> --api-token <token> status` returns device info
-10. **CLI relay control**: `./cli/evb-relay --host <ip> --api-token <token> relay on onboard:1` — relay clicks
-11. **OTA**: `./cli/evb-relay --host <ip> --api-token <token> ota flash firmware/build/esp32-evb-relay.bin` — device reboots with new firmware
+8. **Test response headers**: verify every API response includes `X-FW-Version`, `X-ModIO-Present`, and `X-ModIO-Sync` headers
+
+### CLI — Human Mode
+
+9. **Build CLI**: `cd cli && go build -o evb-relay .`
+10. **CLI test**: `./cli/evb-relay --host <ip> --api-key <token> status` returns device info
+11. **CLI relay control**: `./cli/evb-relay --host <ip> --api-key <token> relay on onboard:1` — relay clicks
+12. **OTA**: `./cli/evb-relay --host <ip> --api-key <token> ota flash firmware/build/esp32-evb-relay.bin` — device reboots with new firmware
+
+### CLI — Robot Mode (unit tests in `go test ./...`)
+
+13. **TOON encoder**: unit tests covering flat objects, uniform arrays, nested objects, null/bool/number/string types
+14. **Robot envelope**: test `Wrap()` produces valid TOON and JSON envelopes for success and error cases
+15. **Remediation mapping**: test each API error code maps to correct exit code and remediation command
+16. **`--robot-capabilities`**: verify output is valid JSON with all commands, exit codes, error codes, state machine, and env vars
+17. **`modio:all` expansion**: test `modio:all=off` expands to 4 individual targets, `onboard:all=on` to 2
+18. **Batch results**: test partial failure produces per-target results with `PARTIAL_FAILURE` error code
+19. **NDJSON watch**: test stream header, event lines, and stream_end are valid NDJSON
+20. **Exit codes**: test each error condition produces the correct exit code (0-7)
+21. **Device context**: test extraction from HTTP response headers, test null when headers absent
+22. **Format matrix**: test `--robot`, `--robot --format json`, `--format json`, `--format table`, `--format plain` each produce expected output shape
