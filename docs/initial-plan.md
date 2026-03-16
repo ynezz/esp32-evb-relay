@@ -94,7 +94,7 @@ esp32-evb-relay/
 - Event-driven: wait for IP via `IP_EVENT_ETH_GOT_IP`
 - `network_wait_for_ip(timeout_ms)` blocks `app_main` until connected or returns a timeout/error; in the Ethernet-only phase, treat timeout as a startup failure instead of silently continuing without a usable control plane
 - Architecture allows a later WiFi phase (separate init path, shared event handlers)
-- mDNS: hostname `esp32-evb-relay`, register `_http._tcp` with TXT records (fw_version, board type)
+- mDNS: default hostname `esp32-evb-relay` comes from `device_config`; register `_http._tcp` with TXT records (fw_version, board type)
 
 ### Step 6 — `auth` component
 - API token loaded from `device_config`
