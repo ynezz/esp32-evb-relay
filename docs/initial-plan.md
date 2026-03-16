@@ -80,6 +80,7 @@ esp32-evb-relay/
 - Compares against previous state, on change: publishes input events onto a shared event queue
 - Relay setters publish `relay_changed` events onto the same queue; `input_monitor` should not invent relay events
 - Also monitors onboard button (GPIO34 interrupt → `button` event on the shared queue)
+- Debounce the onboard button in software before emitting `button` events so one press does not fan out into multiple spurious notifications
 - Analog inputs: configurable threshold for change detection on 8-bit samples (avoid noise-triggered events)
 
 ### Step 4c — `device_config` component
