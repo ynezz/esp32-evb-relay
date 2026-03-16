@@ -169,11 +169,11 @@ register long-running tasks with the task WDT
 
 ### Step 12 — Commands
 ```
-evb-relay relay list                    # All relay states
+evb-relay relay list                    # Relay states + MOD-IO sync metadata
 evb-relay relay on onboard:1            # Target format: <group>:<id>
 evb-relay relay off modio:3
 evb-relay relay toggle onboard:2
-evb-relay relay set onboard:1=on modio:2=off   # Bulk
+evb-relay relay set onboard:1=on modio:1=off modio:2=off modio:3=on modio:4=off   # Multi-target; also the safe way to re-establish a full MOD-IO bitmap
 
 evb-relay input digital                 # All digital inputs (one-shot)
 evb-relay input digital 2               # Single digital input
