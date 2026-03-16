@@ -76,7 +76,7 @@ esp32-evb-relay/
 - I2C protocol:
   - `0x10` + bitmask → set relay outputs (bits 0-3)
   - `0x20` → read digital inputs (1 byte)
-  - `0x30-0x33` → select analog inputs 0-3, then read back a 16-bit value carrying the 10-bit sample
+  - `0x30-0x33` → select analog inputs 1-4, then read two bytes carrying the 10-bit sample in the MOD-IO manual's bit-packed `LSB:MSB` format; decode it explicitly instead of treating it as a plain host-endian `uint16`
 - There is no separate relay-state readback command in the Olimex firmware, and the write command always sends the full 4-bit relay bitmap
 - Keep the relay bitmap in RAM for normal uptime, but after an ESP32 reboot mark MOD-IO relay state as `unknown` until the configured boot policy applies or a client sends a bulk `PUT /api/v1/relays/modio`
 - After a hot reattach, always return MOD-IO relay state to `unknown` and require an explicit bulk `PUT /api/v1/relays/modio`; do not replay `modio_boot_policy` against a newly reappearing daughterboard
