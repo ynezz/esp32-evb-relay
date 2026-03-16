@@ -466,8 +466,7 @@ feature branch → PR → CI (Step 15) → review → merge to main
 
 1. Create a feature branch, make changes with conventional commits
 2. Open a PR targeting `main` — CI runs path-filtered jobs
-3. On merge to `main`, tag the release: `git tag v0.1.0 && git push --tags`
-   (or more narrowly: `git push origin v0.1.0`)
+3. On merge to `main`, tag the release: `git tag v0.1.0 && git push origin v0.1.0`
 4. The release workflow triggers and produces:
    - Firmware binary built with the embedded version
    - 6 CLI archives built by GoReleaser
