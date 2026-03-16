@@ -29,7 +29,8 @@ esp32-evb-relay/
 │       ├── relay/                    # Onboard relay GPIO driver
 │       ├── mod_io/                   # MOD-IO I2C protocol driver
 │       ├── network/                  # Ethernet (+ WiFi placeholder)
-│       ├── rest_api/                 # HTTP server + JSON handlers
+│       ├── input_monitor/             # Polls MOD-IO inputs, detects changes
+│       ├── rest_api/                 # HTTP server + JSON handlers + SSE
 │       ├── auth/                     # Optional API key middleware
 │       └── ota/                      # OTA firmware update
 ├── cli/                             # Go CLI (cobra)
@@ -70,6 +71,13 @@ esp32-evb-relay/
   - `0x40` → read current relay states
 - `mod_io_init(bus_handle)`, `mod_io_is_present()`, graceful failure if module absent
 
+### Step 4b — `input_monitor` component
+- FreeRTOS task polls MOD-IO digital + analog inputs at configurable interval (default 100ms)
+- Compares against previous state, on change: pushes event to a queue
+- Events consumed by SSE handler in `rest_api` and by internal relay-change callbacks
+- Also monitors onboard button (GPIO34 interrupt → event queue)
+- Analog inputs: configurable threshold for change detection (avoid noise-triggered events)
+
 ### Step 5 — `network` component
 - Ethernet init: LAN8710A PHY, external RMII clock on GPIO0, MDC/MDIO on GPIO23/18
 - Event-driven: wait for IP via `IP_EVENT_ETH_GOT_IP`
@@ -97,9 +105,21 @@ Base: `http://<host>/api/v1`
 | PUT | `/api/v1/relays/modio/{id}` | Set MOD-IO relay |
 | PUT | `/api/v1/relays/modio` | Bulk set `{"states": [true,false,true,false]}` |
 | GET | `/api/v1/inputs/digital` | Read all digital inputs |
+| GET | `/api/v1/inputs/digital/{id}` | Read single digital input |
 | GET | `/api/v1/inputs/analog` | Read all analog inputs |
 | GET | `/api/v1/inputs/analog/{id}` | Read single analog input |
+| GET | `/api/v1/events` | SSE stream — pushes input/relay change events |
+| GET | `/api/v1/config` | Read device config (poll_interval_ms, hostname, etc.) |
+| PUT | `/api/v1/config` | Update device config `{"poll_interval_ms": 200}` |
 | POST | `/api/v1/ota` | Upload firmware binary (octet-stream) |
+
+**SSE event stream** (`GET /api/v1/events`, `Accept: text/event-stream`):
+- Long-lived HTTP connection, server pushes newline-delimited JSON events
+- Event types: `digital_input`, `analog_input`, `relay_changed`
+- Format: `data: {"type":"digital_input","id":2,"state":true,"ts":12345}\n\n`
+- Firmware I2C polling is internal (MOD-IO has no interrupt line); SSE makes the *client* event-driven
+- Polling interval configurable via `PUT /api/v1/config` (see below)
+- Heartbeat every 30s to detect stale connections
 
 Error format: `{"error": {"code": "RELAY_NOT_FOUND", "message": "...", "status": 404}}`
 
@@ -114,7 +134,7 @@ URI parsing: helper function `parse_id_from_uri()` since ESP-IDF httpd lacks nat
 ```
 nvs_flash_init → event_loop_create → board_init → relay_init →
 mod_io_init → network_init → wait_for_ip → mdns_register →
-auth_init → rest_api_start → watchdog task
+auth_init → rest_api_start → input_monitor_start → watchdog task
 ```
 
 ---
@@ -138,11 +158,15 @@ evb-relay relay off modio:3
 evb-relay relay toggle onboard:2
 evb-relay relay set onboard:1=on modio:2=off   # Bulk
 
-evb-relay input digital                 # All digital inputs
-evb-relay input analog                  # All analog inputs
-evb-relay input analog 2                # Single channel
+evb-relay input digital                 # All digital inputs (one-shot)
+evb-relay input digital 2               # Single digital input
+evb-relay input analog                  # All analog inputs (one-shot)
+evb-relay input analog 2                # Single analog input
+evb-relay input watch                   # SSE stream — prints events as they arrive
 
 evb-relay status                        # Device health
+evb-relay config show                   # Read device config
+evb-relay config set poll_interval_ms=200  # Change input polling interval
 evb-relay discover                      # mDNS browse
 evb-relay ota flash <firmware.bin>      # OTA update
 evb-relay completion bash|zsh|fish      # Shell completions
