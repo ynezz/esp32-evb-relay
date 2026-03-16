@@ -752,7 +752,7 @@ history is available to GoReleaser and `git-cliff`:
    - Runs on `ubuntu-latest`
    - After checkout, uses `actions/setup-go@v6` with
      `go-version-file: cli/go.mod`, `cache-dependency-path: cli/go.sum`
-   - Uses `goreleaser/goreleaser-action@v7` with `version: "~> v2"`,
+   - Uses `goreleaser/goreleaser-action@v6` with `version: "~> v2"`,
      `workdir: cli`, and `args: release --clean`
    - Creates a draft GitHub Release with 6 CLI archives
      (linux/darwin/windows × amd64/arm64) + checksums file
@@ -792,7 +792,7 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X github.com/puvvadi/esp32-evb-relay/cli/cmd.Version={{.Version}}
+      - -X github.com/ynezz/esp32-evb-relay/cli/cmd.Version={{.Version}}
       - -X main.commit={{.Commit}}
       - -X main.date={{.CommitDate}}
     mod_timestamp: "{{ .CommitTimestamp }}"
