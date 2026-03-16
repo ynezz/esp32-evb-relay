@@ -29,9 +29,10 @@ esp32-evb-relay/
 │       ├── relay/                    # Onboard relay GPIO driver
 │       ├── mod_io/                   # MOD-IO I2C protocol driver
 │       ├── network/                  # Ethernet (+ WiFi placeholder)
+│       ├── device_config/            # NVS-backed runtime config + validation
 │       ├── input_monitor/             # Polls MOD-IO inputs, detects changes
 │       ├── rest_api/                 # HTTP server + JSON handlers + SSE
-│       ├── auth/                     # Optional API key middleware
+│       ├── auth/                     # API token middleware
 │       └── ota/                      # OTA firmware update
 ├── cli/                             # Go CLI (cobra)
 │   ├── go.mod
@@ -74,10 +75,15 @@ esp32-evb-relay/
 
 ### Step 4b — `input_monitor` component
 - FreeRTOS task polls MOD-IO digital + analog inputs at configurable interval (default 100ms)
-- Compares against previous state, on change: pushes event to a queue
-- Events consumed by SSE handler in `rest_api` and by internal relay-change callbacks
-- Also monitors onboard button (GPIO34 interrupt → event queue)
+- Compares against previous state, on change: publishes input events onto a shared event queue
+- Relay setters publish `relay_changed` events onto the same queue; `input_monitor` should not invent relay events
+- Also monitors onboard button (GPIO34 interrupt → `button` event on the shared queue)
 - Analog inputs: configurable threshold for change detection (avoid noise-triggered events)
+
+### Step 4c — `device_config` component
+- NVS-backed source of truth for `api_token`, `poll_interval_ms`, `hostname`, and future WiFi credentials
+- Centralizes validation, defaults, and persistence so `auth`, `network`, `input_monitor`, and `rest_api` do not each manage their own ad hoc NVS keys
+- Returns metadata about whether a config change is applied live or requires a restart/rebind
 
 ### Step 5 — `network` component
 - Ethernet init: LAN8710A PHY, PHY address 0x01, reset on GPIO5, external RMII clock on GPIO0, MDC/MDIO on GPIO23/18
@@ -87,9 +93,9 @@ esp32-evb-relay/
 - mDNS: hostname `esp32-evb-relay`, register `_http._tcp` with TXT records (fw_version, board type)
 
 ### Step 6 — `auth` component
-- API key stored in NVS, loaded at boot
-- `auth_check(httpd_req_t*)` validates `Authorization: Bearer <token>` header
-- **Optional, enabled by default**. If no key configured → auth disabled + warning log
+- API token loaded from `device_config`
+- `auth_check(httpd_req_t*)` validates `Authorization: Bearer <token>` for all `/api/v1/*` endpoints
+- Secure by default. On first boot, if no token exists yet, generate a random token, persist it, and print it once on the serial console for provisioning
 - Constant-time comparison
 
 ### Step 7 — `rest_api` component
@@ -109,22 +115,24 @@ Base: `http://<host>/api/v1`
 | GET | `/api/v1/inputs/digital/{id}` | Read single digital input |
 | GET | `/api/v1/inputs/analog` | Read all analog inputs |
 | GET | `/api/v1/inputs/analog/{id}` | Read single analog input |
-| GET | `/api/v1/events` | SSE stream — pushes input/relay change events |
-| GET | `/api/v1/config` | Read device config (poll_interval_ms, hostname, etc.) |
-| PUT | `/api/v1/config` | Update device config `{"poll_interval_ms": 200}` |
+| GET | `/api/v1/events` | SSE stream — pushes input/relay/button change events |
+| GET | `/api/v1/config` | Read validated device config (`poll_interval_ms`, `hostname`, etc.) |
+| PUT | `/api/v1/config` | Update device config `{"poll_interval_ms": 200}` and report whether the change applied live |
 | POST | `/api/v1/ota` | Upload firmware binary (octet-stream) |
 
 **SSE event stream** (`GET /api/v1/events`, `Accept: text/event-stream`):
-- Long-lived HTTP connection, server pushes newline-delimited JSON events
-- Event types: `digital_input`, `analog_input`, `relay_changed`
-- Format: `data: {"type":"digital_input","id":2,"state":true,"ts":12345}\n\n`
+- Long-lived HTTP connection, server pushes SSE-framed JSON payloads
+- Event types: `digital_input`, `analog_input`, `relay_changed`, `button`
+- Format: `event: digital_input\ndata: {"id":2,"state":true,"ts_ms":12345}\n\n`
 - Firmware I2C polling is internal (MOD-IO has no interrupt line); SSE makes the *client* event-driven
 - Polling interval configurable via `PUT /api/v1/config` (see below)
+- Cap SSE fan-out to a small fixed number of clients and drop stale subscribers on backpressure instead of letting one slow client exhaust MCU resources
 - Heartbeat every 30s to detect stale connections
 
 Error format: `{"error": {"code": "RELAY_NOT_FOUND", "message": "...", "status": 404}}`
+- MOD-IO-specific endpoints return `503 MODIO_NOT_PRESENT` when the daughterboard is absent; do not fabricate zeroed input or relay state
 
-URI parsing: helper function `parse_id_from_uri()` since ESP-IDF httpd lacks native path params.
+URI parsing: register wildcard handlers with `httpd_uri_match_wildcard()` and use a helper such as `parse_id_from_uri()` because ESP-IDF httpd still lacks native path params.
 
 ### Step 8 — `ota` component
 - `POST /api/v1/ota` streams binary via `esp_ota_begin/write/end`
