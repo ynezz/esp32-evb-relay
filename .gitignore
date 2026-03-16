@@ -1,2 +1,5 @@
 .ntm
 docs/olimex-esp32-evb-project
+
+# bv (beads viewer) local config and caches
+.bv/
