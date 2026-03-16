@@ -231,4 +231,4 @@ Exit codes: 0=success, 1=general, 2=network, 3=auth, 4=not found, 5=bad argument
 8. **Build CLI**: `cd cli && go build -o evb-relay .`
 9. **CLI test**: `./evb-relay --host <ip> --api-key <key> status` returns device info
 10. **CLI relay control**: `./evb-relay --host <ip> --api-key <key> relay on onboard:1` — relay clicks
-11. **OTA**: `./evb-relay --host <ip> --api-key <key> ota flash firmware/build/esp32-evb-relay.bin` — device reboots with new firmware
+11. **OTA**: `./evb-relay --host <ip> --api-key <key> ota flash firmware/build/<project-name>.bin` — device reboots with new firmware
