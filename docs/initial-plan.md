@@ -2,12 +2,12 @@
 
 ## Context
 
-Build a networked relay controller for Olimex ESP32-EVB + MOD-IO expansion. The system allows agents to control power supply to boards remotely over Ethernet (phase 1) or WiFi (phase 2) via a REST API, with a Go CLI for human and automation use.
+Build a networked relay controller for Olimex ESP32-EVB + MOD-IO expansion. The system exposes a REST API for remote power control over Ethernet first, with WiFi added later, and a Go CLI for human and automation use.
 
 **Hardware:**
 - ESP32-EVB: 2 onboard relays (GPIO32, GPIO33), Ethernet (LAN8710A), UEXT I2C (SDA=GPIO13, SCL=GPIO16)
 - MOD-IO (I2C slave 0x58): 4 relays, 4 digital inputs, 4 analog inputs (10-bit)
-- Serial: `/dev/tty.usbserial-120`
+- Serial: host-specific USB serial device (for example `/dev/tty.usbserial-*`)
 
 ---
 
@@ -51,7 +51,8 @@ esp32-evb-relay/
 ### Step 1 — Scaffold ESP-IDF project
 - `firmware/CMakeLists.txt`, `firmware/main/CMakeLists.txt`
 - `sdkconfig.defaults` with: 4MB flash, custom partition table, Ethernet EMAC enabled, task WDT, OTA rollback
-- `partitions.csv`: nvs, phy_init, otadata, ota_0 (~1.9MB), ota_1 (~1.9MB)
+- `partitions.csv`: nvs, otadata, phy_init, coredump, ota_0, ota_1
+- Size OTA slots from the real firmware binary with explicit headroom, instead of assuming a vague "~1.9MB" budget on a 4MB flash part
 - `.gitignore` (sdkconfig, build/, managed_components/)
 
 ### Step 2 — `board` component
@@ -68,7 +69,7 @@ esp32-evb-relay/
   - `0x10` + bitmask → set relay outputs (bits 0-3)
   - `0x20` → read digital inputs (1 byte)
   - `0x30-0x33` → read analog inputs (2 bytes each, 10-bit)
-  - `0x40` → read current relay states
+- There is no separate relay-state readback command in the Olimex firmware; keep the last written relay bitmap in firmware state and reissue the command byte before each input/ADC read
 - `mod_io_init(bus_handle)`, `mod_io_is_present()`, graceful failure if module absent
 
 ### Step 4b — `input_monitor` component
@@ -79,10 +80,10 @@ esp32-evb-relay/
 - Analog inputs: configurable threshold for change detection (avoid noise-triggered events)
 
 ### Step 5 — `network` component
-- Ethernet init: LAN8710A PHY, external RMII clock on GPIO0, MDC/MDIO on GPIO23/18
+- Ethernet init: LAN8710A PHY, PHY address 0x01, reset on GPIO5, external RMII clock on GPIO0, MDC/MDIO on GPIO23/18
 - Event-driven: wait for IP via `IP_EVENT_ETH_GOT_IP`
 - `network_wait_for_ip(timeout_ms)` blocks `app_main` until connected
-- Architecture allows WiFi addition in phase 2 (separate init path, shared event handlers)
+- Architecture allows a later WiFi phase (separate init path, shared event handlers)
 - mDNS: hostname `esp32-evb-relay`, register `_http._tcp` with TXT records (fw_version, board type)
 
 ### Step 6 — `auth` component
