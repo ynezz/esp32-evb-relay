@@ -227,7 +227,7 @@ and a full release pipeline on tag push.
 All commit messages follow the [Conventional Commits](https://www.conventionalcommits.org/) format:
 
 ```
-<type>(<scope>)!: <description>
+<type>[(<scope>)][!]: <description>
 ```
 
 - **Scopes:** `firmware`, `cli`, or omit for cross-cutting changes
