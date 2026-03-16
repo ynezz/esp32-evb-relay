@@ -673,7 +673,7 @@ permissions:
   pull-requests: read
 ```
 
-Path filtering via `dorny/paths-filter@v4` ensures firmware-only changes skip
+Path filtering via `dorny/paths-filter@v3` ensures firmware-only changes skip
 Go jobs and vice versa, while shared CI/release changes still exercise both
 stacks.
 
@@ -683,7 +683,7 @@ stacks.
    - Runs on `ubuntu-latest`
    - Starts with `actions/checkout@v6`; push-based change detection needs the
      repository checkout even though pull-request mode can use the GitHub API
-   - Uses `dorny/paths-filter@v4`
+   - Uses `dorny/paths-filter@v3`
    - Outputs: `firmware` (bool), `cli` (bool), `shared` (bool)
    - Filters:
      ```yaml
