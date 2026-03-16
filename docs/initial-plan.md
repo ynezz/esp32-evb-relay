@@ -67,10 +67,10 @@ esp32-evb-relay/
 ### Step 4 — `mod_io` component
 - Uses ESP-IDF v5.x `i2c_master` API (not deprecated `i2c_cmd_link`)
 - I2C protocol:
-  - `0x10` + bitmask → set relay outputs (bits 0-3)
-  - `0x20` → read digital inputs (1 byte)
-  - `0x30-0x33` → read analog inputs (2 bytes each, 10-bit)
-- There is no separate relay-state readback command in the Olimex firmware; persist the last commanded relay bitmap in `device_config`, replay it during boot so controller and hardware state converge after an ESP32 reboot, and reissue the command byte before each input/ADC read
+  - `0x41` + bitmask → set relay outputs (bits 0-3)
+  - `0x42` → read digital inputs (1 byte)
+  - `0x43-0x46` → read analog inputs 0-3 (1 byte each, 8-bit samples)
+- There is no separate relay-state readback command in the Olimex firmware; treat relay state as controller-managed metadata rather than something the daughterboard can report back
 - `mod_io_init(bus_handle)`, `mod_io_is_present()`, graceful failure if module absent
 
 ### Step 4b — `input_monitor` component
@@ -78,7 +78,7 @@ esp32-evb-relay/
 - Compares against previous state, on change: publishes input events onto a shared event queue
 - Relay setters publish `relay_changed` events onto the same queue; `input_monitor` should not invent relay events
 - Also monitors onboard button (GPIO34 interrupt → `button` event on the shared queue)
-- Analog inputs: configurable threshold for change detection (avoid noise-triggered events)
+- Analog inputs: configurable threshold for change detection on 8-bit samples (avoid noise-triggered events)
 
 ### Step 4c — `device_config` component
 - NVS-backed source of truth for `api_token`, `poll_interval_ms`, `hostname`, and future WiFi credentials
