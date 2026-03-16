@@ -215,7 +215,7 @@ register long-running tasks with the task WDT
 | `--api-token/-k` | `EVB_RELAY_API_TOKEN` | API authentication token |
 | `--format/-f` | — | Output format: table/json/plain (default: table) |
 | `--timeout/-t` | `EVB_RELAY_TIMEOUT` | HTTP timeout (e.g., 5s, 10s; default: 10s) |
-| `--robot` | `EVB_RELAY_ROBOT=1` | Activate robot mode (TOON envelope, no color, stderr=NDJSON) |
+| `--robot` | `EVB_RELAY_ROBOT=1` | Activate robot mode (TOON/JSON envelope on stdout, no color) |
 | `--robot-capabilities` | — | Introspection: dump full CLI contract as JSON, exit. No `--host` needed. |
 
 **Format matrix:**
@@ -224,7 +224,7 @@ register long-running tasks with the task WDT
 |------|---------------|--------|-----------|
 | `--robot` | TOON | TOON envelope + data | yes |
 | `--robot --format json` | JSON | JSON envelope + data | yes |
-| `--format json` | JSON | raw API response | no |
+| `--format json` | JSON | command result as JSON, no robot envelope | no |
 | `--format table` | table | human-aligned columns | no |
 | `--format plain` | plain | bare values, one/line | no |
 | (default) | table | human-aligned columns | no |
@@ -314,23 +314,27 @@ independent single-relay writes.
 
 #### Step 12b — TOON encoder
 
-Minimal Go TOON encoder, output-only (~200-300 lines). TOON is a compact text
-format that uses 30-60% fewer tokens than JSON while remaining
-machine-readable.
+Minimal Go TOON encoder, output-only. If we adopt TOON, it must emit
+spec-compatible TOON rather than an ad hoc `key=value` dialect. The reference
+TOON project reports materially lower token counts than pretty-printed JSON on
+mixed benchmarks, but the real savings depend on payload shape and are best on
+uniform tabular data.
 
 **Capabilities:**
-- Flat key=value pairs (envelope header fields)
-- Tabular uniform arrays (relay lists, input arrays)
-- Nested objects (status, config) as prefixed key=value
+- Nested objects via indentation
+- Compact primitive fields (`key: value`)
+- Spec-compatible uniform arrays (`items[3]: a,b,c`)
+- Spec-compatible uniform object tables (`relays[6]{group,id,state,sync}:`)
 - Type handling: null, bool, number, string
 - No TOON parser needed (output-only)
+- Validate the encoder against upstream TOON conformance fixtures before making
+  it the default robot format
 
 **API:**
 ```go
 package toon
 
 func Encode(w io.Writer, v any) error
-func EncodeTable(w io.Writer, name string, rows []map[string]any, cols []string) error
 ```
 
 #### Step 12c — Robot envelope
@@ -339,24 +343,25 @@ Every `--robot` response wraps output in a structured envelope.
 
 **Success envelope (TOON):**
 ```
-v=1
-command=relay list
-elapsed_ms=42
-exit_code=0
-host=192.168.1.50
-modio_present=true
-modio_sync=unknown
-firmware_version=0.3.1
-next=evb-relay relay set modio:all=off
-
-relays
-group	id	state	sync
-onboard	1	true	-
-onboard	2	false	-
-modio	1	true	synchronized
-modio	2	false	synchronized
-modio	3	null	unknown
-modio	4	null	unknown
+v: 1
+command: relay list
+timestamp: 2026-03-16T14:22:03.412Z
+elapsed_ms: 42
+exit_code: 0
+host: 192.168.1.50
+device_context:
+  modio_present: true
+  modio_sync: unknown
+  firmware_version: 0.3.1
+next[1]: evb-relay relay set modio:all=off
+data:
+  relays[6]{group,id,state,sync}:
+    onboard,1,true,null
+    onboard,2,false,null
+    modio,1,null,unknown
+    modio,2,null,unknown
+    modio,3,null,unknown
+    modio,4,null,unknown
 ```
 
 **Success envelope (JSON, via `--robot --format json`):**
@@ -370,10 +375,10 @@ modio	4	null	unknown
   "host": "192.168.1.50",
   "data": {
     "relays": [
-      {"group": "onboard", "id": 1, "state": true},
-      {"group": "onboard", "id": 2, "state": false},
-      {"group": "modio", "id": 1, "state": true, "sync": "synchronized"},
-      {"group": "modio", "id": 2, "state": false, "sync": "synchronized"},
+      {"group": "onboard", "id": 1, "state": true, "sync": null},
+      {"group": "onboard", "id": 2, "state": false, "sync": null},
+      {"group": "modio", "id": 1, "state": null, "sync": "unknown"},
+      {"group": "modio", "id": 2, "state": null, "sync": "unknown"},
       {"group": "modio", "id": 3, "state": null, "sync": "unknown"},
       {"group": "modio", "id": 4, "state": null, "sync": "unknown"}
     ]
@@ -390,22 +395,23 @@ modio	4	null	unknown
 
 **Error envelope (TOON):**
 ```
-v=1
-command=relay on modio:3
-elapsed_ms=52
-exit_code=6
-host=192.168.1.50
-modio_present=true
-modio_sync=unknown
-firmware_version=0.3.1
-
-error_code=MODIO_STATE_UNKNOWN
-error_message=MOD-IO relay state is unknown after boot. Set all 4 relays first.
-error_http_status=409
-error_retryable=false
-error_remediation=evb-relay relay set modio:all=off
-
-next=evb-relay relay set modio:all=off
+v: 1
+command: relay on modio:3
+timestamp: 2026-03-16T14:22:03.464Z
+elapsed_ms: 52
+exit_code: 6
+host: 192.168.1.50
+device_context:
+  modio_present: true
+  modio_sync: unknown
+  firmware_version: 0.3.1
+error:
+  code: MODIO_STATE_UNKNOWN
+  message: MOD-IO relay state is unknown after boot. Set all 4 relays first.
+  http_status: 409
+  retryable: false
+  remediation: evb-relay relay set modio:all=off
+next[1]: evb-relay relay set modio:all=off
 ```
 
 **Error envelope (JSON):**
@@ -413,6 +419,7 @@ next=evb-relay relay set modio:all=off
 {
   "v": 1,
   "command": "relay on modio:3",
+  "timestamp": "2026-03-16T14:22:03.464Z",
   "elapsed_ms": 52,
   "exit_code": 6,
   "host": "192.168.1.50",
@@ -469,7 +476,8 @@ func runRelayOn(cmd *cobra.Command, args []string) error {
 
 `robot.Wrap()` handles: building the envelope (command, timing, exit code,
 device context), error → remediation mapping, populating `next` suggestions,
-marshaling to TOON or JSON, and setting the process exit code.
+and marshaling to TOON or JSON. `main()` remains responsible for converting the
+classified result into the process exit code.
 
 #### Step 12d — `--robot-capabilities` introspection
 
@@ -490,7 +498,7 @@ robot mode, capabilities is complex/nested and JSON is better here). No
       "args": [],
       "flags": [],
       "output_fields": ["relays[].group", "relays[].id", "relays[].state", "relays[].sync"],
-      "errors": ["MODIO_NOT_PRESENT"],
+      "errors": [],
       "example": "evb-relay --robot relay list"
     }
   ],
@@ -558,20 +566,20 @@ the standard envelope.
 {"event":"stream_end","reason":"client_disconnect","received_at":"2026-03-16T14:22:35.000Z"}
 ```
 
-Why NDJSON for streams (not TOON): TOON requires knowing the full table schema
-upfront. SSE events have different shapes (`digital_input` vs `relay_changed`
-vs `heartbeat`). NDJSON is the right format for heterogeneous unbounded
-streams.
+Why NDJSON for streams (not TOON): this plan's TOON encoder targets bounded
+request/response envelopes and fixed-shape arrays. SSE events are
+heterogeneous (`digital_input` vs `relay_changed` vs `heartbeat`) and the
+stream is unbounded, so NDJSON is the better fit.
 
 ### Step 13 — Output formats and exit codes
 
 **Human formats** (no envelope):
 - **table** (default): aligned columns via `text/tabwriter`
-- **json**: raw API response
+- **json**: command result as JSON, without the robot envelope
 - **plain**: bare values, one per line (for piping)
 
 **Robot formats** (wrapped in envelope):
-- **toon** (default in `--robot`): TOON envelope + data (30-60% fewer tokens than JSON)
+- **toon** (default in `--robot`): spec-compatible TOON envelope + data
 - **json** (`--robot --format json`): JSON envelope + data
 
 **Exit codes:**
@@ -591,7 +599,7 @@ streams.
 
 | Command | Schema |
 |---------|--------|
-| `relay list` | `relays[]: {group, id, state: bool\|null, sync: string}` |
+| `relay list` | `relays[]: {group, id, state: bool\|null, sync: string\|null}` |
 | `relay on/off/toggle` | `relay: {group, id, state: bool}` |
 | `relay set` (batch) | `results[]: {target, state, ok: bool, error: string\|null}`, `all_ok: bool` |
 | `input digital` | `inputs[]: {id, state: bool}`, `sample_ts_ms`, `sample_age_ms` |
