@@ -314,7 +314,8 @@ history is available to GoReleaser and `git-cliff`:
    - Uploads both as workflow artifacts
 
 2. **`cli`** — build CLI binaries via GoReleaser
-   - Uses `goreleaser/goreleaser-action@v6` with GoReleaser v2
+   - Uses `goreleaser/goreleaser-action@v6` with GoReleaser v2,
+     running in `cli/`
    - Creates a draft GitHub Release with 6 CLI archives
      (linux/darwin/windows × amd64/arm64) + checksums file
    - GoReleaser creates the release; later jobs augment it
@@ -338,10 +339,11 @@ history is available to GoReleaser and `git-cliff`:
 GoReleaser v2 format. Key settings:
 
 ```yaml
+project_name: evb-relay
 version: 2
 builds:
   - main: .
-    dir: cli
+    binary: evb-relay
     env:
       - CGO_ENABLED=0
     goos: [linux, darwin, windows]
@@ -363,16 +365,24 @@ archives:
           - zip
 
 release:
+  draft: true
   prerelease: auto    # -rc/-beta tags → pre-release
 
 changelog:
   disable: true       # git-cliff handles changelog
 ```
 
+- The release workflow runs GoReleaser from `cli/`, so `main: .` resolves to
+  the CLI module without needing `dir: cli`
+- `project_name: evb-relay` keeps archive names aligned with the documented
+  release assets instead of inheriting the repository name
+- `binary: evb-relay` makes the extracted executable match the CLI command name
 - `CGO_ENABLED=0` for static binaries
 - `-trimpath` for reproducible builds
 - 6 targets: linux/darwin/windows × amd64/arm64
 - Archives: `.tar.gz` (Unix), `.zip` (Windows)
+- `draft: true` matches the release workflow's expectation that GoReleaser
+  creates a draft release first
 - `prerelease: auto` flags `-rc`/`-beta` tags as pre-release
 - Changelog disabled — git-cliff generates release notes instead
 
