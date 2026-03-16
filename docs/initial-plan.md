@@ -140,16 +140,17 @@ URI parsing: register wildcard handlers with `httpd_uri_match_wildcard()` and us
 
 ### Step 8 — `ota` component
 - `POST /api/v1/ota` streams binary via `esp_ota_begin/write/end`
-- On the next successful boot, confirm the running image with `esp_ota_mark_app_valid_cancel_rollback()` so rollback does not remain pending forever
+- On the next boot, only call `esp_ota_mark_app_valid_cancel_rollback()` after the image has passed its real startup health checks (for example: board init succeeded, networking came up, and the REST API started); if startup fails first, leave rollback pending
 - Sets boot partition, reboots after 2s delay
 - Rollback enabled via `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`
 
 ### Step 9 — `main.c` boot sequence
 ```
 nvs_flash_init → event_loop_create → device_config_init →
-ota_confirm_running_image_if_needed → board_init → relay_init →
+board_init → relay_init →
 mod_io_init → auth_init → network_init → wait_for_ip →
 mdns_register → rest_api_start → input_monitor_start →
+ota_confirm_running_image_if_healthy →
 register long-running tasks with the task WDT
 ```
 
