@@ -70,7 +70,9 @@ esp32-evb-relay/
   - `0x41` + bitmask → set relay outputs (bits 0-3)
   - `0x42` → read digital inputs (1 byte)
   - `0x43-0x46` → read analog inputs 0-3 (1 byte each, 8-bit samples)
-- There is no separate relay-state readback command in the Olimex firmware; treat relay state as controller-managed metadata rather than something the daughterboard can report back
+- There is no separate relay-state readback command in the Olimex firmware, and the write command always sends the full 4-bit relay bitmap
+- Keep the relay bitmap in RAM for normal uptime, but after an ESP32 reboot or MOD-IO reattach mark MOD-IO relay state as `unknown` until a deliberate boot policy applies or a client sends a bulk `PUT /api/v1/relays/modio`
+- Do not write every relay toggle to NVS just to simulate readback; that would create flash wear without making the state authoritative
 - `mod_io_init(bus_handle)`, `mod_io_is_present()`, graceful failure if module absent
 
 ### Step 4b — `input_monitor` component
@@ -81,8 +83,9 @@ esp32-evb-relay/
 - Analog inputs: configurable threshold for change detection on 8-bit samples (avoid noise-triggered events)
 
 ### Step 4c — `device_config` component
-- NVS-backed source of truth for `api_token`, `poll_interval_ms`, `hostname`, and future WiFi credentials
+- NVS-backed source of truth for `api_token`, `poll_interval_ms`, `hostname`, `modio_boot_policy`, and future WiFi credentials
 - Centralizes validation, defaults, and persistence so `auth`, `network`, `input_monitor`, and `rest_api` do not each manage their own ad hoc NVS keys
+- `modio_boot_policy` should be explicit and low-churn, for example `all_off` (apply `0000` on boot and mark state synchronized) or `leave_unchanged` (do not touch hardware on boot, but report MOD-IO relay state as unknown until the client performs a bulk set)
 - Returns metadata about whether a config change is applied live or requires a restart/rebind
 
 ### Step 5 — `network` component
@@ -104,13 +107,13 @@ Base: `http://<host>/api/v1`
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/v1/status` | Uptime, FW version, network info, MOD-IO presence/sync state, free heap |
-| GET | `/api/v1/relays` | All relay states (onboard + modio unified) |
+| GET | `/api/v1/relays` | Onboard relay states plus MOD-IO state/sync metadata; never guess unknown MOD-IO relay values |
 | GET | `/api/v1/relays/onboard` | Onboard relay states |
 | PUT | `/api/v1/relays/onboard/{id}` | Set onboard relay `{"state": true}` |
 | POST | `/api/v1/relays/onboard/{id}/toggle` | Toggle onboard relay |
-| GET | `/api/v1/relays/modio` | MOD-IO relay states |
-| PUT | `/api/v1/relays/modio/{id}` | Set MOD-IO relay |
-| PUT | `/api/v1/relays/modio` | Bulk set `{"states": [true,false,true,false]}` |
+| GET | `/api/v1/relays/modio` | MOD-IO relay states when synchronized |
+| PUT | `/api/v1/relays/modio/{id}` | Set MOD-IO relay when sync state is known |
+| PUT | `/api/v1/relays/modio` | Bulk set `{"states": [true,false,true,false]}` and establish authoritative sync |
 | GET | `/api/v1/inputs/digital` | Read all digital inputs |
 | GET | `/api/v1/inputs/digital/{id}` | Read single digital input |
 | GET | `/api/v1/inputs/analog` | Read all analog inputs |
@@ -131,6 +134,7 @@ Base: `http://<host>/api/v1`
 
 Error format: `{"error": {"code": "RELAY_NOT_FOUND", "message": "...", "status": 404}}`
 - MOD-IO-specific endpoints return `503 MODIO_NOT_PRESENT` when the daughterboard is absent; do not fabricate zeroed input or relay state
+- If MOD-IO relay state is unknown after boot or reattach, `GET /api/v1/relays/modio` and single-relay `PUT /api/v1/relays/modio/{id}` return `409 MODIO_STATE_UNKNOWN`; clients must use bulk `PUT /api/v1/relays/modio` to establish a full bitmap first
 
 URI parsing: register wildcard handlers with `httpd_uri_match_wildcard()` and use a helper such as `parse_id_from_uri()` because ESP-IDF httpd still lacks native path params.
 
@@ -184,6 +188,8 @@ evb-relay ota flash <firmware.bin>      # OTA update
 evb-relay completion bash|zsh|fish      # Shell completions
 ```
 
+If the firmware reports `MODIO_STATE_UNKNOWN` after boot, use `evb-relay relay set ...` with all four MOD-IO relays once before relying on single-relay `on`/`off` commands.
+
 ### Step 13 — Output formats
 - **table** (default): aligned columns via `text/tabwriter`
 - **json**: raw API response
@@ -210,7 +216,7 @@ Exit codes: 0=success, 1=general, 2=network, 3=auth, 4=not found, 5=bad argument
 3. **Verify boot**: serial console shows init sequence, prints the first-boot API token if one was generated, and reports an Ethernet IP
 4. **Test API**: `curl -H "Authorization: Bearer <key>" http://<ip>/api/v1/status` returns JSON
 5. **Test relays**: `curl -X PUT -H "Authorization: Bearer <key>" -H "Content-Type: application/json" -d '{"state":true}' http://<ip>/api/v1/relays/onboard/1` — hear relay click
-6. **Test MOD-IO**: `curl -H "Authorization: Bearer <key>" http://<ip>/api/v1/relays/modio` — returns 4 relay states when MOD-IO is connected, otherwise `503 MODIO_NOT_PRESENT`
+6. **Test MOD-IO sync model**: with `modio_boot_policy=leave_unchanged`, `GET /api/v1/relays/modio` returns `409 MODIO_STATE_UNKNOWN` after boot; `PUT /api/v1/relays/modio` with all 4 states establishes sync, after which `GET` returns the authoritative 4-relay bitmap
 7. **Build CLI**: `cd cli && go build -o evb-relay .`
 8. **CLI test**: `./evb-relay --host <ip> --api-key <key> status` returns device info
 9. **CLI relay control**: `./evb-relay --host <ip> --api-key <key> relay on onboard:1` — relay clicks
