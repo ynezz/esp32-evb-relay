@@ -256,26 +256,31 @@ ci: add firmware binary size tracking to CI
 **Triggers:** push to `main`, pull requests targeting `main`.
 
 Path filtering via `dorny/paths-filter@v3` ensures firmware-only changes skip
-Go jobs and vice versa.
+Go jobs and vice versa, while shared CI/release changes still exercise both
+stacks.
 
 **Jobs:**
 
 1. **`changes`** — detect which paths changed
    - Uses `dorny/paths-filter@v3`
-   - Outputs: `firmware` (bool), `cli` (bool)
+   - Outputs: `firmware` (bool), `cli` (bool), `shared` (bool)
    - Filters:
      ```yaml
      firmware:
        - 'firmware/**'
      cli:
        - 'cli/**'
+     shared:
+       - '.github/workflows/**'
+       - 'cli/.goreleaser.yaml'
+       - 'cliff.toml'
      ```
 
 2. **`firmware-build`** — build the ESP-IDF project
-   - Condition: `needs.changes.outputs.firmware == 'true'`
+   - Condition: `needs.changes.outputs.firmware == 'true' || needs.changes.outputs.shared == 'true'`
    - Uses `espressif/esp-idf-ci-action@v1` with `esp_idf_version: v5.4`,
-     command: `idf.py set-target esp32 && idf.py build`
-   - Uploads `build/esp32-evb-relay.bin` as a workflow artifact
+     `path: firmware`, command: `idf.py set-target esp32 && idf.py build`
+   - Uploads `firmware/build/esp32-evb-relay.bin` as a workflow artifact
 
 3. **`firmware-size`** — track binary size
    - Condition: `needs.changes.outputs.firmware == 'true'`
@@ -284,17 +289,17 @@ Go jobs and vice versa.
    - Logs partition sizes to CI output for historical tracking
 
 4. **`cli-lint`** — lint Go code
-   - Condition: `needs.changes.outputs.cli == 'true'`
-   - Uses `actions/setup-go@v5` (handles Go module cache automatically)
-   - Uses `golangci/golangci-lint-action@v9`
+   - Condition: `needs.changes.outputs.cli == 'true' || needs.changes.outputs.shared == 'true'`
+   - Uses `actions/setup-go@v6` with `cache-dependency-path: cli/go.mod`
+   - Uses `golangci/golangci-lint-action@v9` with `working-directory: cli`
 
 5. **`cli-test`** — run Go tests
-   - Condition: `needs.changes.outputs.cli == 'true'`
-   - `go test -race -coverprofile=coverage.out ./...`
+   - Condition: `needs.changes.outputs.cli == 'true' || needs.changes.outputs.shared == 'true'`
+   - Runs in `cli/`: `go test -race -coverprofile=coverage.out ./...`
 
 6. **`cli-build`** — verify Go compilation
-   - Condition: `needs.changes.outputs.cli == 'true'`
-   - `go build -o /dev/null .`
+   - Condition: `needs.changes.outputs.cli == 'true' || needs.changes.outputs.shared == 'true'`
+   - Runs in `cli/`: `go build -o /dev/null .`
 
 ### Step 16 — Release workflow (`.github/workflows/release.yml`)
 
