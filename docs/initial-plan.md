@@ -219,6 +219,7 @@ register long-running tasks with the task WDT
 | `--timeout/-t` | `EVB_RELAY_TIMEOUT` | HTTP timeout (e.g., 5s, 10s; default: 10s) |
 | `--robot` | `EVB_RELAY_ROBOT=1` | Activate robot mode (TOON/JSON envelope on stdout, no color) |
 | `--robot-capabilities` | — | Introspection: dump full CLI contract as JSON, exit. No `--host` needed. |
+| `--version` | — | Print CLI version metadata and exit |
 
 **Format matrix:**
 
@@ -1003,17 +1004,18 @@ is intentionally app-only.
 9. **Build CLI**: `cd cli && go build -o evb-relay .`
 10. **CLI test**: `./cli/evb-relay --host <ip> --api-token <token> status` returns device info
 11. **CLI relay control**: `./cli/evb-relay --host <ip> --api-token <token> relay on onboard:1` — relay clicks
-12. **OTA**: `./cli/evb-relay --host <ip> --api-token <token> ota flash firmware/build/esp32-evb-relay.bin` — device reboots with new firmware
+12. **CLI version**: `./cli/evb-relay --version` prints the injected CLI version metadata
+13. **OTA**: `./cli/evb-relay --host <ip> --api-token <token> ota flash firmware/build/esp32-evb-relay.bin` — device reboots with new firmware
 
 ### CLI — Robot Mode (unit tests in `go test ./...`)
 
-13. **TOON encoder**: unit tests covering primitives, uniform arrays, uniform object tables, nested objects, null/bool/number/string types, plus upstream TOON conformance fixtures
-14. **Robot envelope**: test `Wrap()` produces valid TOON and JSON envelopes for success and error cases
-15. **Remediation mapping**: test each API error code maps to correct exit code and remediation command
-16. **`--robot-capabilities`**: verify output is valid JSON with all commands, exit codes, error codes, state machine, and env vars
-17. **`modio:all` resolution**: test `modio:all=off` becomes one bulk MOD-IO bitmap request, while `onboard:all=on` becomes 2 onboard relay targets
-18. **Batch results**: test partial failure produces per-target results with `PARTIAL_FAILURE` error code
-19. **NDJSON watch**: test stream header, event lines, and stream_end are valid NDJSON
-20. **Exit codes**: test each error condition produces the correct exit code (0-7)
-21. **Device context**: test extraction from HTTP response headers, test null when headers absent
-22. **Format matrix**: test `--robot`, `--robot --format json`, `--format json`, `--format table`, and `--format plain` each produce the expected output shape, and test `--robot --format table/plain` are rejected with exit code 5
+14. **TOON encoder**: unit tests covering primitives, uniform arrays, uniform object tables, nested objects, null/bool/number/string types, plus upstream TOON conformance fixtures
+15. **Robot envelope**: test `Wrap()` produces valid TOON and JSON envelopes for success and error cases
+16. **Remediation mapping**: test each API error code maps to correct exit code and remediation command/template
+17. **`--robot-capabilities`**: verify output is valid JSON with all commands, exit codes, error codes, state machine, and env vars
+18. **`modio:all` resolution**: test `modio:all=off` becomes one bulk MOD-IO bitmap request, while `onboard:all=on` becomes 2 onboard relay targets
+19. **Batch results**: test partial failure produces per-target results with `PARTIAL_FAILURE` error code
+20. **NDJSON watch**: test stream header, event lines, and stream_end are valid NDJSON
+21. **Exit codes**: test each error condition produces the correct exit code (0-7)
+22. **Device context**: test extraction from HTTP response headers, test null when headers absent
+23. **Format matrix**: test `--robot`, `--robot --format json`, `--format json`, `--format table`, and `--format plain` each produce the expected output shape, and test `--robot --format table/plain` are rejected with exit code 5
