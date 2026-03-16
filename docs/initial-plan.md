@@ -161,9 +161,9 @@ Base: `http://<host>/api/v1`
 - Cap SSE fan-out to a small fixed number of clients and drop stale subscribers on backpressure instead of letting one slow client exhaust MCU resources
 - Heartbeat every 30s to detect stale connections
 
-**Response headers** — every `rest_api` HTTP response includes device context
-headers so agents can build `device_context` without a sidecar `/api/v1/status`
-call:
+**Response headers** — every authenticated `rest_api` HTTP response includes
+device context headers so agents can build `device_context` without a sidecar
+`/api/v1/status` call:
 
 ```
 X-FW-Version: 0.3.1
@@ -171,9 +171,11 @@ X-ModIO-Present: true
 X-ModIO-Sync: synchronized|unknown|absent
 ```
 
-Add a post-handler hook or helper that injects these headers on every response.
-`X-ModIO-Present` and `X-ModIO-Sync` are read from `mod_io` component state;
-`X-FW-Version` is read from `esp_app_desc_t.version`.
+Add a post-handler hook or helper that injects these headers on success
+responses and on application errors returned after auth succeeds. Do not attach
+them to pre-auth `401/403` responses, since unauthenticated clients do not need
+firmware/hardware metadata. `X-ModIO-Present` and `X-ModIO-Sync` are read from
+`mod_io` component state; `X-FW-Version` is read from `esp_app_desc_t.version`.
 
 Error format: `{"error": {"code": "RELAY_NOT_FOUND", "message": "...", "status": 404}}`
 - MOD-IO-specific endpoints return `503 MODIO_NOT_PRESENT` when the daughterboard is absent; do not fabricate zeroed input or relay state
@@ -272,7 +274,9 @@ evb-relay ota flash <firmware.bin>      # OTA update
 evb-relay completion bash|zsh|fish|powershell  # Shell completions
 ```
 
-If the firmware reports `MODIO_STATE_UNKNOWN` after boot, use `evb-relay relay set modio:all=off` to establish sync before relying on single-relay `on`/`off` commands.
+If the firmware reports `MODIO_STATE_UNKNOWN` after boot, use one `evb-relay relay set ...`
+command that specifies the intended state of all 4 MOD-IO relays before relying
+on single-relay `on`/`off` commands.
 
 #### Step 12a — `modio:all` and `onboard:all` shorthand
 
@@ -359,7 +363,7 @@ device_context:
   modio_present: true
   modio_sync: unknown
   firmware_version: 0.3.1
-next[1]: evb-relay relay set modio:all=off
+next[1]: evb-relay relay set modio:1=<on|off> modio:2=<on|off> modio:3=<on|off> modio:4=<on|off>
 data:
   relays[6]{group,id,state,sync}:
     onboard,1,true,null
@@ -395,7 +399,7 @@ data:
     "firmware_version": "0.3.1"
   },
   "warnings": [],
-  "next": ["evb-relay relay set modio:all=off"]
+  "next": ["evb-relay relay set modio:1=<on|off> modio:2=<on|off> modio:3=<on|off> modio:4=<on|off>"]
 }
 ```
 
@@ -416,8 +420,8 @@ error:
   message: MOD-IO relay state is unknown after boot. Set all 4 relays first.
   http_status: 409
   retryable: false
-  remediation: evb-relay relay set modio:all=off
-next[1]: evb-relay relay set modio:all=off
+  remediation: evb-relay relay set modio:1=<on|off> modio:2=<on|off> modio:3=<on|off> modio:4=<on|off>
+next[1]: evb-relay relay set modio:1=<on|off> modio:2=<on|off> modio:3=<on|off> modio:4=<on|off>
 ```
 
 **Error envelope (JSON):**
@@ -434,14 +438,14 @@ next[1]: evb-relay relay set modio:all=off
     "message": "MOD-IO relay state is unknown after boot. Set all 4 relays first.",
     "http_status": 409,
     "retryable": false,
-    "remediation": "evb-relay relay set modio:all=off"
+    "remediation": "evb-relay relay set modio:1=<on|off> modio:2=<on|off> modio:3=<on|off> modio:4=<on|off>"
   },
   "device_context": {
     "modio_present": true,
     "modio_sync": "unknown",
     "firmware_version": "0.3.1"
   },
-  "next": ["evb-relay relay set modio:all=off"]
+  "next": ["evb-relay relay set modio:1=<on|off> modio:2=<on|off> modio:3=<on|off> modio:4=<on|off>"]
 }
 ```
 
@@ -449,7 +453,7 @@ next[1]: evb-relay relay set modio:all=off
 
 | API Error | Exit Code | Remediation |
 |-----------|-----------|-------------|
-| `MODIO_STATE_UNKNOWN` (409) | 6 | `evb-relay relay set modio:all=off` |
+| `MODIO_STATE_UNKNOWN` (409) | 6 | Run one explicit 4-relay `relay set` command that matches the intended MOD-IO states |
 | `MODIO_NOT_PRESENT` (503) | 7 | *(none — hardware)* |
 | `MODIO_SAMPLE_UNAVAILABLE` (503) | 7 | *(retryable: true, wait for poll cycle)* |
 | `RELAY_NOT_FOUND` (404) | 4 | *(none — bad ID)* |
@@ -522,7 +526,7 @@ robot mode, capabilities is complex/nested and JSON is better here). No
     "7": "hardware unavailable"
   },
   "error_codes": {
-    "MODIO_STATE_UNKNOWN": {"exit_code": 6, "retryable": false, "remediation": "evb-relay relay set modio:all=off"},
+    "MODIO_STATE_UNKNOWN": {"exit_code": 6, "retryable": false, "remediation": "evb-relay relay set modio:1=<on|off> modio:2=<on|off> modio:3=<on|off> modio:4=<on|off>"},
     "MODIO_NOT_PRESENT": {"exit_code": 7, "retryable": false, "remediation": null},
     "MODIO_SAMPLE_UNAVAILABLE": {"exit_code": 7, "retryable": true, "remediation": null},
     "RELAY_NOT_FOUND": {"exit_code": 4, "retryable": false, "remediation": null},
@@ -533,12 +537,12 @@ robot mode, capabilities is complex/nested and JSON is better here). No
   "state_machine": {
     "modio_sync_states": ["unknown", "synchronized", "absent"],
     "transitions": {
-      "unknown -> synchronized": "Bulk set all 4 MOD-IO relays via: evb-relay relay set modio:all=off",
+      "unknown -> synchronized": "Bulk set all 4 MOD-IO relays in one `relay set` command using the intended final bitmap",
       "absent -> unknown": "MOD-IO physically connected, device detects presence on next poll",
       "synchronized -> unknown": "ESP32 reboots or MOD-IO reconnects",
       "* -> absent": "MOD-IO physically disconnected"
     },
-    "boot_hint": "After boot with modio_boot_policy=leave_unchanged, run: evb-relay relay set modio:all=off"
+    "boot_hint": "After boot with modio_boot_policy=leave_unchanged, run one `relay set` command that declares the intended state of all 4 MOD-IO relays"
   },
   "environment_variables": {
     "EVB_RELAY_HOST": "Device IP or hostname",
@@ -604,7 +608,7 @@ TOON/JSON envelope.
 | 3 | auth | 401/403 | Provide a valid API token |
 | 4 | not_found | 404 | Fix target identifier |
 | 5 | bad_arg | Invalid CLI usage | Fix invocation |
-| 6 | state | 409 MODIO_STATE_UNKNOWN | Run `error.remediation` command |
+| 6 | state | 409 MODIO_STATE_UNKNOWN | Follow `error.remediation` to send one explicit 4-relay MOD-IO bitmap |
 | 7 | hardware | 503 MODIO_NOT_PRESENT/SAMPLE_UNAVAILABLE | Check physical hardware, wait, or skip |
 
 **Per-command output schemas (data field):**
@@ -983,7 +987,7 @@ is intentionally app-only.
 5. **Test API**: `curl -H "Authorization: Bearer <token>" http://<ip>/api/v1/status` returns JSON
 6. **Test relays**: `curl -X PUT -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d '{"state":true}' http://<ip>/api/v1/relays/onboard/1` — hear relay click
 7. **Test MOD-IO sync model**: with `modio_boot_policy=leave_unchanged`, `GET /api/v1/relays/modio` returns `409 MODIO_STATE_UNKNOWN` after boot; `PUT /api/v1/relays/modio` with all 4 states establishes sync, after which `GET` returns the authoritative 4-relay bitmap
-8. **Test response headers**: verify every API response includes `X-FW-Version`, `X-ModIO-Present`, and `X-ModIO-Sync` headers
+8. **Test response headers**: verify authenticated API responses, including post-auth application errors, include `X-FW-Version`, `X-ModIO-Present`, and `X-ModIO-Sync` headers; pre-auth `401/403` responses may omit them
 
 ### CLI — Human Mode
 
