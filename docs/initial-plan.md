@@ -212,7 +212,7 @@ register long-running tasks with the task WDT
 | Flag | Env Var | Description |
 |------|---------|-------------|
 | `--host/-H` | `EVB_RELAY_HOST` | Device IP or hostname |
-| `--api-key/-k` | `EVB_RELAY_API_KEY` | API authentication token |
+| `--api-token/-k` | `EVB_RELAY_API_TOKEN` | API authentication token |
 | `--format/-f` | — | Output format: table/json/plain (default: table) |
 | `--timeout/-t` | `EVB_RELAY_TIMEOUT` | HTTP timeout (e.g., 5s, 10s; default: 10s) |
 | `--robot` | `EVB_RELAY_ROBOT=1` | Activate robot mode (TOON envelope, no color, stderr=NDJSON) |
@@ -230,8 +230,8 @@ register long-running tasks with the task WDT
 | (default) | table | human-aligned columns | no |
 
 **Config precedence (highest → lowest):**
-1. CLI flags (`--host`, `--api-key`, `--robot`, `--format`, `--timeout`)
-2. Environment variables (`EVB_RELAY_HOST`, `EVB_RELAY_API_KEY`, `EVB_RELAY_ROBOT`, `EVB_RELAY_TIMEOUT`)
+1. CLI flags (`--host`, `--api-token`, `--robot`, `--format`, `--timeout`)
+2. Environment variables (`EVB_RELAY_HOST`, `EVB_RELAY_API_TOKEN`, `EVB_RELAY_ROBOT`, `EVB_RELAY_TIMEOUT`)
 3. Config file (`~/.config/evb-relay/config.toml`)
 
 ### Step 11 — `client/` package
@@ -434,14 +434,14 @@ next=evb-relay relay set modio:all=off
 
 **Remediation table (built into CLI):**
 
-| API Error | Exit Code | Remediation Command |
-|-----------|-----------|---------------------|
+| API Error | Exit Code | Remediation |
+|-----------|-----------|-------------|
 | `MODIO_STATE_UNKNOWN` (409) | 6 | `evb-relay relay set modio:all=off` |
 | `MODIO_NOT_PRESENT` (503) | 7 | *(none — hardware)* |
 | `MODIO_SAMPLE_UNAVAILABLE` (503) | 7 | *(retryable: true, wait for poll cycle)* |
 | `RELAY_NOT_FOUND` (404) | 4 | *(none — bad ID)* |
-| `AUTH_REQUIRED`/`AUTH_INVALID` (401/403) | 3 | `evb-relay config show` |
-| Network timeout | 2 | `evb-relay discover` |
+| `AUTH_REQUIRED`/`AUTH_INVALID` (401/403) | 3 | Provide a valid API token via `--api-token`, `EVB_RELAY_API_TOKEN`, or the CLI config file |
+| Network timeout | 2 | Retry; if the target host is stale or unknown, re-run `evb-relay discover` |
 
 `device_context` is populated from firmware response headers (`X-ModIO-Sync`,
 `X-FW-Version`, `X-ModIO-Present`). If firmware doesn't provide headers yet,
@@ -509,8 +509,8 @@ robot mode, capabilities is complex/nested and JSON is better here). No
     "MODIO_NOT_PRESENT": {"exit_code": 7, "retryable": false, "remediation": null},
     "MODIO_SAMPLE_UNAVAILABLE": {"exit_code": 7, "retryable": true, "remediation": null},
     "RELAY_NOT_FOUND": {"exit_code": 4, "retryable": false, "remediation": null},
-    "AUTH_REQUIRED": {"exit_code": 3, "retryable": false, "remediation": "evb-relay config show"},
-    "AUTH_INVALID": {"exit_code": 3, "retryable": false, "remediation": "evb-relay config show"},
+    "AUTH_REQUIRED": {"exit_code": 3, "retryable": false, "remediation": null},
+    "AUTH_INVALID": {"exit_code": 3, "retryable": false, "remediation": null},
     "PARTIAL_FAILURE": {"exit_code": 1, "retryable": false, "remediation": null}
   },
   "state_machine": {
@@ -525,7 +525,7 @@ robot mode, capabilities is complex/nested and JSON is better here). No
   },
   "environment_variables": {
     "EVB_RELAY_HOST": "Device IP or hostname",
-    "EVB_RELAY_API_KEY": "API authentication token",
+    "EVB_RELAY_API_TOKEN": "API authentication token",
     "EVB_RELAY_ROBOT": "Set to 1 to enable robot mode",
     "EVB_RELAY_TIMEOUT": "HTTP timeout (e.g., 5s, 10s)"
   }
@@ -581,7 +581,7 @@ streams.
 | 0 | success | Command completed | Read `data` |
 | 1 | general | Unexpected error / partial failure | Parse `error`, log, escalate |
 | 2 | network | Connection/timeout | Retry, run `discover` |
-| 3 | auth | 401/403 | Check API key |
+| 3 | auth | 401/403 | Provide a valid API token |
 | 4 | not_found | 404 | Fix target identifier |
 | 5 | bad_arg | Invalid CLI usage | Fix invocation |
 | 6 | state | 409 MODIO_STATE_UNKNOWN | Run `error.remediation` command |
@@ -963,9 +963,9 @@ is intentionally app-only.
 ### CLI — Human Mode
 
 9. **Build CLI**: `cd cli && go build -o evb-relay .`
-10. **CLI test**: `./cli/evb-relay --host <ip> --api-key <token> status` returns device info
-11. **CLI relay control**: `./cli/evb-relay --host <ip> --api-key <token> relay on onboard:1` — relay clicks
-12. **OTA**: `./cli/evb-relay --host <ip> --api-key <token> ota flash firmware/build/esp32-evb-relay.bin` — device reboots with new firmware
+10. **CLI test**: `./cli/evb-relay --host <ip> --api-token <token> status` returns device info
+11. **CLI relay control**: `./cli/evb-relay --host <ip> --api-token <token> relay on onboard:1` — relay clicks
+12. **OTA**: `./cli/evb-relay --host <ip> --api-token <token> ota flash firmware/build/esp32-evb-relay.bin` — device reboots with new firmware
 
 ### CLI — Robot Mode (unit tests in `go test ./...`)
 
