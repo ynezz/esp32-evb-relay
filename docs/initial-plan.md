@@ -336,8 +336,8 @@ shape and are best on uniform tabular data.
 - Spec-compatible uniform object tables (`relays[6]{group,id,state,sync}:`)
 - Type handling: null, bool, number, string
 - No TOON parser needed (output-only)
-- Validate the encoder against upstream TOON conformance fixtures before making
-  it the default robot format
+- Validate the encoder against upstream TOON conformance fixtures before
+  shipping robot mode with TOON as the default format
 
 **API:**
 ```go
