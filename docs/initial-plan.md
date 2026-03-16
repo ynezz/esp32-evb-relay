@@ -80,9 +80,9 @@ esp32-evb-relay/
 ### Step 4b — `input_monitor` component
 - FreeRTOS task polls MOD-IO digital + analog inputs at configurable interval (default 100ms)
 - Owns the latest sampled input snapshot and timestamps; REST input endpoints should serve this shared snapshot by default instead of triggering separate I2C reads on every request
-- Compares against previous state, on change: publishes input events onto a shared event queue
-- Relay setters publish `relay_changed` events onto the same queue; `input_monitor` should not invent relay events
-- Also monitors onboard button (GPIO34 interrupt → `button` event on the shared queue)
+- Compares against previous state and publishes normalized events into a single internal event queue
+- Relay setters publish `relay_changed` events into the same internal event queue; `input_monitor` should not invent relay events
+- Also monitors onboard button (GPIO34 interrupt → `button` event on the same internal event queue)
 - Debounce the onboard button in software before emitting `button` events so one press does not fan out into multiple spurious notifications
 - Analog inputs: configurable threshold for change detection on 8-bit samples (avoid noise-triggered events)
 - If MOD-IO probing starts succeeding after an absence/error period, publish a presence change, reset relay sync to `unknown`, and resume normal sampling
@@ -132,6 +132,7 @@ Base: `http://<host>/api/v1`
 
 **SSE event stream** (`GET /api/v1/events`, `Accept: text/event-stream`):
 - Long-lived HTTP connection, server pushes SSE-framed JSON payloads
+- A dedicated event-dispatch path inside `rest_api` drains the internal event queue and fans out copies to connected SSE clients; individual HTTP handlers must not consume the one producer queue directly
 - Event types: `digital_input`, `analog_input`, `relay_changed`, `button`
 - Format: `event: digital_input\ndata: {"id":2,"state":true,"ts_ms":12345}\n\n`
 - Firmware I2C polling is internal (MOD-IO has no interrupt line); SSE makes the *client* event-driven
