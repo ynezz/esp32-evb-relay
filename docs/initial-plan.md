@@ -121,10 +121,10 @@ Base: `http://<host>/api/v1`
 | GET | `/api/v1/relays/modio` | MOD-IO relay states when synchronized |
 | PUT | `/api/v1/relays/modio/{id}` | Set MOD-IO relay when sync state is known |
 | PUT | `/api/v1/relays/modio` | Bulk set `{"states": [true,false,true,false]}` and establish authoritative sync |
-| GET | `/api/v1/inputs/digital` | Read the latest sampled digital inputs |
-| GET | `/api/v1/inputs/digital/{id}` | Read one digital input from the latest sampled snapshot |
-| GET | `/api/v1/inputs/analog` | Read the latest sampled analog inputs |
-| GET | `/api/v1/inputs/analog/{id}` | Read one analog input from the latest sampled snapshot |
+| GET | `/api/v1/inputs/digital` | Read the latest sampled digital inputs plus sample timestamp/staleness metadata |
+| GET | `/api/v1/inputs/digital/{id}` | Read one digital input from the latest sampled snapshot plus sample timestamp/staleness metadata |
+| GET | `/api/v1/inputs/analog` | Read the latest sampled analog inputs plus sample timestamp/staleness metadata |
+| GET | `/api/v1/inputs/analog/{id}` | Read one analog input from the latest sampled snapshot plus sample timestamp/staleness metadata |
 | GET | `/api/v1/events` | SSE stream — pushes input/relay/button change events |
 | GET | `/api/v1/config` | Read validated, redacted device config (`poll_interval_ms`, `hostname`, `modio_boot_policy`, secret-presence metadata) |
 | PUT | `/api/v1/config` | Update device config `{"poll_interval_ms": 200}` and report whether the change applied live |
@@ -142,6 +142,7 @@ Base: `http://<host>/api/v1`
 Error format: `{"error": {"code": "RELAY_NOT_FOUND", "message": "...", "status": 404}}`
 - MOD-IO-specific endpoints return `503 MODIO_NOT_PRESENT` when the daughterboard is absent; do not fabricate zeroed input or relay state
 - If MOD-IO relay state is unknown after boot or reattach, `GET /api/v1/relays/modio` and single-relay `PUT /api/v1/relays/modio/{id}` return `409 MODIO_STATE_UNKNOWN`; clients must use bulk `PUT /api/v1/relays/modio` to establish a full bitmap first
+- If no valid MOD-IO sample exists yet, input endpoints return `503 MODIO_SAMPLE_UNAVAILABLE` rather than pretending an old or nonexistent snapshot is current
 
 URI parsing: register wildcard handlers with `httpd_uri_match_wildcard()` and use a helper such as `parse_id_from_uri()` because ESP-IDF httpd still lacks native path params.
 
