@@ -377,24 +377,8 @@ Also, if I ask you to explicitly use your built-in TODO functionality, don't com
 
 ---
 
-## Board Verification: 2026-03-16
+## Hardware Reference
 
-I connected the EVB board on `/dev/ttyS4` and verified serial bootloader access.
-
-Checks run successfully:
-- `python3 -m esptool --no-stub --port /dev/ttyS4 chip_id`
-- `python3 -m esptool --no-stub --port /dev/ttyS4 flash_id`
-- `python3 -m esptool --no-stub --port /dev/ttyS4 read_flash_status`
-- `python3 -m esptool --no-stub --port /dev/ttyS4 read_flash 0x00001000 0x1000 /tmp/esp_flash.bin`
-
-Observed:
-- Chip: `ESP32-D0WD (revision v1.0)`
-- MAC: `bc:dd:c2:f2:aa:19`
-- Flash: 4MB (`Manufacturer: c8`, `Device: 4016`)
-- No `esptool` stub crash when using `--no-stub` mode
-
-Actionable outcome:
-- `/dev/ttyS4` is usable for serial flashing/programming.
-- A second UART is not required for flashing on this board.
-- For firmware runtime testing, Ethernet hookup is still needed for `/api/v1` validation.
-- This machine’s host port `/dev/ttyS4` appears to be a PCI 16550 serial device path (`QEMU VM` type per kernel property query), so verify physical USB-UART mapping if this changes.
+See [`docs/hardware-reference.md`](../hardware-reference.md) for ESP32-EVB
+board specs, pin mappings, MOD-IO I2C protocol, flashing commands, and
+debugging tips. **Read it before writing any firmware code.**
