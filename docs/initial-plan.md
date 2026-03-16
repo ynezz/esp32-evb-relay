@@ -272,17 +272,28 @@ If the firmware reports `MODIO_STATE_UNKNOWN` after boot, use `evb-relay relay s
 
 #### Step 12a — `modio:all` and `onboard:all` shorthand
 
-`relay set` expands `modio:all` and `onboard:all` **before** API calls:
+`relay set` resolves `modio:all` and `onboard:all` into a desired-state plan
+before choosing transport:
 
 ```bash
 evb-relay relay set modio:all=off
-# expands to: modio:1=off modio:2=off modio:3=off modio:4=off
+# resolves to desired MOD-IO bitmap [false,false,false,false]
+# then sends one bulk PUT /api/v1/relays/modio request
 
 evb-relay relay set onboard:all=on
-# expands to: onboard:1=on onboard:2=on
+# resolves to: onboard:1=on onboard:2=on
+# then sends two onboard requests because the firmware only exposes
+# per-relay onboard endpoints
 ```
 
-Relay count (4 MOD-IO, 2 onboard) is hardcoded in the CLI to match the hardware spec. Batch results in robot mode report per-target success/failure:
+If a single `relay set` command mentions any `modio:*` targets, the CLI must
+coalesce them into one final 4-relay bitmap and send exactly one MOD-IO bulk
+request. That preserves the firmware's `MODIO_STATE_UNKNOWN` recovery rule and
+avoids transient intermediate states between separate single-relay writes.
+
+Relay count (4 MOD-IO, 2 onboard) is hardcoded in the CLI to match the
+hardware spec. Batch results in robot mode still report per-target
+success/failure:
 
 ```
 results
@@ -296,7 +307,10 @@ modio:4	false	true	-
 all_ok=true
 ```
 
-On partial failure: `exit_code=1`, `error.code=PARTIAL_FAILURE`, per-target `ok=false` + `error` on failed targets, `all_ok=false`.
+On partial failure: `exit_code=1`, `error.code=PARTIAL_FAILURE`, per-target
+`ok=false` + `error` on failed targets, `all_ok=false`. The MOD-IO rows share
+the outcome of the single bulk MOD-IO request; the CLI must not treat them as
+independent single-relay writes.
 
 #### Step 12b — TOON encoder
 
