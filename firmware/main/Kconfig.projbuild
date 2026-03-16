@@ -1,0 +1,18 @@
+menu "EVB Relay"
+
+config EVB_RELAY_DEFAULT_HOSTNAME
+    string "Default device hostname"
+    default "esp32-evb-relay"
+    help
+        Hostname announced by the firmware until runtime configuration
+        overrides it.
+
+config EVB_RELAY_DEFAULT_POLL_INTERVAL_MS
+    int "Default MOD-IO polling interval (ms)"
+    range 50 10000
+    default 100
+    help
+        Poll interval used by the input monitor until runtime configuration
+        is stored in NVS.
+
+endmenu

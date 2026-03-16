@@ -3,3 +3,9 @@ docs/olimex-esp32-evb-project
 
 # bv (beads viewer) local config and caches
 .bv/
+
+# ESP-IDF generated artifacts
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/build/
+firmware/managed_components/

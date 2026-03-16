@@ -1,0 +1,69 @@
+#pragma once
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "esp_err.h"
+#include "esp_http_server.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define REST_API_DEFAULT_PORT 80U
+#define REST_API_HOSTNAME_MAX_LEN 63
+#define REST_API_IPV4_ADDR_STR_LEN 16
+
+typedef enum {
+    REST_API_AUTH_RESULT_ALLOW = 0,
+    REST_API_AUTH_RESULT_UNAUTHORIZED,
+    REST_API_AUTH_RESULT_FORBIDDEN,
+} rest_api_auth_result_t;
+
+typedef enum {
+    REST_API_MODIO_SYNC_ABSENT = 0,
+    REST_API_MODIO_SYNC_UNKNOWN,
+    REST_API_MODIO_SYNC_SYNCHRONIZED,
+} rest_api_modio_sync_t;
+
+typedef struct {
+    bool connected;
+    char hostname[REST_API_HOSTNAME_MAX_LEN + 1];
+    char ip[REST_API_IPV4_ADDR_STR_LEN];
+    char netmask[REST_API_IPV4_ADDR_STR_LEN];
+    char gateway[REST_API_IPV4_ADDR_STR_LEN];
+} rest_api_network_status_t;
+
+typedef struct {
+    rest_api_network_status_t network;
+    bool modio_present;
+    rest_api_modio_sync_t modio_sync;
+} rest_api_status_view_t;
+
+typedef rest_api_auth_result_t (*rest_api_auth_handler_t)(httpd_req_t *req, void *ctx);
+typedef esp_err_t (*rest_api_status_provider_t)(rest_api_status_view_t *status, void *ctx);
+
+typedef struct {
+    uint16_t port;
+    rest_api_auth_handler_t auth_handler;
+    void *auth_ctx;
+    rest_api_status_provider_t status_provider;
+    void *status_ctx;
+} rest_api_config_t;
+
+esp_err_t rest_api_start(const rest_api_config_t *config);
+esp_err_t rest_api_stop(void);
+
+httpd_handle_t rest_api_get_server(void);
+
+bool rest_api_parse_id_from_uri(const char *uri, const char *prefix, uint32_t *out_id);
+const char *rest_api_modio_sync_to_string(rest_api_modio_sync_t sync_state);
+esp_err_t rest_api_send_error(httpd_req_t *req,
+                              int http_status,
+                              const char *code,
+                              const char *message,
+                              bool authenticated);
+
+#ifdef __cplusplus
+}
+#endif

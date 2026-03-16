@@ -1,0 +1,73 @@
+#include "board.h"
+#include "device_config.h"
+#include "esp_err.h"
+#include "esp_log.h"
+#include "mod_io.h"
+#include "rest_api.h"
+
+static const char *TAG = "main";
+
+static rest_api_modio_sync_t app_modio_sync_to_rest_api(mod_io_relay_sync_t relay_sync)
+{
+    switch (relay_sync) {
+    case MOD_IO_RELAY_SYNC_ABSENT:
+        return REST_API_MODIO_SYNC_ABSENT;
+    case MOD_IO_RELAY_SYNC_UNKNOWN:
+        return REST_API_MODIO_SYNC_UNKNOWN;
+    case MOD_IO_RELAY_SYNC_SYNCHRONIZED:
+        return REST_API_MODIO_SYNC_SYNCHRONIZED;
+    default:
+        return REST_API_MODIO_SYNC_UNKNOWN;
+    }
+}
+
+static esp_err_t app_status_provider(rest_api_status_view_t *status, void *ctx)
+{
+    mod_io_status_t mod_io_status;
+    esp_err_t err;
+
+    (void)ctx;
+    err = mod_io_get_status(&mod_io_status);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    status->modio_present = mod_io_status.present;
+    status->modio_sync = app_modio_sync_to_rest_api(mod_io_status.relay_sync);
+    return ESP_OK;
+}
+
+void app_main(void)
+{
+    rest_api_config_t api_config = {
+        .port = 80,
+        .status_provider = app_status_provider,
+    };
+    esp_err_t err;
+
+    err = device_config_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize device config: %s", esp_err_to_name(err));
+        return;
+    }
+
+    err = board_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize board: %s", esp_err_to_name(err));
+        return;
+    }
+
+    err = mod_io_init(board_i2c_bus_handle());
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize MOD-IO component: %s", esp_err_to_name(err));
+        return;
+    }
+
+    err = rest_api_start(&api_config);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start REST API: %s", esp_err_to_name(err));
+        return;
+    }
+
+    ESP_LOGI(TAG, "REST API listening on /api/v1");
+}
