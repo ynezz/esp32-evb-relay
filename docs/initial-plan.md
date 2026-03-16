@@ -805,8 +805,8 @@ builds:
     ldflags:
       - -s -w
       - -X github.com/ynezz/esp32-evb-relay/cli/cmd.Version={{.Version}}
-      - -X main.commit={{.Commit}}
-      - -X main.date={{.CommitDate}}
+      - -X github.com/ynezz/esp32-evb-relay/cli/cmd.Commit={{.Commit}}
+      - -X github.com/ynezz/esp32-evb-relay/cli/cmd.Date={{.CommitDate}}
     mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:
@@ -893,9 +893,10 @@ commit_parsers = [
   `firmware/version.txt` contains `0.0.0-dev` as a local dev fallback when
   `PROJECT_VER` is not injected by the release pipeline.
 
-- **CLI:** GoReleaser injects the version via ldflags into `cmd.Version`,
-  `main.commit`, and a commit-derived `main.date`. The `--version` flag and
-  `--robot-capabilities` both read `cmd.Version`.
+- **CLI:** GoReleaser injects version metadata via ldflags into `cmd.Version`,
+  `cmd.Commit`, and `cmd.Date`. The `--version` flag and
+  `--robot-capabilities` read from the same `cmd` package metadata instead of
+  splitting version state across `cmd` and `main`.
 
 - **Semver policy:**
   - **Major** — breaking REST API changes, breaking CLI interface changes
