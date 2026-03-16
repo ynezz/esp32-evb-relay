@@ -78,7 +78,8 @@ esp32-evb-relay/
   - `0x20` → read digital inputs (1 byte)
   - `0x30-0x33` → select analog inputs 0-3, then read back a 16-bit value carrying the 10-bit sample
 - There is no separate relay-state readback command in the Olimex firmware, and the write command always sends the full 4-bit relay bitmap
-- Keep the relay bitmap in RAM for normal uptime, but after an ESP32 reboot or MOD-IO reattach mark MOD-IO relay state as `unknown` until a deliberate boot policy applies or a client sends a bulk `PUT /api/v1/relays/modio`
+- Keep the relay bitmap in RAM for normal uptime, but after an ESP32 reboot mark MOD-IO relay state as `unknown` until the configured boot policy applies or a client sends a bulk `PUT /api/v1/relays/modio`
+- After a hot reattach, always return MOD-IO relay state to `unknown` and require an explicit bulk `PUT /api/v1/relays/modio`; do not replay `modio_boot_policy` against a newly reappearing daughterboard
 - Do not write every relay toggle to NVS just to simulate readback; that would create flash wear without making the state authoritative
 - Serialize all MOD-IO I2C transactions inside the component so background polling and request handlers never race each other on the shared bus
 - `mod_io_init(bus_handle)`, `mod_io_is_present()`, graceful failure if module absent
@@ -91,7 +92,7 @@ esp32-evb-relay/
 - Also monitors onboard button (GPIO34 interrupt → `button` event on the same internal event queue)
 - Debounce the onboard button in software before emitting `button` events so one press does not fan out into multiple spurious notifications
 - Analog inputs: configurable threshold for change detection on 10-bit samples (avoid noise-triggered events)
-- If MOD-IO probing starts succeeding after an absence/error period, publish a presence change, reset relay sync to `unknown`, and resume normal sampling
+- If MOD-IO probing starts succeeding after an absence/error period, publish a presence change, reset relay sync to `unknown`, and resume normal sampling without reapplying `modio_boot_policy`
 
 ### Step 4c — `device_config` component
 - NVS-backed source of truth for `api_token`, `poll_interval_ms`, `hostname`, `modio_boot_policy`, and future WiFi credentials
