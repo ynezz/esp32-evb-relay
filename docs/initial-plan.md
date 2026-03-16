@@ -460,6 +460,10 @@ next[1]: evb-relay relay set modio:1=<on|off> modio:2=<on|off> modio:3=<on|off> 
 | `AUTH_REQUIRED`/`AUTH_INVALID` (401/403) | 3 | Provide a valid API token via `--api-token`, `EVB_RELAY_API_TOKEN`, or the CLI config file |
 | Network timeout | 2 | Retry; if the target host is stale or unknown, re-run `evb-relay discover` |
 
+When `error.remediation` or `next[]` contains angle-bracket placeholders such
+as `<on|off>`, treat it as a command template that requires operator or agent
+substitution before execution, not as a literal shell command.
+
 `device_context` is populated from firmware response headers (`X-ModIO-Sync`,
 `X-FW-Version`, `X-ModIO-Present`). If firmware doesn't provide headers yet,
 the field is null/omitted.
@@ -825,6 +829,9 @@ archives:
         formats:
           - zip
 
+checksum:
+  name_template: checksums.txt
+
 release:
   draft: true
   prerelease: auto    # -rc/-beta tags → pre-release
@@ -839,6 +846,8 @@ changelog:
   release assets instead of inheriting the repository name
 - `binary: evb-relay` makes the extracted executable match the CLI command name
 - `CGO_ENABLED=0` for static binaries
+- `checksum.name_template: checksums.txt` makes the published checksum asset
+  match the documented release contents exactly
 - `-trimpath` plus commit-derived timestamps keep repeat builds from the same
   tag closer to reproducible
 - 6 targets: linux/darwin/windows × amd64/arm64
