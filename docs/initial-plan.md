@@ -205,7 +205,7 @@ Exit codes: 0=success, 1=general, 2=network, 3=auth, 4=not found, 5=bad argument
 - Add WiFi STA init in `network` component (credentials from `device_config`)
 - Replace unconditional fallback with an explicit network policy such as `ethernet_only`, `wifi_only`, or `prefer_ethernet`; do not silently jump transports just because DHCP was slow once
 - If `prefer_ethernet` is enabled, only try WiFi after a deliberate timeout and surface the active transport in `/api/v1/status`
-- Add `POST /api/v1/config/wifi` endpoint for setting credentials
+- Add `PUT /api/v1/config/wifi` endpoint for setting credentials
 - Add `evb-relay config wifi` CLI command
 - Architecture in phase 1 already accommodates this (shared config, event handlers, common HTTP stack)
 
