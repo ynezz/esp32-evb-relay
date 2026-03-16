@@ -15,10 +15,15 @@ Build a networked relay controller for Olimex ESP32-EVB + MOD-IO expansion. The 
 
 ```
 esp32-evb-relay/
+├── .github/workflows/
+│   ├── ci.yml                       # CI: build + lint + test (Step 15)
+│   └── release.yml                  # Release: tag → artifacts (Step 16)
+├── cliff.toml                       # git-cliff changelog config (Step 18)
 ├── firmware/                        # ESP-IDF v5.x project
 │   ├── CMakeLists.txt
 │   ├── sdkconfig.defaults
 │   ├── partitions.csv               # OTA-capable partition table
+│   ├── version.txt                  # Dev fallback version (Step 19)
 │   ├── main/
 │   │   ├── CMakeLists.txt
 │   │   ├── idf_component.yml        # mdns dependency
@@ -37,6 +42,7 @@ esp32-evb-relay/
 ├── cli/                             # Go CLI (cobra)
 │   ├── go.mod
 │   ├── main.go
+│   ├── .goreleaser.yaml             # GoReleaser v2 config (Step 17)
 │   ├── cmd/                         # Commands: relay, input, status, ota, discover
 │   ├── client/                      # HTTP client wrapper
 │   └── internal/                    # Output formatters, mDNS discovery
@@ -206,6 +212,273 @@ If the firmware reports `MODIO_STATE_UNKNOWN` after boot, use `evb-relay relay s
 - **plain**: bare values, one per line (for piping)
 
 Exit codes: 0=success, 1=general, 2=network, 3=auth, 4=not found, 5=bad argument
+
+---
+
+## Phase 2b: CI/CD & Release Cycle
+
+A unified version tag `vX.Y.Z` drives firmware builds, CLI releases, and
+changelog generation. GitHub Actions handles everything: CI on every push/PR,
+and a full release pipeline on tag push.
+
+### Step 14 — Conventional Commits convention
+
+All commit messages follow the [Conventional Commits](https://www.conventionalcommits.org/) format:
+
+```
+<type>(<scope>): <description>
+```
+
+- **Scopes:** `firmware`, `cli`, or omit for cross-cutting changes
+- **Types and changelog mapping:**
+
+| Type | Changelog Group | Included |
+|------|-----------------|----------|
+| `feat` | Features | yes |
+| `fix` | Bug Fixes | yes |
+| `refactor` | Refactoring | yes |
+| `perf` | Performance | yes |
+| `docs` | Documentation | yes |
+| `ci` | CI/CD | yes |
+| `test` | Testing | yes |
+| `build` | Build System | yes |
+| `chore` | *(filtered out)* | no |
+
+Examples:
+```
+feat(firmware): add SSE heartbeat to rest_api component
+fix(cli): handle 409 MODIO_STATE_UNKNOWN in relay set
+ci: add firmware binary size tracking to CI
+```
+
+### Step 15 — CI workflow (`.github/workflows/ci.yml`)
+
+**Triggers:** push to `main`, pull requests targeting `main`.
+
+Path filtering via `dorny/paths-filter@v3` ensures firmware-only changes skip
+Go jobs and vice versa.
+
+**Jobs:**
+
+1. **`changes`** — detect which paths changed
+   - Uses `dorny/paths-filter@v3`
+   - Outputs: `firmware` (bool), `cli` (bool)
+   - Filters:
+     ```yaml
+     firmware:
+       - 'firmware/**'
+     cli:
+       - 'cli/**'
+     ```
+
+2. **`firmware-build`** — build the ESP-IDF project
+   - Condition: `needs.changes.outputs.firmware == 'true'`
+   - Uses `espressif/esp-idf-ci-action@v1` with `esp_idf_version: v5.4`,
+     command: `idf.py set-target esp32 && idf.py build`
+   - Uploads `build/esp32-evb-relay.bin` as a workflow artifact
+
+3. **`firmware-size`** — track binary size
+   - Condition: `needs.changes.outputs.firmware == 'true'`
+   - Runs after `firmware-build`
+   - Uses `espressif/esp-idf-ci-action@v1` with `idf.py size`
+   - Logs partition sizes to CI output for historical tracking
+
+4. **`cli-lint`** — lint Go code
+   - Condition: `needs.changes.outputs.cli == 'true'`
+   - Uses `actions/setup-go@v5` (handles Go module cache automatically)
+   - Uses `golangci/golangci-lint-action@v9`
+
+5. **`cli-test`** — run Go tests
+   - Condition: `needs.changes.outputs.cli == 'true'`
+   - `go test -race -coverprofile=coverage.out ./...`
+
+6. **`cli-build`** — verify Go compilation
+   - Condition: `needs.changes.outputs.cli == 'true'`
+   - `go build -o /dev/null .`
+
+### Step 16 — Release workflow (`.github/workflows/release.yml`)
+
+**Trigger:** tag push matching `v*`.
+
+Extracts version from the tag (`${GITHUB_REF_NAME#v}`) and coordinates four
+jobs:
+
+1. **`firmware`** — build versioned firmware binary
+   - Uses `espressif/esp-idf-ci-action@v1` with
+     `cmake -DPROJECT_VER=X.Y.Z` to embed the version in the binary
+   - Renames output to `esp32-evb-relay-vX.Y.Z.bin`
+   - Generates `esp32-evb-relay-vX.Y.Z.bin.sha256` checksum
+   - Uploads both as workflow artifacts
+
+2. **`cli`** — build CLI binaries via GoReleaser
+   - Uses `goreleaser/goreleaser-action@v6` with GoReleaser v2
+   - Creates a draft GitHub Release with 6 CLI archives
+     (linux/darwin/windows × amd64/arm64) + checksums file
+   - GoReleaser creates the release; later jobs augment it
+
+3. **`changelog`** — generate release notes
+   - Installs `git-cliff` and runs `git-cliff --latest --strip header`
+   - Uploads the changelog text as a workflow artifact
+
+4. **`release`** — assemble final GitHub Release
+   - Depends on: `firmware`, `cli`, `changelog`
+   - Downloads firmware artifact and changelog artifact
+   - Uploads `esp32-evb-relay-vX.Y.Z.bin` + `.sha256` to the existing
+     GitHub Release (created by GoReleaser)
+   - Sets the release body to the git-cliff output via
+     `softprops/action-gh-release@v2`
+   - Marks the release as non-draft
+
+### Step 17 — GoReleaser configuration (`cli/.goreleaser.yaml`)
+
+GoReleaser v2 format. Key settings:
+
+```yaml
+version: 2
+builds:
+  - main: .
+    dir: cli
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+release:
+  prerelease: auto    # -rc/-beta tags → pre-release
+
+changelog:
+  disable: true       # git-cliff handles changelog
+```
+
+- `CGO_ENABLED=0` for static binaries
+- `-trimpath` for reproducible builds
+- 6 targets: linux/darwin/windows × amd64/arm64
+- Archives: `.tar.gz` (Unix), `.zip` (Windows)
+- `prerelease: auto` flags `-rc`/`-beta` tags as pre-release
+- Changelog disabled — git-cliff generates release notes instead
+
+### Step 18 — git-cliff configuration (`cliff.toml`)
+
+Conventional commit parser with type-to-group mapping and scope-inline
+rendering:
+
+```toml
+[changelog]
+header = ""
+body = """
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+- {% if commit.scope %}**{{ commit.scope }}**: {% endif %}\
+  {{ commit.message | upper_first }}\
+  ({{ commit.id | truncate(length=7, end="") }})\
+{% endfor %}
+{% endfor %}
+"""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+commit_parsers = [
+  { message = "^feat",     group = "Features" },
+  { message = "^fix",      group = "Bug Fixes" },
+  { message = "^refactor", group = "Refactoring" },
+  { message = "^perf",     group = "Performance" },
+  { message = "^docs",     group = "Documentation" },
+  { message = "^ci",       group = "CI/CD" },
+  { message = "^test",     group = "Testing" },
+  { message = "^build",    group = "Build System" },
+  { message = "^chore",    skip = true },
+]
+```
+
+- Scopes render inline (e.g., `**firmware**: Add SSE heartbeat`) so
+  firmware-only and CLI-only changes are visually distinct in the changelog
+- `chore` commits are filtered out
+- Unconventional commits are excluded (`filter_unconventional = true`)
+
+### Step 19 — Version management
+
+**Single source of truth:** the git tag `vX.Y.Z`.
+
+- **Firmware:** The release workflow passes `-DPROJECT_VER=X.Y.Z` to CMake,
+  which populates `esp_app_desc_t.version`. This version surfaces in
+  `GET /api/v1/status` and the mDNS `fw_version` TXT record.
+  `firmware/version.txt` contains `0.0.0-dev` as a local dev fallback for
+  builds outside the release pipeline.
+
+- **CLI:** GoReleaser injects the version via ldflags into `main.version`,
+  `main.commit`, and `main.date`. The `--version` flag reads these values.
+
+- **Semver policy:**
+  - **Major** — breaking REST API changes, breaking CLI interface changes
+  - **Minor** — new endpoints, new CLI commands, new firmware features
+  - **Patch** — bug fixes, documentation, internal refactors
+
+### Step 20 — Full release cycle
+
+**End-to-end flow:**
+
+```
+feature branch → PR → CI (Step 15) → review → merge to main
+                                                    ↓
+                                              git tag vX.Y.Z
+                                                    ↓
+                                        release workflow (Step 16)
+                                           ↓        ↓        ↓
+                                      firmware    CLI     changelog
+                                           ↓        ↓        ↓
+                                        GitHub Release (assembled)
+```
+
+1. Create a feature branch, make changes with conventional commits
+2. Open a PR targeting `main` — CI runs path-filtered jobs
+3. On merge to `main`, tag the release: `git tag v0.1.0 && git push --tags`
+4. The release workflow triggers and produces:
+   - Firmware binary built with the embedded version
+   - 6 CLI archives built by GoReleaser
+   - Changelog generated by git-cliff
+5. The final `release` job assembles the GitHub Release
+
+**GitHub Release contents:**
+
+| Asset | Description |
+|-------|-------------|
+| `esp32-evb-relay-v0.1.0.bin` | Firmware binary for OTA or serial flash |
+| `esp32-evb-relay-v0.1.0.bin.sha256` | SHA-256 checksum for firmware |
+| `evb-relay_0.1.0_linux_amd64.tar.gz` | CLI binary (Linux amd64) |
+| `evb-relay_0.1.0_linux_arm64.tar.gz` | CLI binary (Linux arm64) |
+| `evb-relay_0.1.0_darwin_amd64.tar.gz` | CLI binary (macOS amd64) |
+| `evb-relay_0.1.0_darwin_arm64.tar.gz` | CLI binary (macOS arm64) |
+| `evb-relay_0.1.0_windows_amd64.zip` | CLI binary (Windows amd64) |
+| `evb-relay_0.1.0_windows_arm64.zip` | CLI binary (Windows arm64) |
+| `checksums.txt` | SHA-256 checksums for all CLI archives |
+
+**Edge cases:**
+
+- **Firmware-only changes:** CI skips CLI jobs; release still builds both
+  artifacts from the tagged commit (the CLI binary is unchanged but versioned
+  consistently)
+- **CLI-only changes:** CI skips firmware jobs; same unified release
+- **Pre-release tags** (`v0.2.0-rc.1`): GoReleaser marks the GitHub Release
+  as a pre-release via `prerelease: auto`; git-cliff still generates the
+  changelog
 
 ---
 
