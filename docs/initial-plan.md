@@ -136,14 +136,17 @@ URI parsing: register wildcard handlers with `httpd_uri_match_wildcard()` and us
 
 ### Step 8 — `ota` component
 - `POST /api/v1/ota` streams binary via `esp_ota_begin/write/end`
+- On the next successful boot, confirm the running image with `esp_ota_mark_app_valid_cancel_rollback()` so rollback does not remain pending forever
 - Sets boot partition, reboots after 2s delay
 - Rollback enabled via `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`
 
 ### Step 9 — `main.c` boot sequence
 ```
-nvs_flash_init → event_loop_create → board_init → relay_init →
-mod_io_init → network_init → wait_for_ip → mdns_register →
-auth_init → rest_api_start → input_monitor_start → watchdog task
+nvs_flash_init → event_loop_create → device_config_init →
+ota_confirm_running_image_if_needed → board_init → relay_init →
+mod_io_init → auth_init → network_init → wait_for_ip →
+mdns_register → rest_api_start → input_monitor_start →
+register long-running tasks with the task WDT
 ```
 
 ---
@@ -191,11 +194,12 @@ Exit codes: 0=success, 1=general, 2=network, 3=auth, 4=not found, 5=bad argument
 ---
 
 ## Phase 3 (future): WiFi support
-- Add WiFi STA init in `network` component (credentials from NVS)
-- Fallback: if Ethernet doesn't get IP within timeout, try WiFi
+- Add WiFi STA init in `network` component (credentials from `device_config`)
+- Replace unconditional fallback with an explicit network policy such as `ethernet_only`, `wifi_only`, or `prefer_ethernet`; do not silently jump transports just because DHCP was slow once
+- If `prefer_ethernet` is enabled, only try WiFi after a deliberate timeout and surface the active transport in `/api/v1/status`
 - Add `POST /api/v1/config/wifi` endpoint for setting credentials
 - Add `evb-relay config wifi` CLI command
-- Architecture in phase 1 already accommodates this (event handlers, NVS)
+- Architecture in phase 1 already accommodates this (shared config, event handlers, common HTTP stack)
 
 ---
 
