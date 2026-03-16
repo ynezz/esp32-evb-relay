@@ -344,8 +344,10 @@ history is available to GoReleaser and `git-cliff`:
 1. **`firmware`** — build versioned firmware binary
    - Runs on `ubuntu-latest`
    - Uses `espressif/esp-idf-ci-action@v1` with
-     `path: firmware`, command: `idf.py -DPROJECT_VER=X.Y.Z build`
-     to embed the version in the binary
+     `path: firmware`, command:
+     `idf.py set-target esp32 && idf.py -DPROJECT_VER=X.Y.Z build`
+     so a clean checkout without a tracked `sdkconfig` still builds for the
+     correct chip while embedding the release version
    - Renames output to `esp32-evb-relay-vX.Y.Z.bin`
    - Generates `esp32-evb-relay-vX.Y.Z.bin.sha256` checksum
    - Uploads both as workflow artifacts
@@ -476,7 +478,8 @@ commit_parsers = [
 **Single source of truth:** the git tag `vX.Y.Z`.
 
 - **Firmware:** The release workflow runs
-  `idf.py -DPROJECT_VER=X.Y.Z build`, which sets `PROJECT_VER` and populates
+  `idf.py set-target esp32 && idf.py -DPROJECT_VER=X.Y.Z build`, which sets the
+  target on clean checkouts, populates `PROJECT_VER`, and fills
   `esp_app_desc_t.version`. This version surfaces in
   `GET /api/v1/status` and the mDNS `fw_version` TXT record.
   `firmware/version.txt` contains `0.0.0-dev` as a local dev fallback when
