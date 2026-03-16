@@ -226,10 +226,12 @@ and a full release pipeline on tag push.
 All commit messages follow the [Conventional Commits](https://www.conventionalcommits.org/) format:
 
 ```
-<type>(<scope>): <description>
+<type>(<scope>)!: <description>
 ```
 
 - **Scopes:** `firmware`, `cli`, or omit for cross-cutting changes
+- Scope and `!` are optional; use `!` or a `BREAKING CHANGE:` footer when a
+  commit introduces a major-version change
 - **Types and changelog mapping:**
 
 | Type | Changelog Group | Included |
@@ -465,6 +467,7 @@ feature branch → PR → CI (Step 15) → review → merge to main
 1. Create a feature branch, make changes with conventional commits
 2. Open a PR targeting `main` — CI runs path-filtered jobs
 3. On merge to `main`, tag the release: `git tag v0.1.0 && git push --tags`
+   (or more narrowly: `git push origin v0.1.0`)
 4. The release workflow triggers and produces:
    - Firmware binary built with the embedded version
    - 6 CLI archives built by GoReleaser
