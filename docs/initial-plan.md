@@ -344,7 +344,7 @@ history is available to GoReleaser and `git-cliff`:
 
 1. **`firmware`** — build versioned firmware binary
    - Runs on `ubuntu-latest`
-   - Uses `espressif/esp-idf-ci-action@v1` with
+   - Uses `espressif/esp-idf-ci-action@v1` with `esp_idf_version: v5.4`,
      `path: firmware`, command:
      `idf.py set-target esp32 && idf.py -DPROJECT_VER=X.Y.Z build`
      so a clean checkout without a tracked `sdkconfig` still builds for the
