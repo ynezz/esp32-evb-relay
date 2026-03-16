@@ -258,14 +258,23 @@ ci: add firmware binary size tracking to CI
 
 **Triggers:** push to `main`, pull requests targeting `main`.
 
-Path filtering via `dorny/paths-filter@v3` ensures firmware-only changes skip
+**Permissions:**
+```yaml
+permissions:
+  contents: read
+  pull-requests: read
+```
+
+Path filtering via `dorny/paths-filter@v4` ensures firmware-only changes skip
 Go jobs and vice versa, while shared CI/release changes still exercise both
 stacks.
 
 **Jobs:**
 
 1. **`changes`** — detect which paths changed
-   - Uses `dorny/paths-filter@v3`
+   - Starts with `actions/checkout@v6`; push-based change detection needs the
+     repository checkout even though pull-request mode can use the GitHub API
+   - Uses `dorny/paths-filter@v4`
    - Outputs: `firmware` (bool), `cli` (bool), `shared` (bool)
    - Filters:
      ```yaml
@@ -281,6 +290,7 @@ stacks.
 
 2. **`firmware-build`** — build the ESP-IDF project and report size
    - Condition: `needs.changes.outputs.firmware == 'true' || needs.changes.outputs.shared == 'true'`
+   - Starts with `actions/checkout@v6`
    - Uses `espressif/esp-idf-ci-action@v1` with `esp_idf_version: v5.4`,
      `path: firmware`, command: `idf.py set-target esp32 && idf.py build && idf.py size`
    - Logs partition and binary sizes in the same job while the generated
@@ -289,23 +299,37 @@ stacks.
 
 3. **`cli-lint`** — lint Go code
    - Condition: `needs.changes.outputs.cli == 'true' || needs.changes.outputs.shared == 'true'`
-   - Uses `actions/setup-go@v6` with `cache-dependency-path: cli/go.mod`
+   - Starts with `actions/checkout@v6`
+   - Uses `actions/setup-go@v6` with
+     `go-version-file: cli/go.mod`, `cache-dependency-path: cli/go.sum`
    - Uses `golangci/golangci-lint-action@v9` with `working-directory: cli`
 
 4. **`cli-test`** — run Go tests
    - Condition: `needs.changes.outputs.cli == 'true' || needs.changes.outputs.shared == 'true'`
+   - Starts with `actions/checkout@v6`
+   - Uses `actions/setup-go@v6` with
+     `go-version-file: cli/go.mod`, `cache-dependency-path: cli/go.sum`
    - Runs in `cli/`: `go test -race -coverprofile=coverage.out ./...`
 
 5. **`cli-build`** — verify Go compilation
    - Condition: `needs.changes.outputs.cli == 'true' || needs.changes.outputs.shared == 'true'`
+   - Starts with `actions/checkout@v6`
+   - Uses `actions/setup-go@v6` with
+     `go-version-file: cli/go.mod`, `cache-dependency-path: cli/go.sum`
    - Runs in `cli/`: `go build -o /dev/null .`
 
 ### Step 16 — Release workflow (`.github/workflows/release.yml`)
 
 **Trigger:** tag push matching `v*`.
 
+**Permissions:**
+```yaml
+permissions:
+  contents: write
+```
+
 Extracts version from the tag (`${GITHUB_REF_NAME#v}`) and coordinates four
-jobs. Each job starts with `actions/checkout@v5` using `fetch-depth: 0` so tag
+jobs. Each job starts with `actions/checkout@v6` using `fetch-depth: 0` so tag
 history is available to GoReleaser and `git-cliff`:
 
 1. **`firmware`** — build versioned firmware binary
@@ -317,8 +341,10 @@ history is available to GoReleaser and `git-cliff`:
    - Uploads both as workflow artifacts
 
 2. **`cli`** — build CLI binaries via GoReleaser
-   - Uses `goreleaser/goreleaser-action@v6` with GoReleaser v2,
-     running in `cli/`
+   - Starts with `actions/setup-go@v6` using
+     `go-version-file: cli/go.mod`, `cache-dependency-path: cli/go.sum`
+   - Uses `goreleaser/goreleaser-action@v7` with `version: "~> v2"`,
+     `workdir: cli`, and `args: release --clean`
    - Creates a draft GitHub Release with 6 CLI archives
      (linux/darwin/windows × amd64/arm64) + checksums file
    - GoReleaser creates the release; later jobs augment it
