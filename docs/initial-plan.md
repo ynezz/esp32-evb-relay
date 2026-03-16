@@ -87,6 +87,7 @@ esp32-evb-relay/
 - NVS-backed source of truth for `api_token`, `poll_interval_ms`, `hostname`, `modio_boot_policy`, and future WiFi credentials
 - Centralizes validation, defaults, and persistence so `auth`, `network`, `input_monitor`, and `rest_api` do not each manage their own ad hoc NVS keys
 - `modio_boot_policy` should be explicit and low-churn, for example `all_off` (apply `0000` on boot and mark state synchronized) or `leave_unchanged` (do not touch hardware on boot, but report MOD-IO relay state as unknown until the client performs a bulk set)
+- Secrets are write-only at the API layer: never echo `api_token` or raw WiFi credentials back from `GET /api/v1/config`; expose redacted metadata instead
 - Returns metadata about whether a config change is applied live or requires a restart/rebind
 
 ### Step 5 — `network` component
@@ -120,7 +121,7 @@ Base: `http://<host>/api/v1`
 | GET | `/api/v1/inputs/analog` | Read all analog inputs |
 | GET | `/api/v1/inputs/analog/{id}` | Read single analog input |
 | GET | `/api/v1/events` | SSE stream — pushes input/relay/button change events |
-| GET | `/api/v1/config` | Read validated device config (`poll_interval_ms`, `hostname`, etc.) |
+| GET | `/api/v1/config` | Read validated, redacted device config (`poll_interval_ms`, `hostname`, `modio_boot_policy`, secret-presence metadata) |
 | PUT | `/api/v1/config` | Update device config `{"poll_interval_ms": 200}` and report whether the change applied live |
 | POST | `/api/v1/ota` | Upload firmware binary (octet-stream) |
 
