@@ -73,15 +73,18 @@ esp32-evb-relay/
 - There is no separate relay-state readback command in the Olimex firmware, and the write command always sends the full 4-bit relay bitmap
 - Keep the relay bitmap in RAM for normal uptime, but after an ESP32 reboot or MOD-IO reattach mark MOD-IO relay state as `unknown` until a deliberate boot policy applies or a client sends a bulk `PUT /api/v1/relays/modio`
 - Do not write every relay toggle to NVS just to simulate readback; that would create flash wear without making the state authoritative
+- Serialize all MOD-IO I2C transactions inside the component so background polling and request handlers never race each other on the shared bus
 - `mod_io_init(bus_handle)`, `mod_io_is_present()`, graceful failure if module absent
 
 ### Step 4b — `input_monitor` component
 - FreeRTOS task polls MOD-IO digital + analog inputs at configurable interval (default 100ms)
+- Owns the latest sampled input snapshot and timestamps; REST input endpoints should serve this shared snapshot by default instead of triggering separate I2C reads on every request
 - Compares against previous state, on change: publishes input events onto a shared event queue
 - Relay setters publish `relay_changed` events onto the same queue; `input_monitor` should not invent relay events
 - Also monitors onboard button (GPIO34 interrupt → `button` event on the shared queue)
 - Debounce the onboard button in software before emitting `button` events so one press does not fan out into multiple spurious notifications
 - Analog inputs: configurable threshold for change detection on 8-bit samples (avoid noise-triggered events)
+- If MOD-IO probing starts succeeding after an absence/error period, publish a presence change, reset relay sync to `unknown`, and resume normal sampling
 
 ### Step 4c — `device_config` component
 - NVS-backed source of truth for `api_token`, `poll_interval_ms`, `hostname`, `modio_boot_policy`, and future WiFi credentials
@@ -116,10 +119,10 @@ Base: `http://<host>/api/v1`
 | GET | `/api/v1/relays/modio` | MOD-IO relay states when synchronized |
 | PUT | `/api/v1/relays/modio/{id}` | Set MOD-IO relay when sync state is known |
 | PUT | `/api/v1/relays/modio` | Bulk set `{"states": [true,false,true,false]}` and establish authoritative sync |
-| GET | `/api/v1/inputs/digital` | Read all digital inputs |
-| GET | `/api/v1/inputs/digital/{id}` | Read single digital input |
-| GET | `/api/v1/inputs/analog` | Read all analog inputs |
-| GET | `/api/v1/inputs/analog/{id}` | Read single analog input |
+| GET | `/api/v1/inputs/digital` | Read the latest sampled digital inputs |
+| GET | `/api/v1/inputs/digital/{id}` | Read one digital input from the latest sampled snapshot |
+| GET | `/api/v1/inputs/analog` | Read the latest sampled analog inputs |
+| GET | `/api/v1/inputs/analog/{id}` | Read one analog input from the latest sampled snapshot |
 | GET | `/api/v1/events` | SSE stream — pushes input/relay/button change events |
 | GET | `/api/v1/config` | Read validated, redacted device config (`poll_interval_ms`, `hostname`, `modio_boot_policy`, secret-presence metadata) |
 | PUT | `/api/v1/config` | Update device config `{"poll_interval_ms": 200}` and report whether the change applied live |
