@@ -213,7 +213,7 @@ register long-running tasks with the task WDT
 |------|---------|-------------|
 | `--host/-H` | `EVB_RELAY_HOST` | Device IP or hostname |
 | `--api-token/-k` | `EVB_RELAY_API_TOKEN` | API authentication token |
-| `--format/-f` | — | Output format: table/json/plain (default: table) |
+| `--format/-f` | — | Human mode: table/json/plain (default: table). Robot mode: only `json` is a valid override; otherwise robot mode defaults to TOON. |
 | `--timeout/-t` | `EVB_RELAY_TIMEOUT` | HTTP timeout (e.g., 5s, 10s; default: 10s) |
 | `--robot` | `EVB_RELAY_ROBOT=1` | Activate robot mode (TOON/JSON envelope on stdout, no color) |
 | `--robot-capabilities` | — | Introspection: dump full CLI contract as JSON, exit. No `--host` needed. |
@@ -228,6 +228,10 @@ register long-running tasks with the task WDT
 | `--format table` | table | human-aligned columns | no |
 | `--format plain` | plain | bare values, one/line | no |
 | (default) | table | human-aligned columns | no |
+
+With `--robot`, only the default TOON output and `--format json` are valid.
+Reject `--robot --format table` and `--robot --format plain` as bad-argument
+usage (`exit_code=5`) instead of silently falling back to a human format.
 
 **Config precedence (highest → lowest):**
 1. CLI flags (`--host`, `--api-token`, `--robot`, `--format`, `--timeout`)
@@ -986,4 +990,4 @@ is intentionally app-only.
 19. **NDJSON watch**: test stream header, event lines, and stream_end are valid NDJSON
 20. **Exit codes**: test each error condition produces the correct exit code (0-7)
 21. **Device context**: test extraction from HTTP response headers, test null when headers absent
-22. **Format matrix**: test `--robot`, `--robot --format json`, `--format json`, `--format table`, `--format plain` each produce expected output shape
+22. **Format matrix**: test `--robot`, `--robot --format json`, `--format json`, `--format table`, and `--format plain` each produce the expected output shape, and test `--robot --format table/plain` are rejected with exit code 5
