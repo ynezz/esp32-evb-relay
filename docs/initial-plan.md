@@ -104,6 +104,7 @@ esp32-evb-relay/
 - API token loaded from `device_config`
 - `auth_check(httpd_req_t*)` validates `Authorization: Bearer <token>` for all `/api/v1/*` endpoints
 - Secure by default. On first boot, if no token exists yet, generate a random token, persist it, and print it once on the serial console for provisioning
+- Define an explicit recovery path for lost credentials: `scripts/provision.sh` should be able to set or rotate the token over serial during provisioning/service, and a factory-reset path may clear the token by wiping relevant NVS keys
 - Constant-time comparison
 
 ### Step 7 — `rest_api` component
@@ -220,10 +221,11 @@ Exit codes: 0=success, 1=general, 2=network, 3=auth, 4=not found, 5=bad argument
 1. **Build firmware**: `cd firmware && idf.py set-target esp32 && idf.py build`
 2. **Flash**: `idf.py -p <serial-port> flash monitor`
 3. **Verify boot**: serial console shows init sequence, prints the first-boot API token if one was generated, and reports an Ethernet IP
-4. **Test API**: `curl -H "Authorization: Bearer <key>" http://<ip>/api/v1/status` returns JSON
-5. **Test relays**: `curl -X PUT -H "Authorization: Bearer <key>" -H "Content-Type: application/json" -d '{"state":true}' http://<ip>/api/v1/relays/onboard/1` — hear relay click
-6. **Test MOD-IO sync model**: with `modio_boot_policy=leave_unchanged`, `GET /api/v1/relays/modio` returns `409 MODIO_STATE_UNKNOWN` after boot; `PUT /api/v1/relays/modio` with all 4 states establishes sync, after which `GET` returns the authoritative 4-relay bitmap
-7. **Build CLI**: `cd cli && go build -o evb-relay .`
-8. **CLI test**: `./evb-relay --host <ip> --api-key <key> status` returns device info
-9. **CLI relay control**: `./evb-relay --host <ip> --api-key <key> relay on onboard:1` — relay clicks
-10. **OTA**: `./evb-relay --host <ip> --api-key <key> ota flash firmware/build/esp32-evb-relay.bin` — device reboots with new firmware
+4. **Verify token recovery path**: use `scripts/provision.sh` or the documented serial recovery flow to rotate the token without exposing it from `GET /api/v1/config`
+5. **Test API**: `curl -H "Authorization: Bearer <key>" http://<ip>/api/v1/status` returns JSON
+6. **Test relays**: `curl -X PUT -H "Authorization: Bearer <key>" -H "Content-Type: application/json" -d '{"state":true}' http://<ip>/api/v1/relays/onboard/1` — hear relay click
+7. **Test MOD-IO sync model**: with `modio_boot_policy=leave_unchanged`, `GET /api/v1/relays/modio` returns `409 MODIO_STATE_UNKNOWN` after boot; `PUT /api/v1/relays/modio` with all 4 states establishes sync, after which `GET` returns the authoritative 4-relay bitmap
+8. **Build CLI**: `cd cli && go build -o evb-relay .`
+9. **CLI test**: `./evb-relay --host <ip> --api-key <key> status` returns device info
+10. **CLI relay control**: `./evb-relay --host <ip> --api-key <key> relay on onboard:1` — relay clicks
+11. **OTA**: `./evb-relay --host <ip> --api-key <key> ota flash firmware/build/esp32-evb-relay.bin` — device reboots with new firmware
