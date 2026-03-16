@@ -151,6 +151,7 @@ Error format: `{"error": {"code": "RELAY_NOT_FOUND", "message": "...", "status":
 - MOD-IO-specific endpoints return `503 MODIO_NOT_PRESENT` when the daughterboard is absent; do not fabricate zeroed input or relay state
 - If MOD-IO relay state is unknown after boot or reattach, `GET /api/v1/relays/modio` and single-relay `PUT /api/v1/relays/modio/{id}` return `409 MODIO_STATE_UNKNOWN`; clients must use bulk `PUT /api/v1/relays/modio` to establish a full bitmap first
 - If no valid MOD-IO sample exists yet, input endpoints return `503 MODIO_SAMPLE_UNAVAILABLE` rather than pretending an old or nonexistent snapshot is current
+- Public API and CLI IDs are 1-based (`onboard:1..2`, `modio:1..4`, `input 1..4`); the firmware maps them internally onto GPIO definitions and MOD-IO protocol channels `0..3`
 
 URI parsing: register wildcard handlers with `httpd_uri_match_wildcard()` and use a helper such as `parse_id_from_uri()` because ESP-IDF httpd still lacks native path params.
 
