@@ -569,7 +569,7 @@ the standard envelope.
 
 **Stream header (first line):**
 ```json
-{"v":1,"stream":"events","host":"192.168.1.50","started_at":"2026-03-16T14:22:03.000Z"}
+{"v":1,"stream":"events","host":"192.168.1.50","started_at":"2026-03-16T14:22:03.000Z","device_context":{"modio_present":true,"modio_sync":"unknown","firmware_version":"0.3.1"}}
 ```
 
 **Event lines:**
@@ -583,6 +583,11 @@ the standard envelope.
 ```json
 {"event":"stream_end","reason":"client_disconnect","received_at":"2026-03-16T14:22:35.000Z"}
 ```
+
+The CLI should extract firmware response headers once at stream startup and
+include them in the NDJSON header line as `device_context`, so robot consumers
+get the same zero-extra-request device metadata that non-streaming robot
+commands expose.
 
 Why NDJSON for streams (not TOON): this plan's TOON encoder targets bounded
 request/response envelopes and fixed-shape arrays. SSE events are
@@ -1015,7 +1020,7 @@ is intentionally app-only.
 17. **`--robot-capabilities`**: verify output is valid JSON with all commands, exit codes, error codes, state machine, and env vars
 18. **`modio:all` resolution**: test `modio:all=off` becomes one bulk MOD-IO bitmap request, while `onboard:all=on` becomes 2 onboard relay targets
 19. **Batch results**: test partial failure produces per-target results with `PARTIAL_FAILURE` error code
-20. **NDJSON watch**: test stream header, event lines, and stream_end are valid NDJSON
+20. **NDJSON watch**: test stream header, including `device_context` when headers are available, plus event lines and stream_end are valid NDJSON
 21. **Exit codes**: test each error condition produces the correct exit code (0-7)
 22. **Device context**: test extraction from HTTP response headers, test null when headers absent
 23. **Format matrix**: test `--robot`, `--robot --format json`, `--format json`, `--format table`, and `--format plain` each produce the expected output shape, and test `--robot --format table/plain` are rejected with exit code 5
