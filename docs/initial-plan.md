@@ -481,7 +481,7 @@ feature branch → PR → CI (Step 15) → review → merge to main
 
 | Asset | Description |
 |-------|-------------|
-| `esp32-evb-relay-v0.1.0.bin` | Firmware binary for OTA or serial flash |
+| `esp32-evb-relay-v0.1.0.bin` | Firmware application image for OTA or updating the app partition on an already provisioned device |
 | `esp32-evb-relay-v0.1.0.bin.sha256` | SHA-256 checksum for firmware |
 | `evb-relay_0.1.0_linux_amd64.tar.gz` | CLI binary (Linux amd64) |
 | `evb-relay_0.1.0_linux_arm64.tar.gz` | CLI binary (Linux arm64) |
@@ -490,6 +490,10 @@ feature branch → PR → CI (Step 15) → review → merge to main
 | `evb-relay_0.1.0_windows_amd64.zip` | CLI binary (Windows amd64) |
 | `evb-relay_0.1.0_windows_arm64.zip` | CLI binary (Windows arm64) |
 | `checksums.txt` | SHA-256 checksums for all CLI archives |
+
+For first-time blank-device flashing, use the local ESP-IDF build outputs (or
+later add a dedicated factory-flash bundle); the released firmware asset above
+is intentionally app-only.
 
 **Edge cases:**
 
