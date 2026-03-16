@@ -5,7 +5,7 @@
 Build a networked relay controller for Olimex ESP32-EVB + MOD-IO expansion. The system exposes a REST API for remote power control over Ethernet first, with WiFi added later, and a Go CLI for human and automation use.
 
 **Hardware:**
-- ESP32-EVB: 2 onboard relays (GPIO32, GPIO33), Ethernet (LAN8710A), UEXT I2C (SDA=GPIO13, SCL=GPIO16)
+- ESP32-EVB: 2 onboard relays (GPIO4, GPIO5), Ethernet (LAN8710A), UEXT I2C (SDA=GPIO13, SCL=GPIO16)
 - MOD-IO (I2C slave 0x58): 4 relays, 4 digital inputs, 4 analog inputs (10-bit samples read over I2C)
 - Serial: host-specific USB serial device (for example `/dev/tty.usbserial-*`)
 
@@ -63,7 +63,7 @@ esp32-evb-relay/
 - `.gitignore` (sdkconfig, build/, managed_components/)
 
 ### Step 2 — `board` component
-- Pin constants: `BOARD_RELAY1_GPIO=32`, `BOARD_RELAY2_GPIO=33`, `BOARD_I2C_SDA=13`, `BOARD_I2C_SCL=16`, `BOARD_ETH_MDC=23`, `BOARD_ETH_MDIO=18`, `BOARD_BUTTON=34`
+- Pin constants: `BOARD_RELAY1_GPIO=4`, `BOARD_RELAY2_GPIO=5`, `BOARD_I2C_SDA=13`, `BOARD_I2C_SCL=16`, `BOARD_ETH_MDC=23`, `BOARD_ETH_MDIO=18`, `BOARD_BUTTON=34`
 - `board_init()`: configure I2C master bus (100kHz), button GPIO
 
 ### Step 3 — `relay` component
