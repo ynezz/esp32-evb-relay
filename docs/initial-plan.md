@@ -6,7 +6,7 @@ Build a networked relay controller for Olimex ESP32-EVB + MOD-IO expansion. The 
 
 **Hardware:**
 - ESP32-EVB: 2 onboard relays (GPIO32, GPIO33), Ethernet (LAN8710A), UEXT I2C (SDA=GPIO13, SCL=GPIO16)
-- MOD-IO (I2C slave 0x58): 4 relays, 4 digital inputs, 4 analog inputs (10-bit)
+- MOD-IO (I2C slave 0x58): 4 relays, 4 digital inputs, 4 analog inputs (1-byte, 8-bit samples over I2C)
 - Serial: host-specific USB serial device (for example `/dev/tty.usbserial-*`)
 
 ---
