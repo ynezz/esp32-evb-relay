@@ -276,28 +276,24 @@ stacks.
        - 'cliff.toml'
      ```
 
-2. **`firmware-build`** — build the ESP-IDF project
+2. **`firmware-build`** — build the ESP-IDF project and report size
    - Condition: `needs.changes.outputs.firmware == 'true' || needs.changes.outputs.shared == 'true'`
    - Uses `espressif/esp-idf-ci-action@v1` with `esp_idf_version: v5.4`,
-     `path: firmware`, command: `idf.py set-target esp32 && idf.py build`
+     `path: firmware`, command: `idf.py set-target esp32 && idf.py build && idf.py size`
+   - Logs partition and binary sizes in the same job while the generated
+     `.elf` and `.map` files are still present
    - Uploads `firmware/build/esp32-evb-relay.bin` as a workflow artifact
 
-3. **`firmware-size`** — track binary size
-   - Condition: `needs.changes.outputs.firmware == 'true'`
-   - Runs after `firmware-build`
-   - Uses `espressif/esp-idf-ci-action@v1` with `idf.py size`
-   - Logs partition sizes to CI output for historical tracking
-
-4. **`cli-lint`** — lint Go code
+3. **`cli-lint`** — lint Go code
    - Condition: `needs.changes.outputs.cli == 'true' || needs.changes.outputs.shared == 'true'`
    - Uses `actions/setup-go@v6` with `cache-dependency-path: cli/go.mod`
    - Uses `golangci/golangci-lint-action@v9` with `working-directory: cli`
 
-5. **`cli-test`** — run Go tests
+4. **`cli-test`** — run Go tests
    - Condition: `needs.changes.outputs.cli == 'true' || needs.changes.outputs.shared == 'true'`
    - Runs in `cli/`: `go test -race -coverprofile=coverage.out ./...`
 
-6. **`cli-build`** — verify Go compilation
+5. **`cli-build`** — verify Go compilation
    - Condition: `needs.changes.outputs.cli == 'true' || needs.changes.outputs.shared == 'true'`
    - Runs in `cli/`: `go build -o /dev/null .`
 
