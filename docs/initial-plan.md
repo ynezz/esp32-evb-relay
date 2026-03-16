@@ -622,6 +622,10 @@ TOON/JSON envelope.
 | `discover` | `devices[]: {hostname, ip, port, txt}` |
 | `ota flash` | `uploaded_bytes`, `firmware_file`, `reboot_in_seconds` |
 
+`input watch` is intentionally omitted from the table above because it is a
+streaming command, not a bounded `data` envelope. Its NDJSON event schema is
+defined in Step 12e.
+
 ---
 
 ## Phase 2b: CI/CD & Release Cycle
@@ -990,7 +994,7 @@ is intentionally app-only.
 
 ### CLI — Robot Mode (unit tests in `go test ./...`)
 
-13. **TOON encoder**: unit tests covering flat objects, uniform arrays, nested objects, null/bool/number/string types
+13. **TOON encoder**: unit tests covering primitives, uniform arrays, uniform object tables, nested objects, null/bool/number/string types, plus upstream TOON conformance fixtures
 14. **Robot envelope**: test `Wrap()` produces valid TOON and JSON envelopes for success and error cases
 15. **Remediation mapping**: test each API error code maps to correct exit code and remediation command
 16. **`--robot-capabilities`**: verify output is valid JSON with all commands, exit codes, error codes, state machine, and env vars
