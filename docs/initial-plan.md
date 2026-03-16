@@ -272,6 +272,7 @@ stacks.
 **Jobs:**
 
 1. **`changes`** — detect which paths changed
+   - Runs on `ubuntu-latest`
    - Starts with `actions/checkout@v6`; push-based change detection needs the
      repository checkout even though pull-request mode can use the GitHub API
    - Uses `dorny/paths-filter@v4`
@@ -289,6 +290,8 @@ stacks.
      ```
 
 2. **`firmware-build`** — build the ESP-IDF project and report size
+   - Needs `changes`
+   - Runs on `ubuntu-latest`
    - Condition: `needs.changes.outputs.firmware == 'true' || needs.changes.outputs.shared == 'true'`
    - Starts with `actions/checkout@v6`
    - Uses `espressif/esp-idf-ci-action@v1` with `esp_idf_version: v5.4`,
@@ -298,6 +301,8 @@ stacks.
    - Uploads `firmware/build/esp32-evb-relay.bin` as a workflow artifact
 
 3. **`cli-lint`** — lint Go code
+   - Needs `changes`
+   - Runs on `ubuntu-latest`
    - Condition: `needs.changes.outputs.cli == 'true' || needs.changes.outputs.shared == 'true'`
    - Starts with `actions/checkout@v6`
    - Uses `actions/setup-go@v6` with
@@ -305,6 +310,8 @@ stacks.
    - Uses `golangci/golangci-lint-action@v9` with `working-directory: cli`
 
 4. **`cli-test`** — run Go tests
+   - Needs `changes`
+   - Runs on `ubuntu-latest`
    - Condition: `needs.changes.outputs.cli == 'true' || needs.changes.outputs.shared == 'true'`
    - Starts with `actions/checkout@v6`
    - Uses `actions/setup-go@v6` with
@@ -312,6 +319,8 @@ stacks.
    - Runs in `cli/`: `go test -race -coverprofile=coverage.out ./...`
 
 5. **`cli-build`** — verify Go compilation
+   - Needs `changes`
+   - Runs on `ubuntu-latest`
    - Condition: `needs.changes.outputs.cli == 'true' || needs.changes.outputs.shared == 'true'`
    - Starts with `actions/checkout@v6`
    - Uses `actions/setup-go@v6` with
@@ -333,6 +342,7 @@ jobs. Each job starts with `actions/checkout@v6` using `fetch-depth: 0` so tag
 history is available to GoReleaser and `git-cliff`:
 
 1. **`firmware`** — build versioned firmware binary
+   - Runs on `ubuntu-latest`
    - Uses `espressif/esp-idf-ci-action@v1` with
      `path: firmware`, command: `idf.py -DPROJECT_VER=X.Y.Z build`
      to embed the version in the binary
@@ -341,7 +351,8 @@ history is available to GoReleaser and `git-cliff`:
    - Uploads both as workflow artifacts
 
 2. **`cli`** — build CLI binaries via GoReleaser
-   - Starts with `actions/setup-go@v6` using
+   - Runs on `ubuntu-latest`
+   - After checkout, uses `actions/setup-go@v6` with
      `go-version-file: cli/go.mod`, `cache-dependency-path: cli/go.sum`
    - Uses `goreleaser/goreleaser-action@v7` with `version: "~> v2"`,
      `workdir: cli`, and `args: release --clean`
@@ -350,12 +361,14 @@ history is available to GoReleaser and `git-cliff`:
    - GoReleaser creates the release; later jobs augment it
 
 3. **`changelog`** — generate release notes
+   - Runs on `ubuntu-latest`
    - Installs `git-cliff` and runs `git-cliff --latest --strip header`
      against the full fetched tag history
    - Uploads the changelog text as a workflow artifact
 
 4. **`release`** — assemble final GitHub Release
    - Depends on: `firmware`, `cli`, `changelog`
+   - Runs on `ubuntu-latest`
    - Downloads firmware artifact and changelog artifact
    - Uploads `esp32-evb-relay-vX.Y.Z.bin` + `.sha256` to the existing
      GitHub Release (created by GoReleaser)
