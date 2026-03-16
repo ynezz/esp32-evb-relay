@@ -343,7 +343,9 @@ func Encode(w io.Writer, v any) error
 
 #### Step 12c — Robot envelope
 
-Every `--robot` response wraps output in a structured envelope.
+Every non-streaming `--robot` response wraps output in a structured envelope.
+`input watch` is the one explicit exception and uses NDJSON instead (see Step
+12e).
 
 **Success envelope (TOON):**
 ```
@@ -465,6 +467,7 @@ func runRelayOn(cmd *cobra.Command, args []string) error {
     result, deviceCtx, err := client.SetRelay(target, true)
 
     if robotMode {
+        // Writes the envelope and returns a typed exit error on non-zero exit.
         return robot.Wrap(cmd, os.Stdout, robot.WrapOpts{
             Data:          result,
             DeviceContext: deviceCtx,
@@ -480,8 +483,10 @@ func runRelayOn(cmd *cobra.Command, args []string) error {
 
 `robot.Wrap()` handles: building the envelope (command, timing, exit code,
 device context), error → remediation mapping, populating `next` suggestions,
-and marshaling to TOON or JSON. `main()` remains responsible for converting the
-classified result into the process exit code.
+and marshaling to TOON or JSON. On non-zero outcomes it returns a typed error
+that carries the desired exit code after the envelope has already been written,
+and the root command must intercept that type so Cobra does not print a second
+human-oriented error line.
 
 #### Step 12d — `--robot-capabilities` introspection
 
@@ -582,9 +587,12 @@ stream is unbounded, so NDJSON is the better fit.
 - **json**: command result as JSON, without the robot envelope
 - **plain**: bare values, one per line (for piping)
 
-**Robot formats** (wrapped in envelope):
+**Robot formats** (for bounded request/response commands):
 - **toon** (default in `--robot`): spec-compatible TOON envelope + data
 - **json** (`--robot --format json`): JSON envelope + data
+
+`evb-relay --robot input watch` is a streaming exception: it uses NDJSON, not a
+TOON/JSON envelope.
 
 **Exit codes:**
 
@@ -985,7 +993,7 @@ is intentionally app-only.
 14. **Robot envelope**: test `Wrap()` produces valid TOON and JSON envelopes for success and error cases
 15. **Remediation mapping**: test each API error code maps to correct exit code and remediation command
 16. **`--robot-capabilities`**: verify output is valid JSON with all commands, exit codes, error codes, state machine, and env vars
-17. **`modio:all` expansion**: test `modio:all=off` expands to 4 individual targets, `onboard:all=on` to 2
+17. **`modio:all` resolution**: test `modio:all=off` becomes one bulk MOD-IO bitmap request, while `onboard:all=on` becomes 2 onboard relay targets
 18. **Batch results**: test partial failure produces per-target results with `PARTIAL_FAILURE` error code
 19. **NDJSON watch**: test stream header, event lines, and stream_end are valid NDJSON
 20. **Exit codes**: test each error condition produces the correct exit code (0-7)
