@@ -70,7 +70,7 @@ esp32-evb-relay/
   - `0x10` + bitmask → set relay outputs (bits 0-3)
   - `0x20` → read digital inputs (1 byte)
   - `0x30-0x33` → read analog inputs (2 bytes each, 10-bit)
-- There is no separate relay-state readback command in the Olimex firmware; keep the last written relay bitmap in firmware state and reissue the command byte before each input/ADC read
+- There is no separate relay-state readback command in the Olimex firmware; persist the last commanded relay bitmap in `device_config`, replay it during boot so controller and hardware state converge after an ESP32 reboot, and reissue the command byte before each input/ADC read
 - `mod_io_init(bus_handle)`, `mod_io_is_present()`, graceful failure if module absent
 
 ### Step 4b — `input_monitor` component
@@ -103,7 +103,7 @@ Base: `http://<host>/api/v1`
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/v1/status` | Uptime, FW version, network info, MOD-IO presence, free heap |
+| GET | `/api/v1/status` | Uptime, FW version, network info, MOD-IO presence/sync state, free heap |
 | GET | `/api/v1/relays` | All relay states (onboard + modio unified) |
 | GET | `/api/v1/relays/onboard` | Onboard relay states |
 | PUT | `/api/v1/relays/onboard/{id}` | Set onboard relay `{"state": true}` |
@@ -154,7 +154,7 @@ register long-running tasks with the task WDT
 ## Phase 2: CLI Client (Go)
 
 ### Step 10 — Scaffold Go project
-- `go.mod` with `github.com/spf13/cobra`, `github.com/hashicorp/mdns` (or `github.com/grandcat/zeroconf`)
+- `go.mod` with `github.com/spf13/cobra`, `github.com/hashicorp/mdns`, `github.com/BurntSushi/toml`
 - Global flags: `--host/-H`, `--api-key/-k`, `--format/-f` (table/json/plain), `--timeout/-t`
 - Config file: `~/.config/evb-relay/config.toml`, env var `EVB_RELAY_API_KEY` override
 
@@ -206,12 +206,12 @@ Exit codes: 0=success, 1=general, 2=network, 3=auth, 4=not found, 5=bad argument
 ## Verification
 
 1. **Build firmware**: `cd firmware && idf.py set-target esp32 && idf.py build`
-2. **Flash**: `idf.py -p /dev/tty.usbserial-120 flash monitor`
-3. **Verify boot**: serial console shows init sequence, Ethernet IP acquired
-4. **Test API**: `curl http://<ip>/api/v1/status` returns JSON
-5. **Test relays**: `curl -X PUT -H "Authorization: Bearer <key>" -d '{"state":true}' http://<ip>/api/v1/relays/onboard/1` — hear relay click
-6. **Test MOD-IO**: `curl http://<ip>/api/v1/relays/modio` — returns 4 relay states (if MOD-IO connected)
+2. **Flash**: `idf.py -p <serial-port> flash monitor`
+3. **Verify boot**: serial console shows init sequence, prints the first-boot API token if one was generated, and reports an Ethernet IP
+4. **Test API**: `curl -H "Authorization: Bearer <key>" http://<ip>/api/v1/status` returns JSON
+5. **Test relays**: `curl -X PUT -H "Authorization: Bearer <key>" -H "Content-Type: application/json" -d '{"state":true}' http://<ip>/api/v1/relays/onboard/1` — hear relay click
+6. **Test MOD-IO**: `curl -H "Authorization: Bearer <key>" http://<ip>/api/v1/relays/modio` — returns 4 relay states when MOD-IO is connected, otherwise `503 MODIO_NOT_PRESENT`
 7. **Build CLI**: `cd cli && go build -o evb-relay .`
-8. **CLI test**: `./evb-relay --host <ip> status` returns device info
-9. **CLI relay control**: `./evb-relay relay on onboard:1` — relay clicks
-10. **OTA**: `./evb-relay ota flash firmware/build/esp32-evb-relay.bin` — device reboots with new firmware
+8. **CLI test**: `./evb-relay --host <ip> --api-key <key> status` returns device info
+9. **CLI relay control**: `./evb-relay --host <ip> --api-key <key> relay on onboard:1` — relay clicks
+10. **OTA**: `./evb-relay --host <ip> --api-key <key> ota flash firmware/build/esp32-evb-relay.bin` — device reboots with new firmware
