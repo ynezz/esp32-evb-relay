@@ -176,8 +176,8 @@ register long-running tasks with the task WDT
 
 ### Step 10 — Scaffold Go project
 - `go.mod` with `github.com/spf13/cobra`, `github.com/hashicorp/mdns`, `github.com/BurntSushi/toml`
-- Global flags: `--host/-H`, `--api-key/-k`, `--format/-f` (table/json/plain), `--timeout/-t`
-- Config file: `~/.config/evb-relay/config.toml`, env var `EVB_RELAY_API_KEY` override
+- Global flags: `--host/-H`, `--api-token/-k`, `--format/-f` (table/json/plain), `--timeout/-t`
+- Config file: `os.UserConfigDir()/evb-relay/config.toml` so the CLI uses the platform-native config directory on Linux, macOS, and Windows; env var `EVB_RELAY_API_TOKEN` override
 
 ### Step 11 — `client/client.go`
 - HTTP client wrapper: base URL, auth header injection, timeout, error handling
@@ -202,7 +202,7 @@ evb-relay config show                   # Read device config
 evb-relay config set poll_interval_ms=200  # Change input polling interval
 evb-relay discover                      # mDNS browse
 evb-relay ota flash <firmware.bin>      # OTA update
-evb-relay completion bash|zsh|fish      # Shell completions
+evb-relay completion bash|zsh|fish|powershell  # Shell completions
 ```
 
 If the firmware reports `MODIO_STATE_UNKNOWN` after boot, use `evb-relay relay set ...` with all four MOD-IO relays once before relying on single-relay `on`/`off` commands.
@@ -553,6 +553,6 @@ is intentionally app-only.
 6. **Test relays**: `curl -X PUT -H "Authorization: Bearer <key>" -H "Content-Type: application/json" -d '{"state":true}' http://<ip>/api/v1/relays/onboard/1` — hear relay click
 7. **Test MOD-IO sync model**: with `modio_boot_policy=leave_unchanged`, `GET /api/v1/relays/modio` returns `409 MODIO_STATE_UNKNOWN` after boot; `PUT /api/v1/relays/modio` with all 4 states establishes sync, after which `GET` returns the authoritative 4-relay bitmap
 8. **Build CLI**: `cd cli && go build -o evb-relay .`
-9. **CLI test**: `./cli/evb-relay --host <ip> --api-key <key> status` returns device info
-10. **CLI relay control**: `./cli/evb-relay --host <ip> --api-key <key> relay on onboard:1` — relay clicks
-11. **OTA**: `./cli/evb-relay --host <ip> --api-key <key> ota flash firmware/build/esp32-evb-relay.bin` — device reboots with new firmware
+9. **CLI test**: `./cli/evb-relay --host <ip> --api-token <key> status` returns device info
+10. **CLI relay control**: `./cli/evb-relay --host <ip> --api-token <key> relay on onboard:1` — relay clicks
+11. **OTA**: `./cli/evb-relay --host <ip> --api-token <key> ota flash firmware/build/esp32-evb-relay.bin` — device reboots with new firmware
