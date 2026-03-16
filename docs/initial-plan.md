@@ -91,7 +91,7 @@ esp32-evb-relay/
 ### Step 5 — `network` component
 - Ethernet init: LAN8710A PHY, PHY address `0`, no dedicated ESP32-controlled PHY reset GPIO on current ESP32-EVB revisions (`reset_gpio_num = -1` unless board-specific testing proves otherwise), RMII clock input on GPIO0, MDC/MDIO on GPIO23/18
 - Event-driven: wait for IP via `IP_EVENT_ETH_GOT_IP`
-- `network_wait_for_ip(timeout_ms)` blocks `app_main` until connected
+- `network_wait_for_ip(timeout_ms)` blocks `app_main` until connected or returns a timeout/error; in the Ethernet-only phase, treat timeout as a startup failure instead of silently continuing without a usable control plane
 - Architecture allows a later WiFi phase (separate init path, shared event handlers)
 - mDNS: hostname `esp32-evb-relay`, register `_http._tcp` with TXT records (fw_version, board type)
 
