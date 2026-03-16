@@ -1,0 +1,180 @@
+# ESP32-EVB Relay Controller — Firmware + CLI
+
+## Context
+
+Build a networked relay controller for Olimex ESP32-EVB + MOD-IO expansion. The system allows agents to control power supply to boards remotely over Ethernet (phase 1) or WiFi (phase 2) via a REST API, with a Go CLI for human and automation use.
+
+**Hardware:**
+- ESP32-EVB: 2 onboard relays (GPIO32, GPIO33), Ethernet (LAN8710A), UEXT I2C (SDA=GPIO13, SCL=GPIO16)
+- MOD-IO (I2C slave 0x58): 4 relays, 4 digital inputs, 4 analog inputs (10-bit)
+- Serial: `/dev/tty.usbserial-120`
+
+---
+
+## Project Structure
+
+```
+esp32-evb-relay/
+├── firmware/                        # ESP-IDF v5.x project
+│   ├── CMakeLists.txt
+│   ├── sdkconfig.defaults
+│   ├── partitions.csv               # OTA-capable partition table
+│   ├── main/
+│   │   ├── CMakeLists.txt
+│   │   ├── idf_component.yml        # mdns dependency
+│   │   ├── main.c                   # app_main: init orchestration
+│   │   └── Kconfig.projbuild
+│   └── components/
+│       ├── board/                    # Pin defs, I2C bus init
+│       ├── relay/                    # Onboard relay GPIO driver
+│       ├── mod_io/                   # MOD-IO I2C protocol driver
+│       ├── network/                  # Ethernet (+ WiFi placeholder)
+│       ├── rest_api/                 # HTTP server + JSON handlers
+│       ├── auth/                     # Optional API key middleware
+│       └── ota/                      # OTA firmware update
+├── cli/                             # Go CLI (cobra)
+│   ├── go.mod
+│   ├── main.go
+│   ├── cmd/                         # Commands: relay, input, status, ota, discover
+│   ├── client/                      # HTTP client wrapper
+│   └── internal/                    # Output formatters, mDNS discovery
+└── scripts/
+    ├── flash.sh
+    └── provision.sh
+```
+
+---
+
+## Phase 1: Firmware (ESP-IDF, C)
+
+### Step 1 — Scaffold ESP-IDF project
+- `firmware/CMakeLists.txt`, `firmware/main/CMakeLists.txt`
+- `sdkconfig.defaults` with: 4MB flash, custom partition table, Ethernet EMAC enabled, task WDT, OTA rollback
+- `partitions.csv`: nvs, phy_init, otadata, ota_0 (~1.9MB), ota_1 (~1.9MB)
+- `.gitignore` (sdkconfig, build/, managed_components/)
+
+### Step 2 — `board` component
+- Pin constants: `BOARD_RELAY1_GPIO=32`, `BOARD_RELAY2_GPIO=33`, `BOARD_I2C_SDA=13`, `BOARD_I2C_SCL=16`, `BOARD_ETH_MDC=23`, `BOARD_ETH_MDIO=18`, `BOARD_BUTTON=34`
+- `board_init()`: configure I2C master bus (100kHz), button GPIO
+
+### Step 3 — `relay` component
+- `relay_init()`, `relay_set(id, state)`, `relay_get(id)`, `relay_toggle(id)`
+- GPIO output, mutex for thread safety, tracks state in memory
+
+### Step 4 — `mod_io` component
+- Uses ESP-IDF v5.x `i2c_master` API (not deprecated `i2c_cmd_link`)
+- I2C protocol:
+  - `0x10` + bitmask → set relay outputs (bits 0-3)
+  - `0x20` → read digital inputs (1 byte)
+  - `0x30-0x33` → read analog inputs (2 bytes each, 10-bit)
+  - `0x40` → read current relay states
+- `mod_io_init(bus_handle)`, `mod_io_is_present()`, graceful failure if module absent
+
+### Step 5 — `network` component
+- Ethernet init: LAN8710A PHY, external RMII clock on GPIO0, MDC/MDIO on GPIO23/18
+- Event-driven: wait for IP via `IP_EVENT_ETH_GOT_IP`
+- `network_wait_for_ip(timeout_ms)` blocks `app_main` until connected
+- Architecture allows WiFi addition in phase 2 (separate init path, shared event handlers)
+- mDNS: hostname `esp32-evb-relay`, register `_http._tcp` with TXT records (fw_version, board type)
+
+### Step 6 — `auth` component
+- API key stored in NVS, loaded at boot
+- `auth_check(httpd_req_t*)` validates `Authorization: Bearer <token>` header
+- **Optional, enabled by default**. If no key configured → auth disabled + warning log
+- Constant-time comparison
+
+### Step 7 — `rest_api` component
+Base: `http://<host>/api/v1`
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/status` | Uptime, FW version, network info, MOD-IO presence, free heap |
+| GET | `/api/v1/relays` | All relay states (onboard + modio unified) |
+| GET | `/api/v1/relays/onboard` | Onboard relay states |
+| PUT | `/api/v1/relays/onboard/{id}` | Set onboard relay `{"state": true}` |
+| POST | `/api/v1/relays/onboard/{id}/toggle` | Toggle onboard relay |
+| GET | `/api/v1/relays/modio` | MOD-IO relay states |
+| PUT | `/api/v1/relays/modio/{id}` | Set MOD-IO relay |
+| PUT | `/api/v1/relays/modio` | Bulk set `{"states": [true,false,true,false]}` |
+| GET | `/api/v1/inputs/digital` | Read all digital inputs |
+| GET | `/api/v1/inputs/analog` | Read all analog inputs |
+| GET | `/api/v1/inputs/analog/{id}` | Read single analog input |
+| POST | `/api/v1/ota` | Upload firmware binary (octet-stream) |
+
+Error format: `{"error": {"code": "RELAY_NOT_FOUND", "message": "...", "status": 404}}`
+
+URI parsing: helper function `parse_id_from_uri()` since ESP-IDF httpd lacks native path params.
+
+### Step 8 — `ota` component
+- `POST /api/v1/ota` streams binary via `esp_ota_begin/write/end`
+- Sets boot partition, reboots after 2s delay
+- Rollback enabled via `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`
+
+### Step 9 — `main.c` boot sequence
+```
+nvs_flash_init → event_loop_create → board_init → relay_init →
+mod_io_init → network_init → wait_for_ip → mdns_register →
+auth_init → rest_api_start → watchdog task
+```
+
+---
+
+## Phase 2: CLI Client (Go)
+
+### Step 10 — Scaffold Go project
+- `go.mod` with `github.com/spf13/cobra`, `github.com/hashicorp/mdns` (or `github.com/grandcat/zeroconf`)
+- Global flags: `--host/-H`, `--api-key/-k`, `--format/-f` (table/json/plain), `--timeout/-t`
+- Config file: `~/.config/evb-relay/config.toml`, env var `EVB_RELAY_API_KEY` override
+
+### Step 11 — `client/client.go`
+- HTTP client wrapper: base URL, auth header injection, timeout, error handling
+- Maps HTTP errors to structured Go errors
+
+### Step 12 — Commands
+```
+evb-relay relay list                    # All relay states
+evb-relay relay on onboard:1            # Target format: <group>:<id>
+evb-relay relay off modio:3
+evb-relay relay toggle onboard:2
+evb-relay relay set onboard:1=on modio:2=off   # Bulk
+
+evb-relay input digital                 # All digital inputs
+evb-relay input analog                  # All analog inputs
+evb-relay input analog 2                # Single channel
+
+evb-relay status                        # Device health
+evb-relay discover                      # mDNS browse
+evb-relay ota flash <firmware.bin>      # OTA update
+evb-relay completion bash|zsh|fish      # Shell completions
+```
+
+### Step 13 — Output formats
+- **table** (default): aligned columns via `text/tabwriter`
+- **json**: raw API response
+- **plain**: bare values, one per line (for piping)
+
+Exit codes: 0=success, 1=general, 2=network, 3=auth, 4=not found, 5=bad argument
+
+---
+
+## Phase 3 (future): WiFi support
+- Add WiFi STA init in `network` component (credentials from NVS)
+- Fallback: if Ethernet doesn't get IP within timeout, try WiFi
+- Add `POST /api/v1/config/wifi` endpoint for setting credentials
+- Add `evb-relay config wifi` CLI command
+- Architecture in phase 1 already accommodates this (event handlers, NVS)
+
+---
+
+## Verification
+
+1. **Build firmware**: `cd firmware && idf.py set-target esp32 && idf.py build`
+2. **Flash**: `idf.py -p /dev/tty.usbserial-120 flash monitor`
+3. **Verify boot**: serial console shows init sequence, Ethernet IP acquired
+4. **Test API**: `curl http://<ip>/api/v1/status` returns JSON
+5. **Test relays**: `curl -X PUT -H "Authorization: Bearer <key>" -d '{"state":true}' http://<ip>/api/v1/relays/onboard/1` — hear relay click
+6. **Test MOD-IO**: `curl http://<ip>/api/v1/relays/modio` — returns 4 relay states (if MOD-IO connected)
+7. **Build CLI**: `cd cli && go build -o evb-relay .`
+8. **CLI test**: `./evb-relay --host <ip> status` returns device info
+9. **CLI relay control**: `./evb-relay relay on onboard:1` — relay clicks
+10. **OTA**: `./evb-relay ota flash firmware/build/esp32-evb-relay.bin` — device reboots with new firmware
