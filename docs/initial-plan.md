@@ -62,7 +62,8 @@ esp32-evb-relay/
 
 ### Step 3 — `relay` component
 - `relay_init()`, `relay_set(id, state)`, `relay_get(id)`, `relay_toggle(id)`
-- GPIO output, mutex for thread safety, tracks state in memory
+- Drive both onboard relays to an explicit boot default during `relay_init()`; default to `off` so an ESP32 reboot does not accidentally energize local loads
+- GPIO output, mutex for thread safety, tracks state in memory after initialization
 
 ### Step 4 — `mod_io` component
 - Uses ESP-IDF v5.x `i2c_master` API (not deprecated `i2c_cmd_link`)
