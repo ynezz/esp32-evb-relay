@@ -323,11 +323,11 @@ independent single-relay writes.
 
 #### Step 12b — TOON encoder
 
-Minimal Go TOON encoder, output-only. If we adopt TOON, it must emit
-spec-compatible TOON rather than an ad hoc `key=value` dialect. The reference
-TOON project reports materially lower token counts than pretty-printed JSON on
-mixed benchmarks, but the real savings depend on payload shape and are best on
-uniform tabular data.
+Minimal Go TOON encoder, output-only. Because `--robot` uses TOON by default,
+the encoder must emit spec-compatible TOON rather than an ad hoc `key=value`
+dialect. The reference TOON project reports materially lower token counts than
+pretty-printed JSON on mixed benchmarks, but the real savings depend on payload
+shape and are best on uniform tabular data.
 
 **Capabilities:**
 - Nested objects via indentation
