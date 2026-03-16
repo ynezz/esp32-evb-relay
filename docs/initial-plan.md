@@ -357,7 +357,8 @@ builds:
       - -s -w
       - -X main.version={{.Version}}
       - -X main.commit={{.Commit}}
-      - -X main.date={{.Date}}
+      - -X main.date={{.CommitDate}}
+    mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:
   - formats:
@@ -381,7 +382,8 @@ changelog:
   release assets instead of inheriting the repository name
 - `binary: evb-relay` makes the extracted executable match the CLI command name
 - `CGO_ENABLED=0` for static binaries
-- `-trimpath` for reproducible builds
+- `-trimpath` plus commit-derived timestamps keep repeat builds from the same
+  tag closer to reproducible
 - 6 targets: linux/darwin/windows × amd64/arm64
 - Archives: `.tar.gz` (Unix), `.zip` (Windows)
 - `draft: true` matches the release workflow's expectation that GoReleaser
@@ -442,7 +444,8 @@ commit_parsers = [
   `PROJECT_VER` is not injected by the release pipeline.
 
 - **CLI:** GoReleaser injects the version via ldflags into `main.version`,
-  `main.commit`, and `main.date`. The `--version` flag reads these values.
+  `main.commit`, and a commit-derived `main.date`. The `--version` flag reads
+  these values.
 
 - **Semver policy:**
   - **Major** — breaking REST API changes, breaking CLI interface changes
