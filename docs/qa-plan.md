@@ -295,6 +295,18 @@ These reset static state between test cases without requiring process
 restart. The `UNIT_TEST` define is set only by the host test
 `CMakeLists.txt`.
 
+### Test Hygiene
+
+- Device and integration tests must not depend on execution order or on
+  leftover state from prior runs
+- Tests that change relay outputs must restore safe defaults before exit
+  (`onboard` OFF, `mod_io` all-off or other explicitly documented safe
+  state)
+- Tests that mutate config or NVS must restore the prior state, or wipe and
+  reinitialize the test namespace in fixture teardown
+- Shared pytest fixtures should own cross-test cleanup so failures in one
+  case do not poison later cases
+
 ### Stub Design Principles
 
 **GPIO stubs (`gpio_stubs.c`):**
@@ -339,8 +351,8 @@ restart. The `UNIT_TEST` define is set only by the host test
 
 ### Tool
 
-`astyle_py` pinned to AStyle 3.4.7 — the same formatter/version used by
-the current ESP-IDF `tools/format.sh`.
+`astyle_py==1.0.5` driving AStyle 3.4.7 — matching the current ESP-IDF
+pre-commit and `tools/format.sh` configuration.
 
 ### Style
 
@@ -472,7 +484,7 @@ ci: format-check build test
 ci-full: ci test-device test-integration
 
 setup:
-    python3 -m pip install astyle_py pytest-embedded \
+    python3 -m pip install astyle_py==1.0.5 pytest-embedded \
         pytest-embedded-serial-esp pytest-embedded-idf
     cp tools/pre-commit-hook.sh .git/hooks/pre-commit
     chmod +x .git/hooks/pre-commit
@@ -510,7 +522,7 @@ if [ "${#STAGED_FILES[@]}" -eq 0 ]; then
 fi
 
 if ! command -v astyle_py &>/dev/null; then
-    echo "ERROR: astyle_py not found. Run: python3 -m pip install astyle_py"
+    echo "ERROR: astyle_py not found. Run: python3 -m pip install astyle_py==1.0.5"
     exit 1
 fi
 
@@ -603,7 +615,7 @@ Add to existing commit prefix list:
 ## 8. Dependencies
 
 ```bash
-python3 -m pip install astyle_py \
+python3 -m pip install astyle_py==1.0.5 \
     pytest-embedded \
     pytest-embedded-serial-esp \
     pytest-embedded-idf
