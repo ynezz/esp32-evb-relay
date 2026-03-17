@@ -255,7 +255,7 @@ bool rest_api_parse_id_from_uri(const char *uri, const char *prefix, uint32_t *o
     errno = 0;
     parsed_id = strtoul(suffix, &endptr, 10);
     if ((errno != 0) || (endptr == suffix) || (*endptr != '\0') || (parsed_id == 0UL) ||
-        (parsed_id > UINT32_MAX)) {
+            (parsed_id > UINT32_MAX)) {
         return false;
     }
 

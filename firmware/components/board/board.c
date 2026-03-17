@@ -16,10 +16,10 @@ esp_err_t board_init(void)
 {
     const gpio_config_t button_config = {
         .pin_bit_mask = 1ULL << BOARD_BUTTON,
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,
+                             .mode = GPIO_MODE_INPUT,
+                             .pull_up_en = GPIO_PULLUP_DISABLE,
+                             .pull_down_en = GPIO_PULLDOWN_DISABLE,
+                             .intr_type = GPIO_INTR_DISABLE,
     };
     const i2c_master_bus_config_t i2c_bus_config = {
         .i2c_port = BOARD_I2C_PORT,

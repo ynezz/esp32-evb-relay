@@ -190,7 +190,7 @@ static void test_device_config_key_descriptors(void)
         TEST_ASSERT_EQUAL(expected[i].restart_required, descriptor->restart_required);
     }
 
-    TEST_ASSERT_NULL(device_config_get_key_descriptor((device_config_key_t)-1));
+    TEST_ASSERT_NULL(device_config_get_key_descriptor((device_config_key_t) -1));
     TEST_ASSERT_NULL(device_config_get_key_descriptor((device_config_key_t)DEVICE_CONFIG_KEY_COUNT));
 }
 

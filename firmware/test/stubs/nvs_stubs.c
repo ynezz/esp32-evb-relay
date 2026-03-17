@@ -80,7 +80,7 @@ static nvs_stub_entry_t *nvs_stub_find_entry(uint8_t namespace_index, const char
             continue;
         }
         if ((s_entries[i].namespace_index == namespace_index) &&
-            (strcmp(s_entries[i].key, key) == 0)) {
+                (strcmp(s_entries[i].key, key) == 0)) {
             return &s_entries[i];
         }
     }

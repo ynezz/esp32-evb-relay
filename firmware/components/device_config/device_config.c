@@ -29,46 +29,46 @@ static const char *TAG = "device_config";
 static const device_config_key_metadata_t s_key_metadata[DEVICE_CONFIG_KEY_COUNT] = {
     [DEVICE_CONFIG_KEY_API_TOKEN] = {
         .descriptor =
-            {
-                .key = DEVICE_CONFIG_KEY_API_TOKEN,
-                .name = "api_token",
-                .secret = true,
-                .live = true,
-                .restart_required = false,
-            },
+        {
+            .key = DEVICE_CONFIG_KEY_API_TOKEN,
+            .name = "api_token",
+            .secret = true,
+            .live = true,
+            .restart_required = false,
+        },
         .nvs_key = "api_token",
     },
     [DEVICE_CONFIG_KEY_POLL_INTERVAL_MS] = {
         .descriptor =
-            {
-                .key = DEVICE_CONFIG_KEY_POLL_INTERVAL_MS,
-                .name = "poll_interval_ms",
-                .secret = false,
-                .live = true,
-                .restart_required = false,
-            },
+        {
+            .key = DEVICE_CONFIG_KEY_POLL_INTERVAL_MS,
+            .name = "poll_interval_ms",
+            .secret = false,
+            .live = true,
+            .restart_required = false,
+        },
         .nvs_key = "poll_ms",
     },
     [DEVICE_CONFIG_KEY_HOSTNAME] = {
         .descriptor =
-            {
-                .key = DEVICE_CONFIG_KEY_HOSTNAME,
-                .name = "hostname",
-                .secret = false,
-                .live = false,
-                .restart_required = true,
-            },
+        {
+            .key = DEVICE_CONFIG_KEY_HOSTNAME,
+            .name = "hostname",
+            .secret = false,
+            .live = false,
+            .restart_required = true,
+        },
         .nvs_key = "hostname",
     },
     [DEVICE_CONFIG_KEY_MODIO_BOOT_POLICY] = {
         .descriptor =
-            {
-                .key = DEVICE_CONFIG_KEY_MODIO_BOOT_POLICY,
-                .name = "modio_boot_policy",
-                .secret = false,
-                .live = false,
-                .restart_required = false,
-            },
+        {
+            .key = DEVICE_CONFIG_KEY_MODIO_BOOT_POLICY,
+            .name = "modio_boot_policy",
+            .secret = false,
+            .live = false,
+            .restart_required = false,
+        },
         .nvs_key = "modio_policy",
     },
 };
@@ -114,7 +114,7 @@ static esp_err_t device_config_init_nvs_flash(void)
 static esp_err_t device_config_validate_poll_interval_ms(uint32_t poll_interval_ms)
 {
     if ((poll_interval_ms < DEVICE_CONFIG_MIN_POLL_INTERVAL_MS) ||
-        (poll_interval_ms > DEVICE_CONFIG_MAX_POLL_INTERVAL_MS)) {
+            (poll_interval_ms > DEVICE_CONFIG_MAX_POLL_INTERVAL_MS)) {
         return ESP_ERR_INVALID_ARG;
     }
 
