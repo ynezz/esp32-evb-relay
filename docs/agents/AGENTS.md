@@ -10,11 +10,27 @@ We do not care about backwards compatibility—we're in early development with n
 - Never create wrapper functions for deprecated APIs
 - Just fix the code directly
 
-## Compiler Checks (CRITICAL)
+## Quality Gates (CRITICAL)
 
-**After any substantive code changes, you MUST verify no errors were introduced:**
+**After any firmware code changes, you MUST run `just ci` before committing:**
 
-If you see errors, **carefully understand and resolve each issue**. Read sufficient context to fix them the RIGHT way.
+```bash
+just ci    # format-check + build + host tests
+```
+
+If you changed component behavior, also run `just test-device` if
+hardware is available.
+
+If you see errors, **carefully understand and resolve each issue**. Read
+sufficient context to fix them the RIGHT way.
+
+## Test Requirements
+
+- New or changed firmware public APIs MUST have corresponding Tier 1
+  host tests when the code can run in the host harness; otherwise add
+  the narrowest possible Tier 2 regression coverage
+- Bug fixes MUST include a regression test
+- Run `just format` before committing any firmware C/H files
 
 ## Third-Party Library Usage
 
@@ -193,6 +209,41 @@ bv --robot-insights | jq '.Cycles'                         # Circular deps (must
 ### Commit Policy
 Agents are expected to commit their changes after completing each task or logical unit of work. Do not leave uncommitted changes. Follow the git commit guidelines below.
 
+### Conventional Commits
+
+All commit messages follow the
+[`Conventional Commits`](https://www.conventionalcommits.org/) format:
+
+```text
+<type>[(<scope>)][!]: <description>
+```
+
+- Scopes: `firmware`, `cli`, or omit for cross-cutting changes
+- Scope and `!` are optional; use `!` or a `BREAKING CHANGE:` footer
+  when a commit introduces a major-version change
+- Types and changelog mapping:
+
+| Type | Changelog Group | Included |
+|------|-----------------|----------|
+| `feat` | Features | yes |
+| `fix` | Bug Fixes | yes |
+| `refactor` | Refactoring | yes |
+| `perf` | Performance | yes |
+| `docs` | Documentation | yes |
+| `ci` | CI/CD | yes |
+| `test` | Testing | yes |
+| `build` | Build System | yes |
+| `chore` | *(filtered out)* | no |
+
+Examples:
+
+```text
+feat(firmware): add SSE heartbeat to rest_api component
+fix(cli): surface MODIO_NOT_PRESENT in relay commands
+ci: add firmware binary size tracking to CI
+docs: document QA gates for agents
+```
+
 ### Git workflow after QA
   - Now, based on your knowledge of the project, commit all changed files now in
     a series of logically connected groupings with super detailed commit messages
@@ -202,13 +253,10 @@ Agents are expected to commit their changes after completing each task or logica
   - Use `git -c commit.gpgsign=false commit -s -m` to avoid signing
   - Avoid one `-m` per wrapped line (that inserts blank lines); use a
     single body with embedded newlines or a message file instead
-  - Commit subject should include `prefix: ...` that matches the
-    top-level tree/area being changed — **NEVER put bead/issue IDs
-    in the subject line**
-    - Makefile: ...
-    - tools: ...
-    - AGENTS: ...
-    - crates: ...
+  - Commit subject must use the conventional commit format documented
+    above — **NEVER put bead/issue IDs in the subject line**
+  - Prefer scopes only when they add signal: `firmware`, `cli`, or omit
+    them for cross-cutting changes
   - Link bead IDs using **git trailers** at the end of the commit
     message body (after a blank line), e.g.:
     - `References: br-123` — related work
@@ -290,6 +338,7 @@ When you need clarification or user input, format questions in a structured way:
 **Before ending any session, run this checklist:**
 
 ```bash
+just ci                 # Quality gate (MUST pass)
 git status              # Check what changed
 git add <files>         # Stage code changes
 br sync --flush-only    # Export beads to JSONL
@@ -315,7 +364,7 @@ git push                # Push to remote
 **MANDATORY WORKFLOW:**
 
 1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
+2. **Run quality gates** (if code changed) - `just ci` (or `just ci-full` when the self-hosted hardware lane is available)
 3. **Update issue status** - Close finished work, update in-progress items
 4. **Sync beads** - `br sync --flush-only` to export to JSONL
 5. **Hand off** - Provide context for next session
