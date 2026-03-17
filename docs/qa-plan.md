@@ -322,17 +322,21 @@ restart. The `UNIT_TEST` define is set only by the host test
 
 ### Tool
 
-`astyle_py` (AStyle 3.4.7) — same formatter used by ESP-IDF upstream.
+`astyle_py` pinned to AStyle 3.4.7 — the same formatter/version used by
+the current ESP-IDF `tools/format.sh`.
 
 ### Style
 
-OTBS (One True Brace Style), 4-space indent, 120-character line limit.
+OTBS (One True Brace Style), 4-space indent. Follow ESP-IDF's AStyle
+rules for mechanical formatting and treat 120 columns as a review
+guideline unless a separate line-length check is added.
 
 ### Flags
 
-Matching `/home/ubuntu/esp/esp-idf/tools/format.sh`:
+Matching the current ESP-IDF `tools/format.sh` flag set:
 
 ```
+--astyle-version=3.4.7
 --style=otbs
 --attach-namespaces
 --attach-classes
@@ -345,6 +349,9 @@ Matching `/home/ubuntu/esp/esp-idf/tools/format.sh`:
 --unpad-paren
 --max-continuation-indent=120
 ```
+
+`--max-continuation-indent=120` limits continuation indentation depth; it
+does **not** impose a hard 120-column line-length cap by itself.
 
 ### Enforcement Layers
 
@@ -402,33 +409,35 @@ test-integration:
         --port {{serial_port}}
 
 format:
-    astyle_py --style=otbs --attach-namespaces --attach-classes \
-        --indent=spaces=4 --convert-tabs --align-reference=name \
+    astyle_py --astyle-version=3.4.7 --style=otbs \
+        --attach-namespaces --attach-classes --indent=spaces=4 \
+        --convert-tabs --align-reference=name \
         --keep-one-line-statements --pad-header --pad-oper \
         --unpad-paren --max-continuation-indent=120 \
-        $(find firmware/components firmware/main -name '*.c' -o -name '*.h')
+        $(find firmware/components firmware/main \( -name '*.c' -o -name '*.h' \))
 
 format-check:
-    astyle_py --dry-run --style=otbs --attach-namespaces \
-        --attach-classes --indent=spaces=4 --convert-tabs \
-        --align-reference=name --keep-one-line-statements \
-        --pad-header --pad-oper --unpad-paren \
-        --max-continuation-indent=120 \
-        $(find firmware/components firmware/main -name '*.c' -o -name '*.h')
+    astyle_py --dry-run --astyle-version=3.4.7 --style=otbs \
+        --attach-namespaces --attach-classes --indent=spaces=4 \
+        --convert-tabs --align-reference=name \
+        --keep-one-line-statements --pad-header --pad-oper \
+        --unpad-paren --max-continuation-indent=120 \
+        $(find firmware/components firmware/main \( -name '*.c' -o -name '*.h' \))
 
 ci: format-check build test
 
 ci-full: ci test-device test-integration
 
 setup:
-    pip install astyle_py pytest-embedded \
+    python3 -m pip install astyle_py pytest-embedded \
         pytest-embedded-serial-esp pytest-embedded-idf
     cp tools/pre-commit-hook.sh .git/hooks/pre-commit
     chmod +x .git/hooks/pre-commit
 
 clean:
     rm -rf firmware/build firmware/test/build \
-        firmware/test_app/build
+        firmware/test_app/build firmware/.pytest_cache \
+        firmware/test_app/.pytest_cache
 ```
 
 ---
@@ -533,7 +542,7 @@ Add to existing commit prefix list:
 ## 8. Dependencies
 
 ```bash
-pip install astyle_py \
+python3 -m pip install astyle_py \
     pytest-embedded \
     pytest-embedded-serial-esp \
     pytest-embedded-idf
@@ -546,6 +555,8 @@ These are needed on both developer machines and CI runners.
 ```
 firmware/test/build/
 firmware/test_app/build/
+firmware/.pytest_cache/
+firmware/test_app/.pytest_cache/
 ```
 
 ---
