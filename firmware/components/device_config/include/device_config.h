@@ -71,7 +71,7 @@ const char *device_config_modio_boot_policy_to_string(device_config_modio_boot_p
 esp_err_t device_config_parse_modio_boot_policy(const char *value,
                                                 device_config_modio_boot_policy_t *out);
 
-#ifdef UNIT_TEST
+#if defined(UNIT_TEST) || defined(DEVICE_CONFIG_ENABLE_TESTING_API)
 void device_config_reset_for_testing(void);
 #endif
 

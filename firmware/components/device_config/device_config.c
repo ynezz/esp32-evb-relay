@@ -703,7 +703,7 @@ esp_err_t device_config_set_modio_boot_policy(device_config_modio_boot_policy_t 
     return err;
 }
 
-#ifdef UNIT_TEST
+#if defined(UNIT_TEST) || defined(DEVICE_CONFIG_ENABLE_TESTING_API)
 void device_config_reset_for_testing(void)
 {
     memset(&s_state, 0, sizeof(s_state));
