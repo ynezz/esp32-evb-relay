@@ -22,7 +22,6 @@ typedef enum {
 
 typedef enum {
     REST_API_MODIO_SYNC_ABSENT = 0,
-    REST_API_MODIO_SYNC_UNKNOWN,
     REST_API_MODIO_SYNC_SYNCHRONIZED,
 } rest_api_modio_sync_t;
 

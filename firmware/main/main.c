@@ -14,12 +14,10 @@ static rest_api_modio_sync_t app_modio_sync_to_rest_api(mod_io_relay_sync_t rela
     switch (relay_sync) {
     case MOD_IO_RELAY_SYNC_ABSENT:
         return REST_API_MODIO_SYNC_ABSENT;
-    case MOD_IO_RELAY_SYNC_UNKNOWN:
-        return REST_API_MODIO_SYNC_UNKNOWN;
     case MOD_IO_RELAY_SYNC_SYNCHRONIZED:
         return REST_API_MODIO_SYNC_SYNCHRONIZED;
     default:
-        return REST_API_MODIO_SYNC_UNKNOWN;
+        return REST_API_MODIO_SYNC_ABSENT;
     }
 }
 
@@ -29,6 +27,11 @@ static esp_err_t app_status_provider(rest_api_status_view_t *status, void *ctx)
     esp_err_t err;
 
     (void)ctx;
+    err = mod_io_probe();
+    if ((err != ESP_OK) && (err != ESP_ERR_NOT_FOUND)) {
+        ESP_LOGW(TAG, "Failed to refresh MOD-IO state from readback: %s", esp_err_to_name(err));
+    }
+
     err = mod_io_get_status(&mod_io_status);
     if (err != ESP_OK) {
         return err;

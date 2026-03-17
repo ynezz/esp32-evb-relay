@@ -51,12 +51,10 @@ const char *rest_api_modio_sync_to_string(rest_api_modio_sync_t sync_state)
     switch (sync_state) {
     case REST_API_MODIO_SYNC_ABSENT:
         return "absent";
-    case REST_API_MODIO_SYNC_UNKNOWN:
-        return "unknown";
     case REST_API_MODIO_SYNC_SYNCHRONIZED:
         return "synchronized";
     default:
-        return "unknown";
+        return "absent";
     }
 }
 

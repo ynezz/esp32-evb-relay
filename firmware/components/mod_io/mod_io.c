@@ -12,6 +12,7 @@
 #define MOD_IO_RELAY_WRITE_COMMAND 0x10U
 #define MOD_IO_DIGITAL_INPUT_READ_COMMAND 0x20U
 #define MOD_IO_ANALOG_INPUT_BASE_COMMAND 0x30U
+#define MOD_IO_RELAY_READ_COMMAND 0x40U
 
 typedef struct {
     i2c_master_bus_handle_t bus_handle;
@@ -102,47 +103,73 @@ static void mod_io_mark_absent_locked(void)
     s_state.relay_mask = 0;
 }
 
-static void mod_io_mark_present_locked(void)
+static void mod_io_mark_synchronized_locked(uint8_t relay_mask)
 {
-    if (!s_state.present) {
-        s_state.relay_mask = 0;
-        s_state.relay_sync = MOD_IO_RELAY_SYNC_UNKNOWN;
+    s_state.present = true;
+    s_state.relay_sync = MOD_IO_RELAY_SYNC_SYNCHRONIZED;
+    s_state.relay_mask = (uint8_t)(relay_mask & MOD_IO_RELAY_MASK_ALL);
+}
+
+static esp_err_t mod_io_read_relay_mask_locked(uint8_t *out_mask)
+{
+    const uint8_t command = MOD_IO_RELAY_READ_COMMAND;
+    uint8_t relay_mask = 0;
+    esp_err_t err;
+
+    ESP_RETURN_ON_FALSE(out_mask != NULL, ESP_ERR_INVALID_ARG, TAG, "Relay mask output is required");
+
+    err = i2c_master_transmit_receive(s_state.device_handle, &command, sizeof(command), &relay_mask,
+                                      sizeof(relay_mask), MOD_IO_I2C_TIMEOUT_MS);
+    if (err != ESP_OK) {
+        return err;
     }
 
-    s_state.present = true;
+    *out_mask = (uint8_t)(relay_mask & MOD_IO_RELAY_MASK_ALL);
+    return ESP_OK;
 }
 
 static esp_err_t mod_io_probe_locked(void)
 {
     esp_err_t err;
     bool was_present;
+    uint8_t relay_mask = 0;
 
     ESP_RETURN_ON_ERROR(mod_io_require_initialized_locked(), TAG, "MOD-IO is not initialized");
 
     was_present = s_state.present;
     err = i2c_master_probe(s_state.bus_handle, MOD_IO_I2C_ADDRESS, MOD_IO_I2C_TIMEOUT_MS);
     if (err == ESP_OK) {
-        mod_io_mark_present_locked();
+        err = mod_io_read_relay_mask_locked(&relay_mask);
+    }
+    if (err == ESP_OK) {
+        mod_io_mark_synchronized_locked(relay_mask);
         if (!was_present) {
-            ESP_LOGI(TAG, "Detected MOD-IO at 0x%02X; relay sync state is now unknown",
-                     MOD_IO_I2C_ADDRESS);
+            ESP_LOGI(TAG, "Detected MOD-IO at 0x%02X; relay mask refreshed to 0x%02X",
+                     MOD_IO_I2C_ADDRESS, relay_mask);
         }
         return ESP_OK;
     }
 
     mod_io_mark_absent_locked();
     if ((err == ESP_ERR_NOT_FOUND) && was_present) {
-        ESP_LOGW(TAG, "MOD-IO disappeared from the I2C bus; relay sync state reset to absent");
+        ESP_LOGW(TAG, "MOD-IO disappeared from the I2C bus; relay state reset to absent");
+    } else if ((err != ESP_ERR_NOT_FOUND) && was_present) {
+        ESP_LOGW(TAG, "MOD-IO relay readback failed; marking board absent: %s",
+                 esp_err_to_name(err));
     }
 
     return err;
 }
 
-static esp_err_t mod_io_require_present_locked(void)
+static esp_err_t mod_io_ensure_present_locked(void)
 {
     ESP_RETURN_ON_ERROR(mod_io_require_initialized_locked(), TAG, "MOD-IO is not initialized");
 
-    return s_state.present ? ESP_OK : ESP_ERR_NOT_FOUND;
+    if (s_state.present) {
+        return ESP_OK;
+    }
+
+    return mod_io_probe_locked();
 }
 
 static esp_err_t mod_io_reconcile_after_transaction_failure_locked(esp_err_t transaction_err)
@@ -194,7 +221,7 @@ static esp_err_t mod_io_read_analog_input_locked(uint8_t input_id, uint16_t *out
 
     ESP_RETURN_ON_ERROR(mod_io_validate_input_id(input_id), TAG, "Invalid analog input id");
     ESP_RETURN_ON_FALSE(out_value != NULL, ESP_ERR_INVALID_ARG, TAG, "Output value is required");
-    ESP_RETURN_ON_ERROR(mod_io_require_present_locked(), TAG, "MOD-IO is not present");
+    ESP_RETURN_ON_ERROR(mod_io_ensure_present_locked(), TAG, "MOD-IO is not present");
 
     command = (uint8_t)(MOD_IO_ANALOG_INPUT_BASE_COMMAND + (input_id - 1U));
     err = i2c_master_transmit_receive(s_state.device_handle, &command, sizeof(command), raw_value,
@@ -212,12 +239,10 @@ const char *mod_io_relay_sync_to_string(mod_io_relay_sync_t relay_sync)
     switch (relay_sync) {
     case MOD_IO_RELAY_SYNC_ABSENT:
         return "absent";
-    case MOD_IO_RELAY_SYNC_UNKNOWN:
-        return "unknown";
     case MOD_IO_RELAY_SYNC_SYNCHRONIZED:
         return "synchronized";
     default:
-        return "unknown";
+        return "absent";
     }
 }
 
@@ -330,18 +355,10 @@ esp_err_t mod_io_get_relays(uint8_t *out_mask, mod_io_relay_sync_t *out_sync)
     return err;
 }
 
-esp_err_t mod_io_set_relays(uint8_t relay_mask)
+static esp_err_t mod_io_write_relays_locked(uint8_t relay_mask)
 {
     uint8_t command_buffer[2];
     esp_err_t err;
-
-    ESP_RETURN_ON_ERROR(mod_io_validate_relay_mask(relay_mask), TAG, "Invalid relay mask");
-    ESP_RETURN_ON_ERROR(mod_io_lock(), TAG, "Failed to lock MOD-IO state");
-    err = mod_io_require_present_locked();
-    if (err != ESP_OK) {
-        mod_io_unlock();
-        return err;
-    }
 
     command_buffer[0] = MOD_IO_RELAY_WRITE_COMMAND;
     command_buffer[1] = relay_mask;
@@ -349,14 +366,26 @@ esp_err_t mod_io_set_relays(uint8_t relay_mask)
     err = i2c_master_transmit(s_state.device_handle, command_buffer, sizeof(command_buffer),
                               MOD_IO_I2C_TIMEOUT_MS);
     if (err == ESP_OK) {
-        s_state.relay_mask = relay_mask;
-        s_state.relay_sync = MOD_IO_RELAY_SYNC_SYNCHRONIZED;
+        mod_io_mark_synchronized_locked(relay_mask);
         ESP_LOGD(TAG, "Set MOD-IO relays to mask=0x%02X at ts_ms=%llu", relay_mask,
                  (unsigned long long)mod_io_timestamp_ms());
     } else {
         err = mod_io_reconcile_after_transaction_failure_locked(err);
     }
 
+    return err;
+}
+
+esp_err_t mod_io_set_relays(uint8_t relay_mask)
+{
+    esp_err_t err;
+
+    ESP_RETURN_ON_ERROR(mod_io_validate_relay_mask(relay_mask), TAG, "Invalid relay mask");
+    ESP_RETURN_ON_ERROR(mod_io_lock(), TAG, "Failed to lock MOD-IO state");
+    err = mod_io_ensure_present_locked();
+    if (err == ESP_OK) {
+        err = mod_io_write_relays_locked(relay_mask);
+    }
     mod_io_unlock();
     return err;
 }
@@ -368,15 +397,10 @@ esp_err_t mod_io_set_relay(uint8_t relay_id, bool state)
 
     ESP_RETURN_ON_ERROR(mod_io_validate_relay_id(relay_id), TAG, "Invalid relay id");
     ESP_RETURN_ON_ERROR(mod_io_lock(), TAG, "Failed to lock MOD-IO state");
-    err = mod_io_require_present_locked();
+    err = mod_io_probe_locked();
     if (err != ESP_OK) {
         mod_io_unlock();
         return err;
-    }
-
-    if (s_state.relay_sync != MOD_IO_RELAY_SYNC_SYNCHRONIZED) {
-        mod_io_unlock();
-        return ESP_ERR_INVALID_STATE;
     }
 
     relay_mask = s_state.relay_mask;
@@ -386,8 +410,9 @@ esp_err_t mod_io_set_relay(uint8_t relay_id, bool state)
         relay_mask &= (uint8_t)~(1U << (relay_id - 1U));
     }
 
+    err = mod_io_write_relays_locked(relay_mask);
     mod_io_unlock();
-    return mod_io_set_relays(relay_mask);
+    return err;
 }
 
 esp_err_t mod_io_read_digital_inputs(uint8_t *out_mask)
@@ -398,7 +423,7 @@ esp_err_t mod_io_read_digital_inputs(uint8_t *out_mask)
 
     ESP_RETURN_ON_FALSE(out_mask != NULL, ESP_ERR_INVALID_ARG, TAG, "Input mask output is required");
     ESP_RETURN_ON_ERROR(mod_io_lock(), TAG, "Failed to lock MOD-IO state");
-    err = mod_io_require_present_locked();
+    err = mod_io_ensure_present_locked();
     if (err != ESP_OK) {
         mod_io_unlock();
         return err;
@@ -433,7 +458,7 @@ esp_err_t mod_io_read_analog_inputs(uint16_t out_values[MOD_IO_ANALOG_INPUT_COUN
     ESP_RETURN_ON_FALSE(out_values != NULL, ESP_ERR_INVALID_ARG, TAG,
                         "Analog input output buffer is required");
     ESP_RETURN_ON_ERROR(mod_io_lock(), TAG, "Failed to lock MOD-IO state");
-    err = mod_io_require_present_locked();
+    err = mod_io_ensure_present_locked();
     if (err != ESP_OK) {
         mod_io_unlock();
         return err;
