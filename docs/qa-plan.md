@@ -188,8 +188,8 @@ Thin init wrapper with minimal logic to unit test.
 - HTTP server starts on configured port
 - `rest_api_parse_id_from_uri`: various URI patterns return correct IDs
 - `rest_api_modio_sync_to_string`: all enum values → correct strings
-- Fail-closed auth regression: with no auth handler configured, protected
-  endpoints are rejected instead of defaulting to anonymous access
+- Fail-closed auth regression: `rest_api_start()` refuses to start when no
+  auth handler is configured, instead of exposing anonymous access
 - Auth handler: mock handler returning `UNAUTHORIZED` → 401 response
 - Auth handler: mock handler returning `FORBIDDEN` → 403 response
 
@@ -402,6 +402,14 @@ does **not** impose a hard 120-column line-length cap by itself.
 Hardware recipes should keep the build and pytest invocation in the same
 recipe. `pytest-embedded` will flash and monitor the built app, but the app
 still needs to be built first from the matching ESP-IDF project directory.
+
+All `idf.py`, `pytest-embedded`, and ESP-IDF Unity invocations assume the
+ESP-IDF environment is already active in the current shell
+(`. $IDF_PATH/export.sh` or equivalent).
+
+For CI hardware lanes, set
+`EVB_TEST_APP_SDKCONFIG_DEFAULTS='sdkconfig.defaults;sdkconfig.ci'` so the
+test-app build layers CI-specific overrides on top of the base defaults.
 
 ```just
 # Default serial port for hardware tests
@@ -655,6 +663,7 @@ Each step is a discrete, committable unit of work:
 ## 10. Verification
 
 ```bash
+. "$IDF_PATH/export.sh"  # Or activate the equivalent ESP-IDF environment
 just setup              # Install deps + hook
 just ci                 # format-check + build + host tests
 just test-device        # On-device Unity tests (requires hardware)
