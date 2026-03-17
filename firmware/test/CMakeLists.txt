@@ -28,6 +28,7 @@ target_include_directories(unity_host PUBLIC "${UNITY_DIR}/src")
 
 add_executable(host_tests
     "${TEST_DIR}/test_main.c"
+    "${TEST_DIR}/device_config/test_device_config.c"
     "${TEST_DIR}/stubs/esp_idf_stubs.c"
     "${TEST_DIR}/stubs/freertos_stubs.c"
     "${TEST_DIR}/stubs/gpio_stubs.c"
