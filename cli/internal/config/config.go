@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -197,8 +198,21 @@ func loadFile(path string) (partialConfig, error) {
 	}
 
 	var decoded fileConfig
-	if _, err := toml.DecodeFile(path, &decoded); err != nil {
+	meta, err := toml.DecodeFile(path, &decoded)
+	if err != nil {
 		return partialConfig{}, wrapf(ErrorKindInvalid, "decode config file %q: %w", path, err)
+	}
+	if undecoded := meta.Undecoded(); len(undecoded) > 0 {
+		names := make([]string, 0, len(undecoded))
+		for _, key := range undecoded {
+			names = append(names, key.String())
+		}
+		sort.Strings(names)
+		return partialConfig{}, wrapf(ErrorKindInvalid,
+			"unknown keys in %q: %s",
+			path,
+			strings.Join(names, ", "),
+		)
 	}
 
 	parsed := partialConfig{}

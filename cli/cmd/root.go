@@ -50,6 +50,8 @@ func Execute() error {
 }
 
 func newRootCommand() *cobra.Command {
+	cobra.EnableTraverseRunHooks = true
+
 	flags := persistentFlags{
 		timeout: appconfig.DefaultTimeout,
 	}
@@ -62,7 +64,7 @@ func newRootCommand() *cobra.Command {
 		Args:          cobra.NoArgs,
 		Version:       formattedVersion(),
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
-			if versionRequested(cmd) {
+			if versionRequested(cmd) || capabilitiesRequested(cmd) {
 				return nil
 			}
 
@@ -224,6 +226,15 @@ func classifyConfigError(err error) error {
 
 func versionRequested(cmd *cobra.Command) bool {
 	flag := cmd.Flags().Lookup("version")
+	if flag == nil {
+		return false
+	}
+
+	return flag.Changed
+}
+
+func capabilitiesRequested(cmd *cobra.Command) bool {
+	flag := cmd.Flags().Lookup("robot-capabilities")
 	if flag == nil {
 		return false
 	}
