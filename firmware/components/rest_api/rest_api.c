@@ -106,8 +106,10 @@ static void rest_api_try_attach_device_context_headers(httpd_req_t *req,
 
 static rest_api_auth_result_t rest_api_authorize_request(httpd_req_t *req)
 {
+    (void)req;
+
     if (s_config.auth_handler == NULL) {
-        return REST_API_AUTH_RESULT_ALLOW;
+        return REST_API_AUTH_RESULT_FORBIDDEN;
     }
 
     return s_config.auth_handler(req, s_config.auth_ctx);
@@ -280,6 +282,10 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
     esp_err_t err;
 
     ESP_RETURN_ON_FALSE(config != NULL, ESP_ERR_INVALID_ARG, TAG, "REST API config is required");
+    ESP_RETURN_ON_FALSE(config->auth_handler != NULL,
+                        ESP_ERR_INVALID_ARG,
+                        TAG,
+                        "REST API auth handler is required");
     ESP_RETURN_ON_FALSE(s_server == NULL, ESP_ERR_INVALID_STATE, TAG, "REST API server already started");
 
     err = esp_event_loop_create_default();
