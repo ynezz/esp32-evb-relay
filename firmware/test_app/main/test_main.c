@@ -1,5 +1,6 @@
 #include "mod_io.h"
 #include "relay.h"
+#include "rest_api.h"
 #include "unity.h"
 
 void setUp(void)
@@ -11,6 +12,7 @@ void tearDown(void)
     uint8_t relay_mask = 0xFFU;
     mod_io_relay_sync_t relay_sync = MOD_IO_RELAY_SYNC_ABSENT;
 
+    TEST_ASSERT_EQUAL(ESP_OK, rest_api_stop());
     TEST_ASSERT_EQUAL(ESP_OK, relay_init());
     TEST_ASSERT_EQUAL(ESP_OK, relay_set(1U, false));
     TEST_ASSERT_EQUAL(ESP_OK, relay_set(2U, false));
