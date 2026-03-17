@@ -2,6 +2,8 @@
 #include <string.h>
 #include <sys/time.h>
 
+#include "auth.h"
+#include "device_config.h"
 #include "esp_netif.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -71,13 +73,36 @@ static esp_err_t status_provider(rest_api_status_view_t *status, void *ctx)
     return ESP_OK;
 }
 
-static void perform_status_request(uint16_t port, char *response, size_t response_size)
+typedef struct {
+    char api_token[DEVICE_CONFIG_API_TOKEN_MAX_LEN + 1];
+    bool api_token_set;
+} auth_token_fixture_t;
+
+static void capture_auth_token_fixture(auth_token_fixture_t *fixture)
 {
-    static const char request[] =
-        "GET /api/v1/status HTTP/1.1\r\n"
-        "Host: localhost\r\n"
-        "Connection: close\r\n"
-        "\r\n";
+    TEST_ASSERT_NOT_NULL(fixture);
+    TEST_ASSERT_EQUAL(ESP_OK,
+                      device_config_get_api_token(fixture->api_token,
+                                                  sizeof(fixture->api_token),
+                                                  &fixture->api_token_set));
+}
+
+static void restore_auth_token_fixture(const auth_token_fixture_t *fixture)
+{
+    TEST_ASSERT_NOT_NULL(fixture);
+    if (fixture->api_token_set) {
+        TEST_ASSERT_EQUAL(ESP_OK, device_config_set_api_token(fixture->api_token, NULL));
+    } else {
+        TEST_ASSERT_EQUAL(ESP_OK, device_config_set_api_token(NULL, NULL));
+    }
+}
+
+static void perform_status_request(uint16_t port,
+                                   const char *authorization_header,
+                                   char *response,
+                                   size_t response_size)
+{
+    char request[512];
     struct sockaddr_in dest_addr = {
         .sin_family = AF_INET,
         .sin_port = htons(port),
@@ -94,6 +119,25 @@ static void perform_status_request(uint16_t port, char *response, size_t respons
     TEST_ASSERT_NOT_NULL(response);
     TEST_ASSERT_GREATER_THAN_UINT32(0U, response_size);
     memset(response, 0, response_size);
+    if (authorization_header == NULL) {
+        TEST_ASSERT_GREATER_THAN_INT32(0,
+                                       snprintf(request,
+                                                sizeof(request),
+                                                "GET /api/v1/status HTTP/1.1\r\n"
+                                                "Host: localhost\r\n"
+                                                "Connection: close\r\n"
+                                                "\r\n"));
+    } else {
+        TEST_ASSERT_GREATER_THAN_INT32(0,
+                                       snprintf(request,
+                                                sizeof(request),
+                                                "GET /api/v1/status HTTP/1.1\r\n"
+                                                "Host: localhost\r\n"
+                                                "%s\r\n"
+                                                "Connection: close\r\n"
+                                                "\r\n",
+                                                authorization_header));
+    }
 
     sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
     TEST_ASSERT_GREATER_OR_EQUAL_INT32(0, sock);
@@ -104,8 +148,8 @@ static void perform_status_request(uint16_t port, char *response, size_t respons
     TEST_ASSERT_GREATER_OR_EQUAL_INT32(0,
                                        connect(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr)));
 
-    sent = send(sock, request, sizeof(request) - 1U, 0);
-    TEST_ASSERT_EQUAL_INT(sizeof(request) - 1, sent);
+    sent = send(sock, request, strlen(request), 0);
+    TEST_ASSERT_EQUAL_INT(strlen(request), sent);
 
     received = recv(sock, response, response_size - 1U, 0);
     TEST_ASSERT_GREATER_THAN_INT32(0, received);
@@ -128,8 +172,11 @@ TEST_CASE("rest_api device starts the HTTP server on the configured port",
     TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
     TEST_ASSERT_NOT_NULL(rest_api_get_server());
 
-    perform_status_request(test_port, response, sizeof(response));
+    perform_status_request(test_port, NULL, response, sizeof(response));
     TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-FW-Version: "));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Present: true"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Sync: synchronized"));
     TEST_ASSERT_NOT_NULL(strstr(response, "\"hostname\":\"loopback-relay\""));
     TEST_ASSERT_NOT_NULL(strstr(response, "\"sync\":\"synchronized\""));
 }
@@ -194,8 +241,11 @@ TEST_CASE("rest_api device returns 401 when auth handler reports unauthorized",
     ensure_tcpip_ready();
     TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
 
-    perform_status_request(test_port, response, sizeof(response));
+    perform_status_request(test_port, NULL, response, sizeof(response));
     TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 401 Unauthorized"));
+    TEST_ASSERT_NULL(strstr(response, "X-FW-Version: "));
+    TEST_ASSERT_NULL(strstr(response, "X-ModIO-Present: "));
+    TEST_ASSERT_NULL(strstr(response, "X-ModIO-Sync: "));
     TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"AUTH_REQUIRED\""));
 }
 
@@ -213,7 +263,105 @@ TEST_CASE("rest_api device returns 403 when auth handler reports forbidden",
     ensure_tcpip_ready();
     TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
 
-    perform_status_request(test_port, response, sizeof(response));
+    perform_status_request(test_port, NULL, response, sizeof(response));
     TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 403 Forbidden"));
+    TEST_ASSERT_NULL(strstr(response, "X-FW-Version: "));
+    TEST_ASSERT_NULL(strstr(response, "X-ModIO-Present: "));
+    TEST_ASSERT_NULL(strstr(response, "X-ModIO-Sync: "));
     TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"AUTH_FORBIDDEN\""));
+}
+
+TEST_CASE("auth device generates a first-boot token and accepts it",
+          "[firmware][auth][device]")
+{
+    static const uint16_t test_port = 18084U;
+    static const rest_api_config_t config = {
+        .port = test_port,
+        .auth_handler = auth_check,
+        .status_provider = status_provider,
+    };
+    auth_token_fixture_t fixture = {0};
+    char authorization_header[DEVICE_CONFIG_API_TOKEN_MAX_LEN + 32U];
+    char response[768];
+    volatile bool fixture_captured = false;
+    bool token_is_set = false;
+    char generated_token[DEVICE_CONFIG_API_TOKEN_MAX_LEN + 1];
+
+    ensure_tcpip_ready();
+    if (TEST_PROTECT()) {
+        capture_auth_token_fixture(&fixture);
+        fixture_captured = true;
+
+        TEST_ASSERT_EQUAL(ESP_OK, device_config_set_api_token(NULL, NULL));
+        TEST_ASSERT_EQUAL(ESP_OK, auth_init());
+        TEST_ASSERT_EQUAL(ESP_OK,
+                          device_config_get_api_token(generated_token,
+                                                      sizeof(generated_token),
+                                                      &token_is_set));
+        TEST_ASSERT_TRUE(token_is_set);
+        TEST_ASSERT_EQUAL_UINT32(32U, strlen(generated_token));
+
+        TEST_ASSERT_GREATER_THAN_INT32(0,
+                                       snprintf(authorization_header,
+                                                sizeof(authorization_header),
+                                                "Authorization: Bearer %s",
+                                                generated_token));
+        TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
+
+        perform_status_request(test_port, authorization_header, response, sizeof(response));
+        TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+        TEST_ASSERT_NOT_NULL(strstr(response, "X-FW-Version: "));
+        TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Present: true"));
+        TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Sync: synchronized"));
+        TEST_ASSERT_NOT_NULL(strstr(response, "\"hostname\":\"loopback-relay\""));
+    }
+
+    if (fixture_captured) {
+        restore_auth_token_fixture(&fixture);
+    }
+}
+
+TEST_CASE("auth device distinguishes missing and wrong bearer tokens",
+          "[firmware][auth][device]")
+{
+    static const uint16_t test_port = 18085U;
+    static const rest_api_config_t config = {
+        .port = test_port,
+        .auth_handler = auth_check,
+        .status_provider = status_provider,
+    };
+    auth_token_fixture_t fixture = {0};
+    char response[768];
+    volatile bool fixture_captured = false;
+
+    ensure_tcpip_ready();
+    if (TEST_PROTECT()) {
+        capture_auth_token_fixture(&fixture);
+        fixture_captured = true;
+
+        TEST_ASSERT_EQUAL(ESP_OK, device_config_set_api_token("loopback-secret", NULL));
+        TEST_ASSERT_EQUAL(ESP_OK, auth_init());
+        TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
+
+        perform_status_request(test_port, NULL, response, sizeof(response));
+        TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 401 Unauthorized"));
+        TEST_ASSERT_NULL(strstr(response, "X-FW-Version: "));
+        TEST_ASSERT_NULL(strstr(response, "X-ModIO-Present: "));
+        TEST_ASSERT_NULL(strstr(response, "X-ModIO-Sync: "));
+        TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"AUTH_REQUIRED\""));
+
+        perform_status_request(test_port,
+                               "Authorization: Bearer wrong-secret",
+                               response,
+                               sizeof(response));
+        TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 403 Forbidden"));
+        TEST_ASSERT_NULL(strstr(response, "X-FW-Version: "));
+        TEST_ASSERT_NULL(strstr(response, "X-ModIO-Present: "));
+        TEST_ASSERT_NULL(strstr(response, "X-ModIO-Sync: "));
+        TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"AUTH_FORBIDDEN\""));
+    }
+
+    if (fixture_captured) {
+        restore_auth_token_fixture(&fixture);
+    }
 }

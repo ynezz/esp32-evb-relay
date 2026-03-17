@@ -1,3 +1,4 @@
+#include "auth.h"
 #include "board.h"
 #include "device_config.h"
 #include "esp_err.h"
@@ -46,6 +47,7 @@ void app_main(void)
 {
     rest_api_config_t api_config = {
         .port = 80,
+        .auth_handler = auth_check,
         .status_provider = app_status_provider,
     };
     esp_err_t err;
@@ -65,6 +67,12 @@ void app_main(void)
     err = board_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize board: %s", esp_err_to_name(err));
+        return;
+    }
+
+    err = auth_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize auth: %s", esp_err_to_name(err));
         return;
     }
 
