@@ -1,0 +1,3 @@
+# Layered on top of sdkconfig.defaults in CI hardware lanes.
+# Keep overrides minimal until the runner needs target-specific tuning.
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y

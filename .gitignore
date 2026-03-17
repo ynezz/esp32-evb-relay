@@ -9,3 +9,11 @@ firmware/sdkconfig
 firmware/sdkconfig.old
 firmware/build/
 firmware/managed_components/
+firmware/test/build/
+firmware/test_app/build/
+firmware/test_app/sdkconfig
+firmware/test_app/sdkconfig.old
+firmware/test_app/managed_components/
+firmware/.pytest_cache/
+firmware/test_app/.pytest_cache/
+firmware/test_app/__pycache__/
