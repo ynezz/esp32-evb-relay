@@ -75,6 +75,11 @@ I2C addresses and protocols. Do NOT confuse them.**
 | Read relay state | `0x40` | — (read 1 byte) | Current relay bitmask |
 | Change address | `0xF0` | 1 byte new addr | Requires PROG jumper closed |
 
+For the deployed MOD-IO board used in this project, command `0x40` is the
+authoritative relay-state source. Older write-only / unknown-state assumptions
+elsewhere in the repo came from earlier debugging against the wrong board and
+address and should not guide new firmware or tests.
+
 ### Arduino Example (relay sweep)
 
 ```cpp

@@ -18,12 +18,10 @@
 
 - Hardware-backed test lanes require a dedicated self-hosted runner. The
   public GitHub-hosted CI jobs can only cover host-side build and test work.
-- The MOD-IO relay-state model must be reconciled before finalizing `mod_io`
-  and `rest_api` assertions. The hardware reference documents command `0x40`
-  relay-state readback, while `docs/initial-plan.md` and existing beads still
-  assume a write-only unknown/synchronized model. The QA epic should treat
-  that design decision as a first-class gate, then align all affected tests
-  and beads to the chosen authoritative model.
+- The MOD-IO relay-state model is now settled: the hardware reference documents
+  command `0x40` relay-state readback and records a verified-working relay
+  sweep on 2026-03-16. QA should assert that authoritative readback behavior,
+  not preserve the older write-only unknown/synchronized model.
 
 ---
 
@@ -136,28 +134,27 @@ Full firmware + pytest automation via serial and network.
 
 ### mod_io — Tier 1 (stubs) + Tier 2
 
-Resolve the relay readback vs unknown-state design conflict first. The
-component-level tests below should follow one authoritative model, not encode
-both simultaneously.
+MOD-IO relay-state readback via command `0x40` is authoritative for the
+deployed board. The component-level tests below should assert that model
+consistently.
 
 **Host tests (Tier 1):**
 - I2C stubs capture transaction bytes and verify protocol:
   - Relay write: command `0x10` + 1 byte mask
+  - Relay readback: command `0x40`, returns 1 byte
   - Digital input read: command `0x20`, returns 1 byte
   - Analog input read: commands `0x30`–`0x33`, returns 2 bytes each
-  - If relay-state readback becomes part of the public API, relay readback:
-    command `0x40`, returns 1 byte
-- State machine transitions: probe → present, absent → probe fails
+- State machine transitions: probe → present/readable, absent → probe fails
   → stays absent
 - `mod_io_set_relays`: `0x0F` is accepted, `0x10` is rejected, and a
-  successful write transitions relay sync to `SYNCHRONIZED`
-- `mod_io_set_relay`: 0 → invalid, 1–4 → valid when synchronized,
+  successful write is observable via readback or the component's refreshed
+  cache
+- `mod_io_set_relay`: 0 → invalid, 1–4 → valid when MOD-IO is present,
   5 → invalid
 - `mod_io_read_analog_input`: 0 → invalid, 1–4 → valid, 5 → invalid
 - Public analog read APIs return correctly decoded samples for known
   byte pairs (for example `{0x80, 0x00}` → 1, `{0x01, 0x00}` → 128,
   `{0xFF, 0x03}` → 1023)
-- `mod_io_relay_sync_to_string`: all enum values produce correct strings
 - `mod_io_set_relay`: individual relay set modifies correct bit in mask
 - Reconciliation on transaction failure: stub returns error → probe
   called → if probe fails, mark absent
@@ -166,12 +163,10 @@ both simultaneously.
 
 **On-device tests (Tier 2):**
 - I2C probe finds device at `0x58`
-- If relay-state readback becomes part of the public API, relay set +
-  readback: write mask `0x05`, read back `0x05`
+- Relay set + readback: write mask `0x05`, read back `0x05`
 - Digital input read returns valid mask (bits 0–3 only)
 - Analog input read: 4 channels return values in 0–1023 range
-- All-off after test: write `0x00`; if readback is part of the chosen design,
-  verify readback `0x00`
+- All-off after test: write `0x00`; verify readback `0x00`
 
 ### board — Tier 2 only
 
