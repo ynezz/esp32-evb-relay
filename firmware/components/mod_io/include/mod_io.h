@@ -44,6 +44,10 @@ esp_err_t mod_io_read_analog_inputs(uint16_t out_values[MOD_IO_ANALOG_INPUT_COUN
 
 const char *mod_io_relay_sync_to_string(mod_io_relay_sync_t relay_sync);
 
+#ifdef UNIT_TEST
+void mod_io_reset_for_testing(void);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

@@ -450,3 +450,12 @@ esp_err_t mod_io_read_analog_inputs(uint16_t out_values[MOD_IO_ANALOG_INPUT_COUN
     mod_io_unlock();
     return ESP_OK;
 }
+
+#ifdef UNIT_TEST
+void mod_io_reset_for_testing(void)
+{
+    memset(&s_state, 0, sizeof(s_state));
+    s_lock = NULL;
+    memset(&s_lock_buffer, 0, sizeof(s_lock_buffer));
+}
+#endif

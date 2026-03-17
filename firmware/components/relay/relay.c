@@ -245,3 +245,12 @@ esp_err_t relay_toggle(uint8_t relay_id)
 
     return ESP_OK;
 }
+
+#ifdef UNIT_TEST
+void relay_reset_for_testing(void)
+{
+    memset(&s_state, 0, sizeof(s_state));
+    s_lock = NULL;
+    memset(&s_lock_buffer, 0, sizeof(s_lock_buffer));
+}
+#endif

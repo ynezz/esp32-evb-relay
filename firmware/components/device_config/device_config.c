@@ -702,3 +702,13 @@ esp_err_t device_config_set_modio_boot_policy(device_config_modio_boot_policy_t 
     xSemaphoreGive(s_lock);
     return err;
 }
+
+#ifdef UNIT_TEST
+void device_config_reset_for_testing(void)
+{
+    memset(&s_state, 0, sizeof(s_state));
+    s_lock = NULL;
+    memset(&s_lock_buffer, 0, sizeof(s_lock_buffer));
+    s_initialized = false;
+}
+#endif

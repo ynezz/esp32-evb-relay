@@ -16,6 +16,10 @@ esp_err_t relay_set(uint8_t relay_id, bool state);
 esp_err_t relay_get(uint8_t relay_id, bool *out_state);
 esp_err_t relay_toggle(uint8_t relay_id);
 
+#ifdef UNIT_TEST
+void relay_reset_for_testing(void);
+#endif
+
 #ifdef __cplusplus
 }
 #endif
