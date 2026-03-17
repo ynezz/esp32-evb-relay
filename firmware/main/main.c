@@ -1,8 +1,10 @@
 #include "board.h"
 #include "device_config.h"
 #include "esp_err.h"
+#include "esp_event.h"
 #include "esp_log.h"
 #include "mod_io.h"
+#include "relay.h"
 #include "rest_api.h"
 
 static const char *TAG = "main";
@@ -45,6 +47,12 @@ void app_main(void)
     };
     esp_err_t err;
 
+    err = esp_event_loop_create_default();
+    if ((err != ESP_OK) && (err != ESP_ERR_INVALID_STATE)) {
+        ESP_LOGE(TAG, "Failed to create default event loop: %s", esp_err_to_name(err));
+        return;
+    }
+
     err = device_config_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize device config: %s", esp_err_to_name(err));
@@ -54,6 +62,12 @@ void app_main(void)
     err = board_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize board: %s", esp_err_to_name(err));
+        return;
+    }
+
+    err = relay_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize onboard relays: %s", esp_err_to_name(err));
         return;
     }
 
