@@ -73,6 +73,8 @@ Full firmware + pytest automation via serial and network.
 
 - End-to-end scenarios: REST API calls → relay state → MOD-IO sync
 - `dut.expect()` / `dut.write()` for serial interaction
+- Establishes authentication deterministically for test runs; do not make
+  CI depend on scraping a one-time random token from boot logs
 - HTTP client drives REST endpoints from the host
 - Runs via `just test-integration`
 
@@ -190,8 +192,9 @@ Thin init wrapper with minimal logic to unit test.
 - Auth handler: mock handler returning `UNAUTHORIZED` → 401 response
 
 **Integration tests (Tier 3):**
-- pytest fixture resolves device IP and provisions a valid token before
-  authenticated HTTP checks
+- pytest fixture resolves device IP and establishes a known valid token
+  before authenticated HTTP checks, either through a serial provisioning
+  helper or a dedicated test-only config path
 - `GET /api/v1/status` returns valid JSON with expected schema
 - Relay state changes via REST API propagate to actual relay state
 - Auth token enforcement: requests without token → 401, with valid
@@ -233,7 +236,8 @@ firmware/
   test_app/                          # On-device tests (Tier 2)
     CMakeLists.txt                   # IDF project targeting ESP32
     sdkconfig.defaults               # Base device test config
-    sdkconfig.ci                     # CI-specific overrides
+    sdkconfig.ci                     # Optional CI-specific overrides,
+                                     # applied via SDKCONFIG_DEFAULTS
     main/
       CMakeLists.txt                 # Component registration
       test_main.c                    # Unity runner (unity_run_menu)
@@ -252,6 +256,8 @@ firmware/
 
 - `test_main.c` owns host-side test registration and calls `RUN_TEST(...)`
   explicitly for the standalone Unity harness
+- The host harness should reuse Unity from the active ESP-IDF installation
+  (via `$IDF_PATH`) instead of vendoring a second copy just for tests
 - `dut.run_all_single_board_cases()` in pytest-embedded for Unity
   runner interaction
 - `sdkconfig.ci` (and `sdkconfig.ci.*` later if variants become necessary)
@@ -370,40 +376,46 @@ does **not** impose a hard 120-column line-length cap by itself.
 |---------------------|---------------------------------------------|-------------|
 | `just build`        | `idf.py build` (ESP32 target)               | Build gate  |
 | `just test`         | cmake + ctest host tests                    | Tier 1      |
-| `just test-device`  | pytest-embedded build/flash/run test_app    | Tier 2      |
-| `just test-integration` | pytest-embedded build/flash firmware + HTTP checks | Tier 3      |
+| `just test-device`  | `idf.py build` + pytest-embedded flash/run test_app | Tier 2      |
+| `just test-integration` | `idf.py build` + pytest-embedded flash firmware + HTTP checks | Tier 3      |
 | `just format`       | astyle_py auto-fix                          | Format      |
 | `just format-check` | astyle_py dry-run                           | Format gate |
 | `just ci`           | format-check + build + test                 | Full gate   |
 | `just ci-full`      | ci + test-device + test-integration         | Full + HW (self-hosted) |
-| `just setup`        | pip install deps + install pre-commit hook  | One-time    |
+| `just setup`        | install QA Python deps in IDF env + hook    | One-time    |
 | `just clean`        | rm build artifacts                          | Cleanup     |
 
 ### Recipe Details
 
-Hardware recipes should let `pytest-embedded` own the build/flash/monitor
-lifecycle. That keeps the flashed image coupled to the test invocation instead
-of depending on whatever binary was already on the board.
+Hardware recipes should keep the build and pytest invocation in the same
+recipe. `pytest-embedded` will flash and monitor the built app, but the app
+still needs to be built first from the matching ESP-IDF project directory.
 
 ```just
 # Default serial port for hardware tests
 serial_port := env("EVB_SERIAL_PORT", "/dev/ttyS4")
+test_app_sdkconfig_defaults := env("EVB_TEST_APP_SDKCONFIG_DEFAULTS", "sdkconfig.defaults")
 
 build:
     cd firmware && idf.py build
 
 test:
     cmake -S firmware/test -B firmware/test/build \
-        -DCMAKE_BUILD_TYPE=Debug
+        -DCMAKE_BUILD_TYPE=Debug \
+        -DENABLE_SANITIZERS=ON
     cmake --build firmware/test/build
     cd firmware/test/build && ctest --output-on-failure
 
 test-device:
     cd firmware/test_app && \
+        idf.py -DSDKCONFIG_DEFAULTS="{{test_app_sdkconfig_defaults}}" build
+    cd firmware/test_app && \
         pytest --target esp32 -p no:cacheprovider \
         --port {{serial_port}}
 
 test-integration:
+    cd firmware && \
+        idf.py build
     cd firmware && \
         pytest --target esp32 -p no:cacheprovider \
         test_integration \
@@ -551,6 +563,12 @@ python3 -m pip install astyle_py \
     pytest-embedded-idf
 ```
 
+Install these into the active ESP-IDF Python environment rather than an
+arbitrary system Python. If the local ESP-IDF installation manages its own
+Python environment, prefer enabling pytest support there and then running the
+manual `python3 -m pip` command only inside that active environment when extra
+packages are still needed.
+
 These are needed on both developer machines and CI runners.
 
 ### .gitignore Additions
@@ -558,6 +576,10 @@ These are needed on both developer machines and CI runners.
 ```
 firmware/test/build/
 firmware/test_app/build/
+firmware/test_app/sdkconfig
+firmware/test_app/sdkconfig.old
+firmware/test_app/managed_components/
+firmware/test_app/dependencies.lock
 firmware/.pytest_cache/
 firmware/test_app/.pytest_cache/
 ```
@@ -584,7 +606,8 @@ Each step is a discrete, committable unit of work:
 11. Create `Justfile` with all recipes
 12. Create pre-commit hook (`tools/pre-commit-hook.sh`)
 13. Update `AGENTS.md` with quality gate requirements
-14. Update `.gitignore` with test build directories and pytest caches
+14. Update `.gitignore` with test build directories, test-app IDF
+    artifacts, and pytest caches
 15. Verify: `just ci` passes, `just test-device` passes,
     `just test-integration` passes
 
@@ -601,7 +624,8 @@ just test-integration   # System-level pytest (requires hardware)
 
 ### Success Criteria
 
-- `just ci` passes with zero failures on any Linux machine with ESP-IDF
+- `just ci` passes with zero failures on any Linux machine with ESP-IDF,
+  the active IDF Python environment, and the documented QA dependencies
 - `just test-device` passes on a self-hosted runner with ESP32-EVB at
   `/dev/ttyS4`
 - `just test-integration` passes on that same self-hosted runner with
