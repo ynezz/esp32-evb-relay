@@ -74,7 +74,8 @@ Full firmware + pytest automation via serial and network.
 - End-to-end scenarios: REST API calls → relay state → MOD-IO sync
 - `dut.expect()` / `dut.write()` for serial interaction
 - Establishes authentication deterministically for test runs; do not make
-  CI depend on scraping a one-time random token from boot logs
+  CI depend on scraping a one-time random token from boot logs or on a
+  test-only auth bypass in production firmware
 - HTTP client drives REST endpoints from the host
 - Runs via `just test-integration`
 
@@ -190,15 +191,19 @@ Thin init wrapper with minimal logic to unit test.
 - Fail-closed auth regression: with no auth handler configured, protected
   endpoints are rejected instead of defaulting to anonymous access
 - Auth handler: mock handler returning `UNAUTHORIZED` → 401 response
+- Auth handler: mock handler returning `FORBIDDEN` → 403 response
 
 **Integration tests (Tier 3):**
 - pytest fixture resolves device IP and establishes a known valid token
-  before authenticated HTTP checks, either through a serial provisioning
-  helper or a dedicated test-only config path
+  before authenticated HTTP checks using the same serial provisioning
+  path the product already supports
 - `GET /api/v1/status` returns valid JSON with expected schema
 - Relay state changes via REST API propagate to actual relay state
 - Auth token enforcement: requests without token → 401, with valid
   token → 200
+- Invalid token path returns the documented auth error (`401` or `403`,
+  whichever contract the firmware adopts) and does not expose
+  device-context headers
 - Authenticated responses include device-context headers;
   pre-auth `401`/`403` responses do not
 
@@ -249,7 +254,8 @@ firmware/
     pytest_evb_relay.py              # pytest-embedded test driver
   test_integration/                  # Integration tests (Tier 3)
     pytest_integration.py            # System-level pytest scenarios
-    conftest.py                      # Shared fixtures (serial, HTTP client)
+    conftest.py                      # Shared fixtures (serial provisioning,
+                                     # DUT discovery, HTTP client)
 ```
 
 ### Key Patterns from ESP-IDF
@@ -260,6 +266,9 @@ firmware/
   (via `$IDF_PATH`) instead of vendoring a second copy just for tests
 - `dut.run_all_single_board_cases()` in pytest-embedded for Unity
   runner interaction
+- `test_app/CMakeLists.txt` should wire `EXTRA_COMPONENT_DIRS` to the real
+  `../components` tree so on-device tests exercise production code, not
+  copies
 - `sdkconfig.ci` (and `sdkconfig.ci.*` later if variants become necessary)
   for CI-specific build configurations
 - `#ifdef UNIT_TEST` guard for test-only reset functions in production
@@ -306,7 +315,8 @@ restart. The `UNIT_TEST` define is set only by the host test
 **NVS stubs (`nvs_stubs.c`):**
 - In-memory key-value store (hash map or fixed array)
 - Supports `nvs_get_str`, `nvs_set_str`, `nvs_get_u8`, `nvs_set_u8`,
-  `nvs_get_u32`, `nvs_set_u32`, `nvs_erase_key`, `nvs_commit`
+  `nvs_get_u32`, `nvs_set_u32`, `nvs_erase_key`, `nvs_commit`,
+  `nvs_open`, `nvs_close`
 - `nvs_flash_init()` / `nvs_flash_erase()` clear the backing store
 - Test accessor: `nvs_stub_reset()`
 
@@ -362,8 +372,10 @@ does **not** impose a hard 120-column line-length cap by itself.
 
 ### Enforcement Layers
 
-1. **`just format`** — auto-fix all `firmware/**/*.{c,h}` files in-place
-2. **`just format-check`** — dry-run for CI; exits non-zero on diff
+1. **`just format`** — auto-fix all tracked firmware `.c/.h` files,
+   including test sources, while excluding generated directories
+2. **`just format-check`** — dry-run for CI over that same file set;
+   exits non-zero on diff
 3. **Pre-commit hook** — shell script at `tools/pre-commit-hook.sh`
    checks staged `firmware/**/*.{c,h}` files
 4. **`just ci`** recipe includes `format-check` as first gate
@@ -427,7 +439,12 @@ format:
         --convert-tabs --align-reference=name \
         --keep-one-line-statements --pad-header --pad-oper \
         --unpad-paren --max-continuation-indent=120 \
-        $(find firmware/components firmware/main \( -name '*.c' -o -name '*.h' \))
+        $(rg --files firmware -g '*.c' -g '*.h' \
+            -g '!firmware/build/**' \
+            -g '!firmware/managed_components/**' \
+            -g '!firmware/test/build/**' \
+            -g '!firmware/test_app/build/**' \
+            -g '!firmware/test_app/managed_components/**')
 
 format-check:
     astyle_py --dry-run --astyle-version=3.4.7 --style=otbs \
@@ -435,7 +452,12 @@ format-check:
         --convert-tabs --align-reference=name \
         --keep-one-line-statements --pad-header --pad-oper \
         --unpad-paren --max-continuation-indent=120 \
-        $(find firmware/components firmware/main \( -name '*.c' -o -name '*.h' \))
+        $(rg --files firmware -g '*.c' -g '*.h' \
+            -g '!firmware/build/**' \
+            -g '!firmware/managed_components/**' \
+            -g '!firmware/test/build/**' \
+            -g '!firmware/test_app/build/**' \
+            -g '!firmware/test_app/managed_components/**')
 
 ci: format-check build test
 
@@ -449,27 +471,33 @@ setup:
 
 clean:
     rm -rf firmware/build firmware/test/build \
-        firmware/test_app/build firmware/.pytest_cache \
-        firmware/test_app/.pytest_cache
+        firmware/test_app/build firmware/test_app/sdkconfig \
+        firmware/test_app/sdkconfig.old \
+        firmware/test_app/managed_components \
+        firmware/.pytest_cache firmware/test_app/.pytest_cache
 ```
 
 ---
 
 ## 6. Pre-commit Hook
 
-Shell script at `tools/pre-commit-hook.sh` that checks staged
-`firmware/**/*.{c,h}` files against astyle_py. Same flags as
-`just format-check`, but only operates on staged files for speed.
+Shell script at `tools/pre-commit-hook.sh` that checks the staged
+snapshot of `firmware/**/*.{c,h}` files against astyle_py. Same flags as
+`just format-check`, but only operates on staged files for speed and so
+partial staging is handled correctly.
 
 ```bash
 #!/usr/bin/env bash
 # Pre-commit hook: verify C/H formatting with astyle_py
 set -euo pipefail
 
-STAGED=$(git diff --cached --name-only --diff-filter=ACM \
-    | grep -E '^firmware/.*\.[ch]$' || true)
+mapfile -t STAGED_FILES < <(
+    git diff --cached --name-only --diff-filter=ACM \
+        | grep -E '^firmware/.*\.[ch]$' \
+        | grep -Ev '^firmware/(build|managed_components|test/build|test_app/build|test_app/managed_components)/' || true
+)
 
-if [ -z "$STAGED" ]; then
+if [ "${#STAGED_FILES[@]}" -eq 0 ]; then
     exit 0
 fi
 
@@ -484,8 +512,18 @@ ASTYLE_FLAGS="--astyle-version=3.4.7 --style=otbs \
     --keep-one-line-statements --pad-header --pad-oper \
     --unpad-paren --max-continuation-indent=120"
 
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
+
+TMP_FILES=()
+for path in "${STAGED_FILES[@]}"; do
+    mkdir -p "$TMPDIR/$(dirname "$path")"
+    git show ":$path" > "$TMPDIR/$path"
+    TMP_FILES+=("$TMPDIR/$path")
+done
+
 # shellcheck disable=SC2086
-if ! astyle_py --dry-run $ASTYLE_FLAGS $STAGED; then
+if ! astyle_py --dry-run $ASTYLE_FLAGS "${TMP_FILES[@]}"; then
     echo ""
     echo "Formatting errors detected. Run 'just format' to fix."
     exit 1
@@ -579,7 +617,6 @@ firmware/test_app/build/
 firmware/test_app/sdkconfig
 firmware/test_app/sdkconfig.old
 firmware/test_app/managed_components/
-firmware/test_app/dependencies.lock
 firmware/.pytest_cache/
 firmware/test_app/.pytest_cache/
 ```
@@ -600,8 +637,10 @@ Each step is a discrete, committable unit of work:
 6. Write host tests for `mod_io` (I2C stubs, state machine, read/write
    behavior)
 7. Create on-device `test_app/` project structure
+   and wire it to `../components`
 8. Write on-device tests for all 5 components
 9. Create pytest driver files (`pytest_evb_relay.py`, `conftest.py`)
+   including serial provisioning helpers for integration auth setup
 10. Create integration test structure (`test_integration/`)
 11. Create `Justfile` with all recipes
 12. Create pre-commit hook (`tools/pre-commit-hook.sh`)
@@ -631,6 +670,8 @@ just test-integration   # System-level pytest (requires hardware)
 - `just test-integration` passes on that same self-hosted runner with
   working Ethernet access to the DUT
 - `just format-check` exits 0 on all existing firmware source files
+- `just format` and `just format-check` cover production and test C/H
+  sources with the same file-selection rules
 - Pre-commit hook blocks commits with formatting violations
 - All 3 testable components have host-level test coverage for their
   public API boundary conditions
