@@ -1,0 +1,569 @@
+# QA Plan — esp32-evb-relay Firmware
+
+> Comprehensive quality assurance strategy for the ESP32-EVB relay controller
+> firmware. Covers testing architecture, per-component test plans, formatting
+> enforcement, CI recipes, and infrastructure details.
+
+## Current State
+
+- 5 custom ESP-IDF components (`board`, `relay`, `mod_io`, `device_config`,
+  `rest_api`) with **zero tests**
+- No formatting enforcement
+- No build automation beyond manual `idf.py build`
+- Hardware (ESP32-EVB + MOD-IO) available at `/dev/ttyS4`
+- Hardware will be on GitHub Actions runners
+
+---
+
+## 1. Three-Tier Test Architecture
+
+Based on ESP-IDF testing best practices and our hardware constraints.
+
+### Tier 1 — Host Unit Tests (Linux, no hardware)
+
+For components whose logic can be tested without real hardware. Fast
+feedback loop, runs on any dev machine or CI runner.
+
+Two sub-approaches depending on driver availability:
+
+#### Tier 1a — Linux Target (`idf.py --preview set-target linux`)
+
+For components that don't use GPIO/I2C. ESP-IDF provides native Linux
+ports of FreeRTOS, Unity, `esp_event`, `esp_timer`.
+
+**Works for:** `device_config` (validation logic only — NVS stubs needed)
+
+#### Tier 1b — Standalone CMake with Stubs
+
+For components that use GPIO/I2C (which have no Linux port).
+Hand-written stubs track GPIO levels and I2C transactions so tests can
+assert behavior without hardware.
+
+**Works for:** `relay`, `mod_io`
+
+**Common properties:**
+- Uses Unity `TEST_CASE()` macros for auto-registration
+- Runs via `just test` — fast feedback, no hardware needed
+- AddressSanitizer (`-fsanitize=address`) + UBSan
+  (`-fsanitize=undefined`) enabled
+- Target: < 2 seconds total execution
+
+### Tier 2 — On-Device Unity Tests (ESP32-EVB hardware)
+
+Flash test firmware to the device, run Unity tests via serial.
+
+- Tests real GPIO toggle, real I2C to MOD-IO, real NVS, real HTTP server
+- Works for **all 5 components**
+- Driven by `pytest-embedded` (`pytest --target esp32`)
+- Available on CI (GitHub runner has hardware at `/dev/ttyS4`)
+- Runs via `just test-device`
+
+### Tier 3 — Integration / System Tests
+
+Full firmware + pytest automation via serial and network.
+
+- End-to-end scenarios: REST API calls → relay state → MOD-IO sync
+- `dut.expect()` / `dut.write()` for serial interaction
+- HTTP client drives REST endpoints from the host
+- Runs via `just test-integration`
+
+---
+
+## 2. Per-Component Test Plan
+
+### device_config — Tier 1a (Linux target) + Tier 2
+
+**Host tests (Tier 1a):**
+- `poll_interval_ms` validation: below min (49) → `ESP_ERR_INVALID_ARG`,
+  at min (50) → `ESP_OK`, at max (10000) → `ESP_OK`, above max (10001)
+  → `ESP_ERR_INVALID_ARG`, default value is 100
+- Hostname validation: empty string → reject, single char `"a"` → accept,
+  63-char string → accept, 64-char string → reject, leading hyphen →
+  reject, trailing hyphen → reject, embedded hyphen → accept, special
+  chars (`"host.name"`, `"host_name"`) → reject, alphanumeric → accept
+- `modio_boot_policy` parsing: `"leave_unchanged"` → enum 0,
+  `"all_off"` → enum 1, `"bogus"` → `ESP_ERR_INVALID_ARG`,
+  NULL → `ESP_ERR_INVALID_ARG`
+- `modio_boot_policy_to_string`: round-trip with parse
+- API token validation: NULL/empty → accept (clears token), 255-char
+  string → accept, 256-char string → reject
+- Snapshot consistency: after setting values, snapshot reflects them
+- Key descriptor lookup: valid keys return non-NULL with correct
+  metadata, out-of-range key returns NULL
+
+**On-device tests (Tier 2):**
+- NVS persistence: set value, re-init, read back → matches
+- Get/set round-trip for all config keys
+- Default values correct on fresh NVS
+
+### relay — Tier 1b (stubs) + Tier 2
+
+**Host tests (Tier 1b):**
+- `relay_validate_id` boundaries: 0 → `ESP_ERR_INVALID_ARG`, 1 → `ESP_OK`,
+  2 → `ESP_OK`, 3 → `ESP_ERR_INVALID_ARG`, 255 → `ESP_ERR_INVALID_ARG`
+- Init idempotency: second `relay_init()` returns `ESP_OK` without
+  reconfiguring GPIOs
+- Init sets all relays OFF: GPIO stub levels for pin 32 and 33 are both 0
+  after init
+- `relay_set`: set relay 1 ON → GPIO 32 level is 1, set relay 1 OFF →
+  GPIO 32 level is 0
+- `relay_get`: after set ON, get returns `true`; after set OFF, get
+  returns `false`
+- `relay_toggle`: from OFF → ON → OFF cycle, GPIO levels match
+- NULL pointer rejection: `relay_get(1, NULL)` → `ESP_ERR_INVALID_ARG`
+- Uninitialized state rejection: before `relay_init()`, `relay_set()`
+  → `ESP_ERR_INVALID_STATE`
+- GPIO stubs verify correct pin and level for each operation
+
+**On-device tests (Tier 2):**
+- Real GPIO toggle verified by reading back GPIO level
+- `relay_init()` sets both relays OFF
+- Event loop integration: register handler, toggle relay, verify
+  `EVB_RELAY_EVENT_RELAY_CHANGED` event received with correct
+  group/id/state
+
+### mod_io — Tier 1b (stubs) + Tier 2
+
+**Host tests (Tier 1b):**
+- I2C stubs capture transaction bytes and verify protocol:
+  - Relay write: command `0x10` + 1 byte mask
+  - Digital input read: command `0x20`, returns 1 byte
+  - Analog input read: commands `0x30`–`0x33`, returns 2 bytes each
+  - Relay readback: command `0x40`, returns 1 byte
+- State machine transitions: probe → present, absent → probe fails
+  → stays absent
+- `mod_io_validate_relay_mask`: `0x0F` → valid, `0x10` → invalid
+- `mod_io_validate_relay_id`: 0 → invalid, 1–4 → valid, 5 → invalid
+- `mod_io_validate_input_id`: 0 → invalid, 1–4 → valid, 5 → invalid
+- `mod_io_decode_analog_sample`: verify bit-reversal decoding with known
+  byte pairs (e.g., `{0x80, 0x00}` → 1, `{0x01, 0x00}` → 128,
+  `{0xFF, 0x03}` → 1023)
+- `mod_io_relay_sync_to_string`: all enum values produce correct strings
+- `mod_io_set_relays`: after successful write, relay_sync becomes
+  `SYNCHRONIZED` and relay_mask matches
+- `mod_io_set_relay`: individual relay set modifies correct bit in mask
+- Reconciliation on transaction failure: stub returns error → probe
+  called → if probe fails, mark absent
+- Mutex correctness: operations on uninitialized state →
+  `ESP_ERR_INVALID_STATE`
+
+**On-device tests (Tier 2):**
+- I2C probe finds device at `0x58`
+- Relay set + readback: write mask `0x05`, read back `0x05`
+- Digital input read returns valid mask (bits 0–3 only)
+- Analog input read: 4 channels return values in 0–1023 range
+- All-off after test: write `0x00`, verify readback `0x00`
+
+### board — Tier 2 only
+
+Thin init wrapper with minimal logic to unit test.
+
+**On-device tests (Tier 2):**
+- `board_init()` returns `ESP_OK`
+- `board_i2c_bus_handle()` returns non-NULL after init
+- Idempotent init: second `board_init()` returns `ESP_OK` without error
+
+### rest_api — Tier 2 + Tier 3
+
+**On-device tests (Tier 2):**
+- HTTP server starts on configured port
+- `rest_api_parse_id_from_uri`: various URI patterns return correct IDs
+- `rest_api_modio_sync_to_string`: all enum values → correct strings
+- Auth handler: mock handler returning `UNAUTHORIZED` → 401 response
+
+**Integration tests (Tier 3):**
+- pytest drives HTTP requests from host to device IP
+- `GET /api/v1/status` returns valid JSON with expected schema
+- Relay state changes via REST API propagate to actual relay state
+- Auth token enforcement: requests without token → 401, with valid
+  token → 200
+
+---
+
+## 3. Test Infrastructure
+
+### Directory Structure
+
+```
+firmware/
+  test/                              # Host tests (Tier 1)
+    CMakeLists.txt                   # Top-level host test CMake project
+    test_main.c                      # Unity entry point (runs all suites)
+    stubs/
+      sdkconfig.h                    # Minimal CONFIG_* defines for host build
+      esp_idf_stubs.h               # Stub declarations
+      esp_idf_stubs.c               # esp_log, esp_err_to_name, esp_timer
+      freertos_stubs.h              # Stub declarations
+      freertos_stubs.c              # Semaphore ops (always succeed)
+      gpio_stubs.h                  # Test accessors for GPIO state
+      gpio_stubs.c                  # gpio_config/set_level + level tracking
+      i2c_stubs.h                   # Test accessors for I2C transactions
+      i2c_stubs.c                   # I2C master ops + transaction capture
+      esp_event_stubs.h             # Stub declarations
+      esp_event_stubs.c             # esp_event_post noop + event base defn
+      nvs_stubs.h                   # Test accessors for NVS state
+      nvs_stubs.c                   # NVS get/set with in-memory backing
+    relay/
+      test_relay.c                  # Relay host unit tests
+    mod_io/
+      test_mod_io.c                 # MOD-IO host unit tests
+    device_config/
+      test_device_config.c          # Device config host unit tests
+  test_app/                          # On-device tests (Tier 2)
+    CMakeLists.txt                   # IDF project targeting ESP32
+    sdkconfig.defaults               # Base device test config
+    sdkconfig.ci                     # CI-specific overrides
+    main/
+      CMakeLists.txt                 # Component registration
+      test_main.c                    # Unity runner (unity_run_menu)
+      test_relay_device.c            # On-device relay tests
+      test_mod_io_device.c           # On-device MOD-IO tests
+      test_board_device.c            # On-device board init tests
+      test_device_config_device.c    # On-device config tests
+      test_rest_api_device.c         # On-device REST API tests
+    pytest_evb_relay.py              # pytest-embedded test driver
+  test_integration/                  # Integration tests (Tier 3)
+    pytest_integration.py            # System-level pytest scenarios
+    conftest.py                      # Shared fixtures (serial, HTTP client)
+```
+
+### Key Patterns from ESP-IDF
+
+- `TEST_CASE("description", "[tag]")` macro for auto-registration
+  with Unity
+- `dut.run_all_single_board_cases()` in pytest-embedded for Unity
+  runner interaction
+- `sdkconfig.ci.*` files for CI-specific build configurations
+- `#ifdef UNIT_TEST` guard for test-only reset functions in production
+  code (allows resetting static state between test cases)
+- Component `test/` directories with `idf_component_register()` for
+  IDF-native component tests
+
+### Test Reset Functions
+
+Production source files (`relay.c`, `mod_io.c`, `device_config.c`) need
+`#ifdef UNIT_TEST` guarded reset functions to allow test isolation:
+
+```c
+#ifdef UNIT_TEST
+void relay_reset_for_testing(void)
+{
+    memset(&s_state, 0, sizeof(s_state));
+    s_lock = NULL;
+}
+#endif
+```
+
+These reset static state between test cases without requiring process
+restart. The `UNIT_TEST` define is set only by the host test
+`CMakeLists.txt`.
+
+### Stub Design Principles
+
+**GPIO stubs (`gpio_stubs.c`):**
+- Track configured pin modes and current levels in static arrays
+- `gpio_config()` records pin_bit_mask and mode
+- `gpio_set_level()` records level per pin
+- Test accessors: `gpio_stub_get_level(gpio_num)`,
+  `gpio_stub_reset()`
+
+**I2C stubs (`i2c_stubs.c`):**
+- Capture transmitted bytes into a transaction log
+- Configurable return values for probe/transmit/receive
+- Pre-loadable receive buffers for read operations
+- Test accessors: `i2c_stub_get_last_transaction()`,
+  `i2c_stub_set_probe_result()`, `i2c_stub_set_read_data()`,
+  `i2c_stub_reset()`
+
+**NVS stubs (`nvs_stubs.c`):**
+- In-memory key-value store (hash map or fixed array)
+- Supports `nvs_get_str`, `nvs_set_str`, `nvs_get_u8`, `nvs_set_u8`,
+  `nvs_get_u32`, `nvs_set_u32`, `nvs_erase_key`, `nvs_commit`
+- `nvs_flash_init()` / `nvs_flash_erase()` clear the backing store
+- Test accessor: `nvs_stub_reset()`
+
+**FreeRTOS stubs (`freertos_stubs.c`):**
+- `xSemaphoreCreateMutexStatic()` returns a non-NULL sentinel
+- `xSemaphoreTake()` always returns `pdTRUE`
+- `xSemaphoreGive()` is a no-op
+- Single-threaded test environment — no actual synchronization needed
+
+**ESP-IDF stubs (`esp_idf_stubs.c`):**
+- `esp_log_write()` → `printf` to stderr
+- `esp_err_to_name()` → static string lookup for common error codes
+- `esp_timer_get_time()` → monotonic clock via `clock_gettime()`
+- `esp_event_post()` → no-op returning `ESP_OK` (or capture for
+  verification)
+
+---
+
+## 4. Formatting Enforcement
+
+### Tool
+
+`astyle_py` (AStyle 3.4.7) — same formatter used by ESP-IDF upstream.
+
+### Style
+
+OTBS (One True Brace Style), 4-space indent, 120-character line limit.
+
+### Flags
+
+Matching `/home/ubuntu/esp/esp-idf/tools/format.sh`:
+
+```
+--style=otbs
+--attach-namespaces
+--attach-classes
+--indent=spaces=4
+--convert-tabs
+--align-reference=name
+--keep-one-line-statements
+--pad-header
+--pad-oper
+--unpad-paren
+--max-continuation-indent=120
+```
+
+### Enforcement Layers
+
+1. **`just format`** — auto-fix all `firmware/**/*.{c,h}` files in-place
+2. **`just format-check`** — dry-run for CI; exits non-zero on diff
+3. **Pre-commit hook** — shell script at `tools/pre-commit-hook.sh`
+   checks staged `firmware/**/*.{c,h}` files
+4. **`just ci`** recipe includes `format-check` as first gate
+
+---
+
+## 5. Justfile Recipes
+
+| Recipe              | What                                        | Tier        |
+|---------------------|---------------------------------------------|-------------|
+| `just build`        | `idf.py build` (ESP32 target)               | Build gate  |
+| `just test`         | cmake + ctest host tests                    | Tier 1      |
+| `just test-device`  | flash test_app + pytest                     | Tier 2      |
+| `just test-integration` | flash firmware + pytest integration     | Tier 3      |
+| `just format`       | astyle_py auto-fix                          | Format      |
+| `just format-check` | astyle_py dry-run                           | Format gate |
+| `just ci`           | format-check + build + test                 | Full gate   |
+| `just ci-full`      | ci + test-device + test-integration         | Full + HW   |
+| `just setup`        | pip install deps + install pre-commit hook  | One-time    |
+| `just clean`        | rm build artifacts                          | Cleanup     |
+
+### Recipe Details
+
+```just
+# Default serial port for hardware tests
+serial_port := env("EVB_SERIAL_PORT", "/dev/ttyS4")
+
+build:
+    cd firmware && idf.py build
+
+test:
+    cmake -S firmware/test -B firmware/test/build \
+        -DCMAKE_BUILD_TYPE=Debug
+    cmake --build firmware/test/build
+    cd firmware/test/build && ctest --output-on-failure
+
+test-device:
+    cd firmware/test_app && idf.py build
+    cd firmware/test_app && \
+        pytest --target esp32 -p no:cacheprovider \
+        --port {{serial_port}}
+
+test-integration:
+    cd firmware && idf.py build
+    cd firmware/test_integration && \
+        pytest --target esp32 -p no:cacheprovider \
+        --port {{serial_port}}
+
+format:
+    astyle_py --style=otbs --attach-namespaces --attach-classes \
+        --indent=spaces=4 --convert-tabs --align-reference=name \
+        --keep-one-line-statements --pad-header --pad-oper \
+        --unpad-paren --max-continuation-indent=120 \
+        $(find firmware/components firmware/main -name '*.c' -o -name '*.h')
+
+format-check:
+    astyle_py --dry-run --style=otbs --attach-namespaces \
+        --attach-classes --indent=spaces=4 --convert-tabs \
+        --align-reference=name --keep-one-line-statements \
+        --pad-header --pad-oper --unpad-paren \
+        --max-continuation-indent=120 \
+        $(find firmware/components firmware/main -name '*.c' -o -name '*.h')
+
+ci: format-check build test
+
+ci-full: ci test-device test-integration
+
+setup:
+    pip install astyle_py pytest-embedded \
+        pytest-embedded-serial-esp pytest-embedded-idf
+    cp tools/pre-commit-hook.sh .git/hooks/pre-commit
+    chmod +x .git/hooks/pre-commit
+
+clean:
+    rm -rf firmware/build firmware/test/build \
+        firmware/test_app/build
+```
+
+---
+
+## 6. Pre-commit Hook
+
+Shell script at `tools/pre-commit-hook.sh` that checks staged
+`firmware/**/*.{c,h}` files against astyle_py. Same flags as
+`just format-check`, but only operates on staged files for speed.
+
+```bash
+#!/usr/bin/env bash
+# Pre-commit hook: verify C/H formatting with astyle_py
+set -euo pipefail
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACM \
+    | grep -E '^firmware/.*\.[ch]$' || true)
+
+if [ -z "$STAGED" ]; then
+    exit 0
+fi
+
+if ! command -v astyle_py &>/dev/null; then
+    echo "ERROR: astyle_py not found. Run: pip install astyle_py"
+    exit 1
+fi
+
+ASTYLE_FLAGS="--style=otbs --attach-namespaces --attach-classes \
+    --indent=spaces=4 --convert-tabs --align-reference=name \
+    --keep-one-line-statements --pad-header --pad-oper \
+    --unpad-paren --max-continuation-indent=120"
+
+# shellcheck disable=SC2086
+if ! astyle_py --dry-run $ASTYLE_FLAGS $STAGED; then
+    echo ""
+    echo "Formatting errors detected. Run 'just format' to fix."
+    exit 1
+fi
+```
+
+---
+
+## 7. AGENTS.md Updates
+
+The following changes should be made to `CLAUDE.md` (which serves as
+the project's AGENTS.md):
+
+### Replace "Compiler Checks (CRITICAL)" Section
+
+Replace with:
+
+> ### Quality Gates (CRITICAL)
+>
+> **After any firmware code changes, you MUST run `just ci` before
+> committing:**
+>
+> ```bash
+> just ci    # format-check + build + host tests
+> ```
+>
+> If you changed component behavior, also run `just test-device` if
+> hardware is available.
+>
+> If you see errors, **carefully understand and resolve each issue**.
+> Read sufficient context to fix them the RIGHT way.
+
+### Add Test Requirements
+
+> ### Test Requirements
+>
+> - New or changed public API functions MUST have corresponding host
+>   tests (Tier 1)
+> - Bug fixes MUST include a regression test
+> - Run `just format` before committing any firmware C/H files
+
+### Update Session Protocol
+
+Add `just ci` step before `git add`:
+
+```bash
+just ci                 # Quality gate (MUST pass)
+git status              # Check what changed
+git add <files>         # Stage code changes
+```
+
+### Update Landing the Plane
+
+Replace quality gate step with:
+
+> 2. **Run quality gates** (if code changed) — `just ci` (or
+>    `just ci-full` if hardware available)
+
+### Add Commit Prefixes
+
+Add to existing commit prefix list:
+
+- `test:` — test infrastructure, test cases
+- `ci:` — CI configuration, Justfile recipes, pre-commit hooks
+
+---
+
+## 8. Dependencies
+
+```bash
+pip install astyle_py \
+    pytest-embedded \
+    pytest-embedded-serial-esp \
+    pytest-embedded-idf
+```
+
+These are needed on both developer machines and CI runners.
+
+### .gitignore Additions
+
+```
+firmware/test/build/
+firmware/test_app/build/
+```
+
+---
+
+## 9. Implementation Sequence
+
+Each step is a discrete, committable unit of work:
+
+1. Install dependencies (`astyle_py`, `pytest-embedded`)
+2. Create host test infrastructure: stubs + `CMakeLists.txt` +
+   `test_main.c`
+3. Add `#ifdef UNIT_TEST` reset functions to `relay.c`, `mod_io.c`,
+   `device_config.c`
+4. Write host tests for `device_config` (validation logic)
+5. Write host tests for `relay` (state machine, GPIO stubs)
+6. Write host tests for `mod_io` (I2C stubs, state machine, decode)
+7. Create on-device `test_app/` project structure
+8. Write on-device tests for all 5 components
+9. Create pytest driver files (`pytest_evb_relay.py`, `conftest.py`)
+10. Create integration test structure (`test_integration/`)
+11. Create `Justfile` with all recipes
+12. Create pre-commit hook (`tools/pre-commit-hook.sh`)
+13. Update `CLAUDE.md` with quality gate requirements
+14. Update `.gitignore` with test build directories
+15. Verify: `just ci` passes, `just test-device` passes
+
+---
+
+## 10. Verification
+
+```bash
+just setup              # Install deps + hook
+just ci                 # format-check + build + host tests
+just test-device        # On-device Unity tests (requires hardware)
+just test-integration   # System-level pytest (requires hardware)
+```
+
+### Success Criteria
+
+- `just ci` passes with zero failures on any Linux machine with ESP-IDF
+- `just test-device` passes on runner with ESP32-EVB at `/dev/ttyS4`
+- `just format-check` exits 0 on all existing firmware source files
+- Pre-commit hook blocks commits with formatting violations
+- All 3 testable components have host-level test coverage for their
+  public API boundary conditions
