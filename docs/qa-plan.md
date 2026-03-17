@@ -11,7 +11,8 @@
 - No formatting enforcement
 - No build automation beyond manual `idf.py build`
 - Hardware (ESP32-EVB + MOD-IO) available at `/dev/ttyS4`
-- Hardware will be on GitHub Actions runners
+- Hardware-backed CI is expected to run on a self-hosted GitHub Actions
+  runner with `/dev/ttyS4` attached
 
 ### Critical QA Prerequisites
 
@@ -63,7 +64,7 @@ Flash test firmware to the device, run Unity tests via serial.
 - Tests real GPIO toggle, real I2C to MOD-IO, real NVS, real HTTP server
 - Works for **all 5 components**
 - Driven by `pytest-embedded` (`pytest --target esp32`)
-- Available on CI (GitHub runner has hardware at `/dev/ttyS4`)
+- Available on CI via a self-hosted runner that exposes `/dev/ttyS4`
 - Runs via `just test-device`
 
 ### Tier 3 — Integration / System Tests
@@ -189,11 +190,14 @@ Thin init wrapper with minimal logic to unit test.
 - Auth handler: mock handler returning `UNAUTHORIZED` → 401 response
 
 **Integration tests (Tier 3):**
-- pytest drives HTTP requests from host to device IP
+- pytest fixture resolves device IP and provisions a valid token before
+  authenticated HTTP checks
 - `GET /api/v1/status` returns valid JSON with expected schema
 - Relay state changes via REST API propagate to actual relay state
 - Auth token enforcement: requests without token → 401, with valid
   token → 200
+- Authenticated responses include device-context headers;
+  pre-auth `401`/`403` responses do not
 
 ---
 
@@ -358,16 +362,20 @@ Matching `/home/ubuntu/esp/esp-idf/tools/format.sh`:
 |---------------------|---------------------------------------------|-------------|
 | `just build`        | `idf.py build` (ESP32 target)               | Build gate  |
 | `just test`         | cmake + ctest host tests                    | Tier 1      |
-| `just test-device`  | flash test_app + pytest                     | Tier 2      |
-| `just test-integration` | flash firmware + pytest integration     | Tier 3      |
+| `just test-device`  | pytest-embedded build/flash/run test_app    | Tier 2      |
+| `just test-integration` | pytest-embedded build/flash firmware + HTTP checks | Tier 3      |
 | `just format`       | astyle_py auto-fix                          | Format      |
 | `just format-check` | astyle_py dry-run                           | Format gate |
 | `just ci`           | format-check + build + test                 | Full gate   |
-| `just ci-full`      | ci + test-device + test-integration         | Full + HW   |
+| `just ci-full`      | ci + test-device + test-integration         | Full + HW (self-hosted) |
 | `just setup`        | pip install deps + install pre-commit hook  | One-time    |
 | `just clean`        | rm build artifacts                          | Cleanup     |
 
 ### Recipe Details
+
+Hardware recipes should let `pytest-embedded` own the build/flash/monitor
+lifecycle. That keeps the flashed image coupled to the test invocation instead
+of depending on whatever binary was already on the board.
 
 ```just
 # Default serial port for hardware tests
@@ -383,15 +391,14 @@ test:
     cd firmware/test/build && ctest --output-on-failure
 
 test-device:
-    cd firmware/test_app && idf.py build
     cd firmware/test_app && \
         pytest --target esp32 -p no:cacheprovider \
         --port {{serial_port}}
 
 test-integration:
-    cd firmware && idf.py build
-    cd firmware/test_integration && \
+    cd firmware && \
         pytest --target esp32 -p no:cacheprovider \
+        test_integration \
         --port {{serial_port}}
 
 format:
@@ -563,7 +570,8 @@ Each step is a discrete, committable unit of work:
 12. Create pre-commit hook (`tools/pre-commit-hook.sh`)
 13. Update `CLAUDE.md` with quality gate requirements
 14. Update `.gitignore` with test build directories
-15. Verify: `just ci` passes, `just test-device` passes
+15. Verify: `just ci` passes, `just test-device` passes,
+    `just test-integration` passes
 
 ---
 
@@ -579,7 +587,10 @@ just test-integration   # System-level pytest (requires hardware)
 ### Success Criteria
 
 - `just ci` passes with zero failures on any Linux machine with ESP-IDF
-- `just test-device` passes on runner with ESP32-EVB at `/dev/ttyS4`
+- `just test-device` passes on a self-hosted runner with ESP32-EVB at
+  `/dev/ttyS4`
+- `just test-integration` passes on that same self-hosted runner with
+  working Ethernet access to the DUT
 - `just format-check` exits 0 on all existing firmware source files
 - Pre-commit hook blocks commits with formatting violations
 - All 3 testable components have host-level test coverage for their
