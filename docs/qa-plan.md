@@ -254,7 +254,8 @@ firmware/
   explicitly for the standalone Unity harness
 - `dut.run_all_single_board_cases()` in pytest-embedded for Unity
   runner interaction
-- `sdkconfig.ci.*` files for CI-specific build configurations
+- `sdkconfig.ci` (and `sdkconfig.ci.*` later if variants become necessary)
+  for CI-specific build configurations
 - `#ifdef UNIT_TEST` guard for test-only reset functions in production
   code (allows resetting static state between test cases)
 - Dedicated `firmware/test/` host harness keeps stubs and host-only
@@ -461,11 +462,12 @@ if [ -z "$STAGED" ]; then
 fi
 
 if ! command -v astyle_py &>/dev/null; then
-    echo "ERROR: astyle_py not found. Run: pip install astyle_py"
+    echo "ERROR: astyle_py not found. Run: python3 -m pip install astyle_py"
     exit 1
 fi
 
-ASTYLE_FLAGS="--style=otbs --attach-namespaces --attach-classes \
+ASTYLE_FLAGS="--astyle-version=3.4.7 --style=otbs \
+    --attach-namespaces --attach-classes \
     --indent=spaces=4 --convert-tabs --align-reference=name \
     --keep-one-line-statements --pad-header --pad-oper \
     --unpad-paren --max-continuation-indent=120"
@@ -482,8 +484,8 @@ fi
 
 ## 7. AGENTS.md Updates
 
-The following changes should be made to `CLAUDE.md` (which serves as
-the project's AGENTS.md):
+The following changes should be made to `AGENTS.md` (the repo also keeps
+`CLAUDE.md` as a symlink to it):
 
 ### Replace "Compiler Checks (CRITICAL)" Section
 
@@ -508,8 +510,9 @@ Replace with:
 
 > ### Test Requirements
 >
-> - New or changed public API functions MUST have corresponding host
->   tests (Tier 1)
+> - New or changed firmware public APIs MUST have corresponding Tier 1
+>   host tests when the code can run in the host harness; otherwise add
+>   the narrowest possible Tier 2 regression coverage
 > - Bug fixes MUST include a regression test
 > - Run `just format` before committing any firmware C/H files
 
@@ -528,7 +531,7 @@ git add <files>         # Stage code changes
 Replace quality gate step with:
 
 > 2. **Run quality gates** (if code changed) — `just ci` (or
->    `just ci-full` if hardware available)
+>    `just ci-full` when the self-hosted hardware lane is available)
 
 ### Add Commit Prefixes
 
@@ -570,17 +573,18 @@ Each step is a discrete, committable unit of work:
    `test_main.c`
 3. Add `#ifdef UNIT_TEST` reset functions to `relay.c`, `mod_io.c`,
    `device_config.c`
-4. Write host tests for `device_config` (validation logic)
+4. Write host tests for `device_config` (validation + NVS-backed behavior)
 5. Write host tests for `relay` (state machine, GPIO stubs)
-6. Write host tests for `mod_io` (I2C stubs, state machine, decode)
+6. Write host tests for `mod_io` (I2C stubs, state machine, read/write
+   behavior)
 7. Create on-device `test_app/` project structure
 8. Write on-device tests for all 5 components
 9. Create pytest driver files (`pytest_evb_relay.py`, `conftest.py`)
 10. Create integration test structure (`test_integration/`)
 11. Create `Justfile` with all recipes
 12. Create pre-commit hook (`tools/pre-commit-hook.sh`)
-13. Update `CLAUDE.md` with quality gate requirements
-14. Update `.gitignore` with test build directories
+13. Update `AGENTS.md` with quality gate requirements
+14. Update `.gitignore` with test build directories and pytest caches
 15. Verify: `just ci` passes, `just test-device` passes,
     `just test-integration` passes
 
