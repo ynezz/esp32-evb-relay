@@ -35,29 +35,26 @@ Based on ESP-IDF testing best practices and our hardware constraints.
 For components whose logic can be tested without real hardware. Fast
 feedback loop, runs on any dev machine or CI runner.
 
-Two sub-approaches depending on driver availability:
+Primary approach: standalone CMake with focused stubs. Hand-written
+stubs track GPIO levels, I2C transactions, events, and NVS state so
+tests can assert behavior without hardware. This keeps all host tests in
+one harness instead of splitting coverage across a second, more
+experimental Linux-target path.
 
-#### Tier 1a — Linux Target (`idf.py --preview set-target linux`)
-
-For components that don't use GPIO/I2C. ESP-IDF provides native Linux
-ports of FreeRTOS, Unity, `esp_event`, `esp_timer`.
-
-**Works for:** `device_config` (validation logic only — NVS stubs needed)
-
-#### Tier 1b — Standalone CMake with Stubs
-
-For components that use GPIO/I2C (which have no Linux port).
-Hand-written stubs track GPIO levels and I2C transactions so tests can
-assert behavior without hardware.
-
-**Works for:** `relay`, `mod_io`
+**Works for:** `device_config`, `relay`, `mod_io`
 
 **Common properties:**
-- Uses Unity `TEST_CASE()` macros for auto-registration
+- Uses plain Unity assertions with an explicit `test_main.c` runner
+- Exercises public APIs and observable side effects; private static
+  helpers are covered indirectly
 - Runs via `just test` — fast feedback, no hardware needed
 - AddressSanitizer (`-fsanitize=address`) + UBSan
   (`-fsanitize=undefined`) enabled
 - Target: < 2 seconds total execution
+
+ESP-IDF's Linux target can still be evaluated later for broader
+whole-component smoke coverage, but it should not be the base Tier 1
+strategy for this plan.
 
 ### Tier 2 — On-Device Unity Tests (ESP32-EVB hardware)
 
@@ -82,9 +79,9 @@ Full firmware + pytest automation via serial and network.
 
 ## 2. Per-Component Test Plan
 
-### device_config — Tier 1a (Linux target) + Tier 2
+### device_config — Tier 1 (stubs) + Tier 2
 
-**Host tests (Tier 1a):**
+**Host tests (Tier 1):**
 - `poll_interval_ms` validation: below min (49) → `ESP_ERR_INVALID_ARG`,
   at min (50) → `ESP_OK`, at max (10000) → `ESP_OK`, above max (10001)
   → `ESP_ERR_INVALID_ARG`, default value is 100
@@ -107,11 +104,11 @@ Full firmware + pytest automation via serial and network.
 - Get/set round-trip for all config keys
 - Default values correct on fresh NVS
 
-### relay — Tier 1b (stubs) + Tier 2
+### relay — Tier 1 (stubs) + Tier 2
 
-**Host tests (Tier 1b):**
-- `relay_validate_id` boundaries: 0 → `ESP_ERR_INVALID_ARG`, 1 → `ESP_OK`,
-  2 → `ESP_OK`, 3 → `ESP_ERR_INVALID_ARG`, 255 → `ESP_ERR_INVALID_ARG`
+**Host tests (Tier 1):**
+- Invalid relay IDs are rejected through the public API: 0 and 255 reject
+  on `relay_set`, `relay_get`, and `relay_toggle`; 1 and 2 remain valid
 - Init idempotency: second `relay_init()` returns `ESP_OK` without
   reconfiguring GPIOs
 - Init sets all relays OFF: GPIO stub levels for pin 32 and 33 are both 0
@@ -133,13 +130,13 @@ Full firmware + pytest automation via serial and network.
   `EVB_RELAY_EVENT_RELAY_CHANGED` event received with correct
   group/id/state
 
-### mod_io — Tier 1b (stubs) + Tier 2
+### mod_io — Tier 1 (stubs) + Tier 2
 
 Resolve the relay readback vs unknown-state design conflict first. The
 component-level tests below should follow one authoritative model, not encode
 both simultaneously.
 
-**Host tests (Tier 1b):**
+**Host tests (Tier 1):**
 - I2C stubs capture transaction bytes and verify protocol:
   - Relay write: command `0x10` + 1 byte mask
   - Digital input read: command `0x20`, returns 1 byte
@@ -148,15 +145,15 @@ both simultaneously.
     command `0x40`, returns 1 byte
 - State machine transitions: probe → present, absent → probe fails
   → stays absent
-- `mod_io_validate_relay_mask`: `0x0F` → valid, `0x10` → invalid
-- `mod_io_validate_relay_id`: 0 → invalid, 1–4 → valid, 5 → invalid
-- `mod_io_validate_input_id`: 0 → invalid, 1–4 → valid, 5 → invalid
-- `mod_io_decode_analog_sample`: verify bit-reversal decoding with known
-  byte pairs (e.g., `{0x80, 0x00}` → 1, `{0x01, 0x00}` → 128,
+- `mod_io_set_relays`: `0x0F` is accepted, `0x10` is rejected, and a
+  successful write transitions relay sync to `SYNCHRONIZED`
+- `mod_io_set_relay`: 0 → invalid, 1–4 → valid when synchronized,
+  5 → invalid
+- `mod_io_read_analog_input`: 0 → invalid, 1–4 → valid, 5 → invalid
+- Public analog read APIs return correctly decoded samples for known
+  byte pairs (for example `{0x80, 0x00}` → 1, `{0x01, 0x00}` → 128,
   `{0xFF, 0x03}` → 1023)
 - `mod_io_relay_sync_to_string`: all enum values produce correct strings
-- `mod_io_set_relays`: after successful write, relay_sync becomes
-  `SYNCHRONIZED` and relay_mask matches
 - `mod_io_set_relay`: individual relay set modifies correct bit in mask
 - Reconciliation on transaction failure: stub returns error → probe
   called → if probe fails, mark absent
@@ -249,15 +246,15 @@ firmware/
 
 ### Key Patterns from ESP-IDF
 
-- `TEST_CASE("description", "[tag]")` macro for auto-registration
-  with Unity
+- `test_main.c` owns host-side test registration and calls `RUN_TEST(...)`
+  explicitly for the standalone Unity harness
 - `dut.run_all_single_board_cases()` in pytest-embedded for Unity
   runner interaction
 - `sdkconfig.ci.*` files for CI-specific build configurations
 - `#ifdef UNIT_TEST` guard for test-only reset functions in production
   code (allows resetting static state between test cases)
-- Component `test/` directories with `idf_component_register()` for
-  IDF-native component tests
+- Dedicated `firmware/test/` host harness keeps stubs and host-only
+  glue out of production component builds
 
 ### Test Reset Functions
 
