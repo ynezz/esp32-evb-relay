@@ -102,6 +102,9 @@ def test_download_mode_helper_documents_runner_failure_signatures() -> None:
     assert "chip_id" in script_text
     assert "--before default_reset" in script_text
     assert "--after hard_reset" in script_text
+    assert "--console-port <serial-port>" in script_text
+    assert 'console_port="${EVB_SERIAL_PORT:-}"' in script_text
+    assert "Detected console activity on" in script_text
     assert "/docs/hardware-reference.md" in script_text
     assert "Failed to enter ESP32 ROM download mode" in script_text
 

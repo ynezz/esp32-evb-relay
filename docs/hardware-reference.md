@@ -48,6 +48,11 @@ EVB_FLASH_PORT=/dev/ttyS4 EVB_SERIAL_PORT=/dev/ttyS5 just test-device
 # and test-integration run this guardrail automatically before flashing.
 ./scripts/check-download-mode.sh --port /dev/ttyS4
 
+# On the current split-port runner, pass the live UART path as well so
+# the helper can show whether the probe only reset the app instead of
+# reaching the ROM downloader.
+./scripts/check-download-mode.sh --port /dev/ttyS4 --console-port /dev/ttyS5
+
 # Compile
 /tmp/arduino-cli compile --fqbn esp32:esp32:esp32-evb <sketch_dir>
 
@@ -90,6 +95,11 @@ python3 -m esptool --no-stub --chip esp32 --port /dev/ttyS4 \
   `/dev/ttyS5` reads boot/app console bytes such as `Invalid head of
   packet (0x5B)` because the board keeps rebooting into the flashed app
   instead of entering ROM download mode.
+- `scripts/check-download-mode.sh` now accepts `--console-port` (and
+  defaults it from `EVB_SERIAL_PORT` when distinct) so failed download
+  probes print a short live UART preview from `/dev/ttyS5`. That makes
+  the split control-vs-console mapping explicit without re-running
+  manual ad-hoc probes.
 - The image currently flashed on the board reports app version
   `2ae9772-dirty` with build time `2026-03-18 07:46:58 UTC`, which
   predates commit `7815069` that added `network_init()` before
