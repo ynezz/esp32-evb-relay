@@ -24,13 +24,15 @@ type persistentFlags struct {
 	robotCapabilities bool
 }
 
+func init() {
+	cobra.EnableTraverseRunHooks = true
+}
+
 func Execute() error {
 	return newRootCommand().Execute()
 }
 
 func newRootCommand() *cobra.Command {
-	cobra.EnableTraverseRunHooks = true
-
 	flags := persistentFlags{
 		timeout: appconfig.DefaultTimeout,
 	}

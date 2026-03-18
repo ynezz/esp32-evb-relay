@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/hashicorp/mdns"
@@ -107,17 +108,33 @@ func TestRobotCapabilitiesExposeCLIVersion(t *testing.T) {
 	})
 }
 
-func TestNewRootCommandEnablesTraverseRunHooks(t *testing.T) {
-	previous := cobra.EnableTraverseRunHooks
-	cobra.EnableTraverseRunHooks = false
-	t.Cleanup(func() {
-		cobra.EnableTraverseRunHooks = previous
-	})
-
-	newRootCommand()
-
+func TestPackageInitEnablesTraverseRunHooks(t *testing.T) {
 	if !cobra.EnableTraverseRunHooks {
 		t.Fatal("cobra.EnableTraverseRunHooks = false, want true")
+	}
+}
+
+func TestNewRootCommandIsSafeToBuildConcurrently(t *testing.T) {
+	const goroutineCount = 32
+
+	var wg sync.WaitGroup
+	commands := make(chan *cobra.Command, goroutineCount)
+
+	for range goroutineCount {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			commands <- newRootCommand()
+		}()
+	}
+
+	wg.Wait()
+	close(commands)
+
+	for cmd := range commands {
+		if cmd == nil {
+			t.Fatal("newRootCommand() = nil")
+		}
 	}
 }
 
