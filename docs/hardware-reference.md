@@ -5,8 +5,9 @@
 - **Chip:** ESP32-D0WD (revision v1.0)
 - **MAC:** `bc:dd:c2:f2:aa:19`
 - **Flash:** 4 MB
-- **Serial port:** `/dev/ttyS4` (PCI 16550 path, QEMU VM host)
-- **Serial baud:** 115200 (both for console and flashing)
+- **Flash/control port:** `/dev/ttyS4` on the current self-hosted runner
+- **Console port:** `/dev/ttyS5` on the current self-hosted runner
+- **Serial baud:** 115200
 - **Board FQBN:** `esp32:esp32:esp32-evb`
 
 ### Onboard Peripherals
@@ -38,6 +39,11 @@
 ### Flashing
 
 ```bash
+# Repo QA recipes prefer EVB_FLASH_PORT for flashing. Set EVB_SERIAL_PORT
+# as well when a runner exposes a separate live UART console path.
+# Example split-port invocation:
+EVB_FLASH_PORT=/dev/ttyS4 EVB_SERIAL_PORT=/dev/ttyS5 just test-device
+
 # Compile
 /tmp/arduino-cli compile --fqbn esp32:esp32:esp32-evb <sketch_dir>
 

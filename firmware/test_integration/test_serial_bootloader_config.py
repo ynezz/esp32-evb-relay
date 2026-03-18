@@ -87,6 +87,30 @@ def test_integration_parttool_uses_rom_bootloader_only() -> None:
 def test_provision_script_disables_stub_for_parttool() -> None:
     script_text = (_repo_root() / "scripts/provision.sh").read_text(encoding="utf-8")
     assert "parttool_esptool_args=(--esptool-args no-stub)" in script_text
+    assert 'port="${EVB_FLASH_PORT:-${EVB_SERIAL_PORT:-/dev/ttyS4}}"' in script_text
+
+
+def test_flash_port_defaults_prefer_explicit_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_integration_conftest()
+
+    monkeypatch.delenv("EVB_FLASH_PORT", raising=False)
+    monkeypatch.delenv("EVB_SERIAL_PORT", raising=False)
+    assert module._default_flash_port() == "/dev/ttyS4"
+
+    monkeypatch.setenv("EVB_SERIAL_PORT", "/dev/ttyUSB0")
+    assert module._default_flash_port() == "/dev/ttyUSB0"
+
+    monkeypatch.setenv("EVB_FLASH_PORT", "/dev/ttyS4")
+    monkeypatch.setenv("EVB_SERIAL_PORT", "/dev/ttyS5")
+    assert module._default_flash_port() == "/dev/ttyS4"
+
+
+def test_justfile_supports_split_flash_and_monitor_ports() -> None:
+    justfile_text = (_repo_root() / "Justfile").read_text(encoding="utf-8")
+
+    assert 'flash_port := env("EVB_FLASH_PORT", serial_port)' in justfile_text
+    assert "--flash-port {{flash_port}}" in justfile_text
+    assert "test_integration \\\n        --port {{flash_port}}" in justfile_text
 
 
 def test_partition_table_restores_nvs_size_and_flash_headroom() -> None:

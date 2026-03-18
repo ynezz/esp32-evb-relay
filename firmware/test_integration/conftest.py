@@ -18,6 +18,7 @@ os.environ.setdefault("ESPBAUD", "115200")
 
 DEFAULT_DUT_HOST = "esp32-evb-relay.local"
 DEFAULT_HTTP_PORT = 80
+DEFAULT_FLASH_PORT = "/dev/ttyS4"
 DEFAULT_SERIAL_BAUD = "115200"
 DEFAULT_REQUEST_TIMEOUT = 5.0
 DEFAULT_DISCOVERY_TIMEOUT = 15.0
@@ -57,6 +58,10 @@ class IntegrationHttpClient:
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
+
+
+def _default_flash_port() -> str:
+    return os.environ.get("EVB_FLASH_PORT") or os.environ.get("EVB_SERIAL_PORT") or DEFAULT_FLASH_PORT
 
 
 def _run_command(args: list[str], cwd: Path | None = None) -> str:
@@ -158,10 +163,7 @@ def _restore_safe_relays(http_client: IntegrationHttpClient) -> None:
 
 @pytest.fixture(scope="session")
 def serial_port(pytestconfig: pytest.Config) -> str:
-    port = pytestconfig.getoption("port") or os.environ.get("EVB_SERIAL_PORT")
-    if not port:
-        pytest.skip("integration tests require --port or EVB_SERIAL_PORT")
-    return str(port)
+    return str(pytestconfig.getoption("port") or _default_flash_port())
 
 
 @pytest.fixture(scope="session")

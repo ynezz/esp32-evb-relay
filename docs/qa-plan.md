@@ -6,13 +6,19 @@
 
 ## Current State
 
-- 5 custom ESP-IDF components (`board`, `relay`, `mod_io`, `device_config`,
-  `rest_api`) with **zero tests**
-- No formatting enforcement
-- No build automation beyond manual `idf.py build`
-- Hardware (ESP32-EVB + MOD-IO) available at `/dev/ttyS4`
-- Hardware-backed CI is expected to run on a self-hosted GitHub Actions
-  runner with `/dev/ttyS4` attached
+- 5 custom ESP-IDF components (`board`, `relay`, `mod_io`,
+  `device_config`, `rest_api`); Tier 1 host tests cover
+  `device_config`, `relay`, and `mod_io`, while Tier 2 and Tier 3 test
+  projects exist for hardware-backed verification
+- Formatting enforcement exists via `astyle_py`, `just format-check`,
+  and the repo pre-commit hook
+- Build and QA automation exists via `Justfile` recipes including
+  `just ci`, `just test-device`, and `just test-integration`
+- Hardware-backed QA runs on a self-hosted runner; repo recipes default to
+  `/dev/ttyS4` and can optionally split flash/control
+  (`EVB_FLASH_PORT`) from live UART monitoring (`EVB_SERIAL_PORT`)
+- Use the runner port mapping documented in `docs/hardware-reference.md`
+  instead of assuming a single serial path
 
 ### Critical QA Prerequisites
 
@@ -62,7 +68,9 @@ Flash test firmware to the device, run Unity tests via serial.
 - Tests real GPIO toggle, real I2C to MOD-IO, real NVS, real HTTP server
 - Works for **all 5 components**
 - Driven by `pytest-embedded` (`pytest --target esp32`)
-- Available on CI via a self-hosted runner that exposes `/dev/ttyS4`
+- Available on CI via a self-hosted runner with a working flash path
+  (`EVB_FLASH_PORT`) and, when needed, a separate UART monitor path
+  (`EVB_SERIAL_PORT`)
 - Runs via `just test-device`
 
 ### Tier 3 — Integration / System Tests
@@ -418,9 +426,16 @@ For CI hardware lanes, set
 `EVB_TEST_APP_SDKCONFIG_DEFAULTS='sdkconfig.defaults;sdkconfig.ci'` so the
 test-app build layers CI-specific overrides on top of the base defaults.
 
+When hardware exposes separate flash/control and live-UART paths, set
+`EVB_FLASH_PORT` to the ROM flasher path and `EVB_SERIAL_PORT` to the
+console path. If `EVB_FLASH_PORT` is unset, the recipes and helper
+scripts fall back to `EVB_SERIAL_PORT` so single-port local setups keep
+working unchanged.
+
 ```just
 # Default serial port for hardware tests
 serial_port := env("EVB_SERIAL_PORT", "/dev/ttyS4")
+flash_port := env("EVB_FLASH_PORT", serial_port)
 test_app_sdkconfig_defaults := env("EVB_TEST_APP_SDKCONFIG_DEFAULTS", "sdkconfig.defaults")
 
 build:
@@ -440,6 +455,7 @@ test-device:
         pytest --target esp32 -p no:cacheprovider \
         pytest_evb_relay.py \
         --esptool-baud 115200 \
+        --flash-port {{flash_port}} \
         --port {{serial_port}}
 
 test-integration:
@@ -448,7 +464,7 @@ test-integration:
     cd firmware && \
         pytest --target esp32 -p no:cacheprovider \
         test_integration \
-        --port {{serial_port}}
+        --port {{flash_port}}
 
 format:
     astyle_py --astyle-version=3.4.7 --style=otbs \
@@ -694,10 +710,11 @@ just test-integration   # System-level pytest (requires hardware)
 
 - `just ci` passes with zero failures on any Linux machine with ESP-IDF,
   the active IDF Python environment, and the documented QA dependencies
-- `just test-device` passes on a self-hosted runner with ESP32-EVB at
-  `/dev/ttyS4`
+- `just test-device` passes on a self-hosted runner with ESP32-EVB and a
+  working `EVB_FLASH_PORT`; set `EVB_SERIAL_PORT` separately when the
+  runner exposes a different live UART path
 - `just test-integration` passes on that same self-hosted runner with
-  working Ethernet access to the DUT
+  working Ethernet access to the DUT and the same flash-port semantics
 - `just format-check` exits 0 on all existing firmware source files
 - `just format` and `just format-check` cover production and test C/H
   sources with the same file-selection rules

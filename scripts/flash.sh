@@ -10,8 +10,8 @@ Flash the production firmware to an ESP32-EVB using the project's
 firmware/ tree.
 
 Options:
-  --port <serial-port>  Serial port to flash. Defaults to EVB_SERIAL_PORT
-                        or /dev/ttyS4.
+  --port <serial-port>  Serial port to flash. Defaults to EVB_FLASH_PORT,
+                        then EVB_SERIAL_PORT, then /dev/ttyS4.
   --baud <baud>         Flash baud rate. Defaults to EVB_FLASH_BAUD or
                         115200.
   -h, --help            Show this help text.
@@ -34,7 +34,7 @@ require_idf() {
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 firmware_dir="${repo_root}/firmware"
-port="${EVB_SERIAL_PORT:-/dev/ttyS4}"
+port="${EVB_FLASH_PORT:-${EVB_SERIAL_PORT:-/dev/ttyS4}}"
 baud="${EVB_FLASH_BAUD:-115200}"
 
 while (($# > 0)); do

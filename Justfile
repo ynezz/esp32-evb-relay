@@ -1,4 +1,5 @@
 serial_port := env("EVB_SERIAL_PORT", "/dev/ttyS4")
+flash_port := env("EVB_FLASH_PORT", serial_port)
 test_app_sdkconfig_defaults := env(
     "EVB_TEST_APP_SDKCONFIG_DEFAULTS",
     "sdkconfig.defaults",
@@ -40,6 +41,7 @@ test-device: _ensure-python-tools
         ../../{{venv_python}} -m pytest --target esp32 -p no:cacheprovider \
         pytest_evb_relay.py \
         --esptool-baud 115200 \
+        --flash-port {{flash_port}} \
         --port {{serial_port}}
 
 test-integration: _ensure-python-tools
@@ -48,7 +50,7 @@ test-integration: _ensure-python-tools
     cd firmware && \
         ../{{venv_python}} -m pytest --target esp32 -p no:cacheprovider \
         test_integration \
-        --port {{serial_port}}
+        --port {{flash_port}}
 
 format: _ensure-python-tools
     {{venv_astyle_py}} --astyle-version=3.4.7 --style=otbs \
