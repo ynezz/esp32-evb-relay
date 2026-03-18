@@ -73,6 +73,18 @@ static void test_input_monitor_start_configures_button_isr_and_task(void)
     TEST_ASSERT_TRUE(gpio_stub_has_isr_handler(BOARD_BUTTON));
 }
 
+static void test_input_monitor_start_cleans_up_button_isr_when_task_creation_fails(void)
+{
+    init_present_mod_io(0x00U);
+    gpio_stub_set_input_level(BOARD_BUTTON, 1U);
+    freertos_stub_set_task_create_result(pdFALSE);
+
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, input_monitor_start());
+    TEST_ASSERT_EQUAL_UINT32(0U, freertos_stub_get_task_create_count());
+    TEST_ASSERT_EQUAL_INT(GPIO_INTR_DISABLE, gpio_stub_get_intr_type(BOARD_BUTTON));
+    TEST_ASSERT_FALSE(gpio_stub_has_isr_handler(BOARD_BUTTON));
+}
+
 static void test_input_monitor_poll_once_caches_snapshot_without_startup_events(void)
 {
     static const uint16_t analog_values[MOD_IO_ANALOG_INPUT_COUNT] = {10U, 20U, 30U, 40U};
@@ -264,6 +276,7 @@ static void test_input_monitor_task_registers_and_feeds_task_watchdog(void)
 void test_input_monitor_suite(void)
 {
     RUN_TEST(test_input_monitor_start_configures_button_isr_and_task);
+    RUN_TEST(test_input_monitor_start_cleans_up_button_isr_when_task_creation_fails);
     RUN_TEST(test_input_monitor_poll_once_caches_snapshot_without_startup_events);
     RUN_TEST(test_input_monitor_publishes_digital_change_events);
     RUN_TEST(test_input_monitor_aggregates_analog_changes_against_threshold);

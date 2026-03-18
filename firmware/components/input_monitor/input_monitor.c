@@ -77,6 +77,27 @@ static void input_monitor_unlock(void)
     }
 }
 
+static void input_monitor_cleanup_button_interrupt(bool intr_type_configured, bool isr_registered)
+{
+    esp_err_t err;
+
+    if (isr_registered) {
+        err = gpio_isr_handler_remove(BOARD_BUTTON);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to remove button ISR handler: %s", esp_err_to_name(err));
+        }
+    }
+
+    if (intr_type_configured) {
+        err = gpio_set_intr_type(BOARD_BUTTON, GPIO_INTR_DISABLE);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to disable button interrupt: %s", esp_err_to_name(err));
+        }
+    }
+
+    s_button_irq_pending = false;
+}
+
 static bool input_monitor_button_pressed(void)
 {
     return gpio_get_level(BOARD_BUTTON) == INPUT_MONITOR_BUTTON_PRESSED_LEVEL;
@@ -510,6 +531,8 @@ esp_err_t input_monitor_start(void)
 {
     BaseType_t task_result;
     mod_io_status_t mod_io_status = {0};
+    bool button_intr_configured = false;
+    bool button_isr_registered = false;
     esp_err_t err;
 
     err = mod_io_get_status(&mod_io_status);
@@ -543,18 +566,26 @@ esp_err_t input_monitor_start(void)
     if (err != ESP_OK) {
         return err;
     }
+    button_intr_configured = true;
 
     err = gpio_isr_handler_add(BOARD_BUTTON, input_monitor_button_isr, NULL);
     if (err != ESP_OK) {
+        input_monitor_cleanup_button_interrupt(button_intr_configured, button_isr_registered);
         return err;
     }
+    button_isr_registered = true;
 
-    ESP_RETURN_ON_ERROR(input_monitor_lock(), TAG, "Failed to lock input monitor state");
+    err = input_monitor_lock();
+    if (err != ESP_OK) {
+        input_monitor_cleanup_button_interrupt(button_intr_configured, button_isr_registered);
+        return err;
+    }
     task_result = xTaskCreate(input_monitor_task, "input_monitor", INPUT_MONITOR_TASK_STACK_WORDS,
                               NULL, INPUT_MONITOR_TASK_PRIORITY, &s_state.task_handle);
     if (task_result != pdPASS) {
         s_state.task_handle = NULL;
         input_monitor_unlock();
+        input_monitor_cleanup_button_interrupt(button_intr_configured, button_isr_registered);
         return ESP_ERR_NO_MEM;
     }
 
