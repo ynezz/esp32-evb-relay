@@ -173,7 +173,8 @@ static void perform_http_request(uint16_t port,
     };
     int sock;
     ssize_t sent;
-    ssize_t received;
+    ssize_t n;
+    size_t received;
     int written;
     size_t request_len = 0;
 
@@ -241,9 +242,16 @@ static void perform_http_request(uint16_t port,
     sent = send(sock, request, request_len, 0);
     TEST_ASSERT_EQUAL_INT((int)request_len, sent);
 
-    received = recv(sock, response, response_size - 1U, 0);
-    TEST_ASSERT_GREATER_THAN_INT32(0, received);
-    response[received] = '\0';
+    received = 0U;
+    while (received < (response_size - 1U)) {
+        n = recv(sock, response + received, response_size - received - 1U, 0);
+        if (n <= 0) {
+            break;
+        }
+        received += (size_t)n;
+        response[received] = '\0';
+    }
+    TEST_ASSERT_GREATER_THAN_UINT32(0U, received);
     close(sock);
 }
 
