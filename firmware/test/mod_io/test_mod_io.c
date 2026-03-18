@@ -137,6 +137,18 @@ static void test_mod_io_set_relay_validates_ids_and_uses_read_modify_write(void)
     assert_status(true, MOD_IO_RELAY_SYNC_SYNCHRONIZED, 0x06U);
 }
 
+static void test_mod_io_set_relay_skips_reprobe_when_board_is_already_present(void)
+{
+    const uint8_t expected_write[] = {0x10U, 0x07U};
+
+    init_present_mod_io(0x05U);
+    i2c_stub_set_probe_result(ESP_ERR_NOT_FOUND);
+
+    TEST_ASSERT_EQUAL(ESP_OK, mod_io_set_relay(2U, true));
+    assert_last_transaction_equals(expected_write, sizeof(expected_write));
+    assert_status(true, MOD_IO_RELAY_SYNC_SYNCHRONIZED, 0x07U);
+}
+
 static void test_mod_io_read_digital_inputs_uses_protocol_command(void)
 {
     const uint8_t expected_transaction[] = {0x20U};
@@ -232,6 +244,7 @@ void test_mod_io_suite(void)
     RUN_TEST(test_mod_io_probe_keeps_absent_state_when_board_is_missing);
     RUN_TEST(test_mod_io_set_relays_validates_mask_and_round_trips_via_readback);
     RUN_TEST(test_mod_io_set_relay_validates_ids_and_uses_read_modify_write);
+    RUN_TEST(test_mod_io_set_relay_skips_reprobe_when_board_is_already_present);
     RUN_TEST(test_mod_io_read_digital_inputs_uses_protocol_command);
     RUN_TEST(test_mod_io_read_analog_input_validates_ids_and_decodes_samples);
     RUN_TEST(test_mod_io_read_analog_inputs_reads_all_channels);

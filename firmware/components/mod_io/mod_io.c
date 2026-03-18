@@ -397,7 +397,7 @@ esp_err_t mod_io_set_relay(uint8_t relay_id, bool state)
 
     ESP_RETURN_ON_ERROR(mod_io_validate_relay_id(relay_id), TAG, "Invalid relay id");
     ESP_RETURN_ON_ERROR(mod_io_lock(), TAG, "Failed to lock MOD-IO state");
-    err = mod_io_probe_locked();
+    err = mod_io_ensure_present_locked();
     if (err != ESP_OK) {
         mod_io_unlock();
         return err;
