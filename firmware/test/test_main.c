@@ -17,6 +17,7 @@ void test_device_config_suite(void);
 void test_input_monitor_suite(void);
 void test_mod_io_suite(void);
 void test_ota_suite(void);
+void test_rest_api_suite(void);
 void test_relay_suite(void);
 
 void setUp(void)
@@ -48,6 +49,7 @@ int main(void)
     test_input_monitor_suite();
     test_mod_io_suite();
     test_ota_suite();
+    test_rest_api_suite();
     test_relay_suite();
     return UNITY_END();
 }

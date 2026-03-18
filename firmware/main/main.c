@@ -15,18 +15,6 @@
 
 static const char *TAG = "main";
 
-static rest_api_modio_sync_t app_modio_sync_to_rest_api(mod_io_relay_sync_t relay_sync)
-{
-    switch (relay_sync) {
-    case MOD_IO_RELAY_SYNC_ABSENT:
-        return REST_API_MODIO_SYNC_ABSENT;
-    case MOD_IO_RELAY_SYNC_SYNCHRONIZED:
-        return REST_API_MODIO_SYNC_SYNCHRONIZED;
-    default:
-        return REST_API_MODIO_SYNC_ABSENT;
-    }
-}
-
 static esp_err_t app_status_provider(rest_api_status_view_t *status, void *ctx)
 {
     mod_io_status_t mod_io_status;
@@ -55,7 +43,7 @@ static esp_err_t app_status_provider(rest_api_status_view_t *status, void *ctx)
     memcpy(status->network.netmask, network_status.netmask, sizeof(status->network.netmask));
     memcpy(status->network.gateway, network_status.gateway, sizeof(status->network.gateway));
     status->modio_present = mod_io_status.present;
-    status->modio_sync = app_modio_sync_to_rest_api(mod_io_status.relay_sync);
+    status->modio_sync = rest_api_modio_sync_from_driver(mod_io_status.relay_sync);
     return ESP_OK;
 }
 

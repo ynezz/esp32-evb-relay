@@ -5,6 +5,7 @@
 
 #include "esp_err.h"
 #include "esp_http_server.h"
+#include "mod_io.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -49,6 +50,18 @@ typedef struct {
     rest_api_status_provider_t status_provider;
     void *status_ctx;
 } rest_api_config_t;
+
+static inline rest_api_modio_sync_t rest_api_modio_sync_from_driver(mod_io_relay_sync_t relay_sync)
+{
+    switch (relay_sync) {
+    case MOD_IO_RELAY_SYNC_ABSENT:
+        return REST_API_MODIO_SYNC_ABSENT;
+    case MOD_IO_RELAY_SYNC_SYNCHRONIZED:
+        return REST_API_MODIO_SYNC_SYNCHRONIZED;
+    default:
+        return REST_API_MODIO_SYNC_ABSENT;
+    }
+}
 
 esp_err_t rest_api_start(const rest_api_config_t *config);
 esp_err_t rest_api_stop(void);

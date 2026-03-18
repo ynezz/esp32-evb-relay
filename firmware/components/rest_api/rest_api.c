@@ -266,18 +266,6 @@ const char *rest_api_modio_sync_to_string(rest_api_modio_sync_t sync_state)
     }
 }
 
-static rest_api_modio_sync_t rest_api_modio_sync_from_driver(mod_io_relay_sync_t relay_sync)
-{
-    switch (relay_sync) {
-    case MOD_IO_RELAY_SYNC_ABSENT:
-        return REST_API_MODIO_SYNC_ABSENT;
-    case MOD_IO_RELAY_SYNC_SYNCHRONIZED:
-        return REST_API_MODIO_SYNC_SYNCHRONIZED;
-    default:
-        return REST_API_MODIO_SYNC_ABSENT;
-    }
-}
-
 static esp_err_t rest_api_build_status_view(rest_api_status_view_t *status)
 {
     ESP_RETURN_ON_FALSE(status != NULL, ESP_ERR_INVALID_ARG, TAG, "Status output buffer is required");

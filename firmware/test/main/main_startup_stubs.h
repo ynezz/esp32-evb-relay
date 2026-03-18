@@ -69,6 +69,18 @@ typedef struct {
     uint8_t relay_mask;
 } mod_io_status_t;
 
+static inline rest_api_modio_sync_t rest_api_modio_sync_from_driver(mod_io_relay_sync_t relay_sync)
+{
+    switch (relay_sync) {
+    case MOD_IO_RELAY_SYNC_ABSENT:
+        return REST_API_MODIO_SYNC_ABSENT;
+    case MOD_IO_RELAY_SYNC_SYNCHRONIZED:
+        return REST_API_MODIO_SYNC_SYNCHRONIZED;
+    default:
+        return REST_API_MODIO_SYNC_ABSENT;
+    }
+}
+
 typedef struct {
     bool connected;
     char hostname[NETWORK_HOSTNAME_MAX_LEN + 1];
