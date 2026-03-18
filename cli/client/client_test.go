@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
@@ -22,6 +23,37 @@ func TestDeviceContextJSONUsesFirmwareVersionField(t *testing.T) {
 	}
 	if strings.Contains(got, `"fw_version"`) {
 		t.Fatalf("marshaled device context = %s; unexpected legacy fw_version field", got)
+	}
+}
+
+func TestDeviceContextFromHeadersReturnsNilWhenHeadersAreAbsent(t *testing.T) {
+	t.Parallel()
+
+	if got := deviceContextFromHeaders(http.Header{}); got != nil {
+		t.Fatalf("deviceContextFromHeaders(empty) = %#v; want nil", got)
+	}
+}
+
+func TestDeviceContextFromHeadersParsesExpectedFields(t *testing.T) {
+	t.Parallel()
+
+	headers := http.Header{}
+	headers.Set("X-FW-Version", "0.3.1")
+	headers.Set("X-ModIO-Present", "true")
+	headers.Set("X-ModIO-Sync", "synchronized")
+
+	got := deviceContextFromHeaders(headers)
+	if got == nil {
+		t.Fatal("deviceContextFromHeaders(headers) = nil; want device context")
+	}
+	if got.FirmwareVersion != "0.3.1" {
+		t.Fatalf("FirmwareVersion = %q; want %q", got.FirmwareVersion, "0.3.1")
+	}
+	if got.ModIOPresent == nil || !*got.ModIOPresent {
+		t.Fatalf("ModIOPresent = %v; want true", got.ModIOPresent)
+	}
+	if got.ModIOSync != "synchronized" {
+		t.Fatalf("ModIOSync = %q; want %q", got.ModIOSync, "synchronized")
 	}
 }
 

@@ -198,24 +198,24 @@ func normalizeBaseURL(host string) (*url.URL, error) {
 }
 
 func deviceContextFromHeaders(headers http.Header) *DeviceContext {
-	context := &DeviceContext{}
+	deviceContext := &DeviceContext{}
 
 	if value := strings.TrimSpace(headers.Get("X-FW-Version")); value != "" {
-		context.FirmwareVersion = value
+		deviceContext.FirmwareVersion = value
 	}
 	if value := strings.TrimSpace(headers.Get("X-ModIO-Present")); value != "" {
 		parsed, err := strconv.ParseBool(value)
 		if err == nil {
-			context.ModIOPresent = &parsed
+			deviceContext.ModIOPresent = &parsed
 		}
 	}
 	if value := strings.TrimSpace(headers.Get("X-ModIO-Sync")); value != "" {
-		context.ModIOSync = value
+		deviceContext.ModIOSync = value
 	}
 
-	if context.FirmwareVersion == "" && context.ModIOPresent == nil && context.ModIOSync == "" {
+	if deviceContext.FirmwareVersion == "" && deviceContext.ModIOPresent == nil && deviceContext.ModIOSync == "" {
 		return nil
 	}
 
-	return context
+	return deviceContext
 }
