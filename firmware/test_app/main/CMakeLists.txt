@@ -6,6 +6,7 @@ idf_component_register(SRC_DIRS "."
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
                            DEVICE_CONFIG_ENABLE_TESTING_API=1
                            INPUT_MONITOR_ENABLE_TESTING_API=1
+                           REST_API_ENABLE_TESTING_API=1
                            OTA_ENABLE_TESTING_API=1)
 
 idf_component_get_property(device_config_lib device_config COMPONENT_LIB)

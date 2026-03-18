@@ -108,6 +108,42 @@ typedef struct {
 
 static rest_api_sse_state_t s_sse_state;
 
+#if defined(REST_API_ENABLE_TESTING_API)
+typedef struct {
+    volatile bool hold_dispatch_task_on_shutdown;
+    volatile bool dispatch_shutdown_reached;
+    volatile bool dispatch_task_deleted_by_stop;
+} rest_api_testing_state_t;
+
+static rest_api_testing_state_t s_testing_state;
+
+void rest_api_sse_hold_dispatch_task_on_shutdown_for_testing(bool hold)
+{
+    s_testing_state.hold_dispatch_task_on_shutdown = hold;
+}
+
+bool rest_api_sse_wait_for_dispatch_shutdown_reached_for_testing(uint32_t timeout_ms)
+{
+    TickType_t start_tick = xTaskGetTickCount();
+    TickType_t timeout_ticks = pdMS_TO_TICKS(timeout_ms);
+
+    while (!s_testing_state.dispatch_shutdown_reached) {
+        if ((timeout_ticks == 0U) || ((xTaskGetTickCount() - start_tick) >= timeout_ticks)) {
+            return false;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+
+    return true;
+}
+
+bool rest_api_sse_dispatch_task_deleted_by_stop_for_testing(void)
+{
+    return s_testing_state.dispatch_task_deleted_by_stop;
+}
+#endif
+
 static esp_err_t rest_api_send_error_with_retryable(httpd_req_t *req,
                                                     int http_status,
                                                     const char *code,
@@ -874,8 +910,19 @@ static void rest_api_sse_dispatch_task(void *arg)
     }
 
     rest_api_task_watchdog_delete(NULL, "rest_api_sse_dispatch");
-    s_sse_state.dispatch_task = NULL;
-    vTaskDelete(NULL);
+
+#if defined(REST_API_ENABLE_TESTING_API)
+    s_testing_state.dispatch_shutdown_reached = true;
+    while (s_testing_state.hold_dispatch_task_on_shutdown) {
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+#endif
+
+    /* rest_api_sse_stop() is the sole owner of deleting this task. */
+    vTaskSuspend(NULL);
+    for (;;) {
+        vTaskDelay(portMAX_DELAY);
+    }
 }
 
 static void rest_api_sse_client_task(void *arg)
@@ -1043,6 +1090,12 @@ static esp_err_t rest_api_sse_start(void)
 
     memset(&s_sse_state, 0, sizeof(s_sse_state));
 
+#if defined(REST_API_ENABLE_TESTING_API)
+    s_testing_state.hold_dispatch_task_on_shutdown = false;
+    s_testing_state.dispatch_shutdown_reached = false;
+    s_testing_state.dispatch_task_deleted_by_stop = false;
+#endif
+
     s_sse_state.lock = xSemaphoreCreateMutex();
     if (s_sse_state.lock == NULL) {
         return ESP_ERR_NO_MEM;
@@ -1137,7 +1190,17 @@ static void rest_api_sse_stop(void)
         vTaskDelay(pdMS_TO_TICKS(REST_API_SSE_CLIENT_POLL_WAIT_MS));
     }
 
+#if defined(REST_API_ENABLE_TESTING_API)
+    if (s_testing_state.hold_dispatch_task_on_shutdown) {
+        (void)rest_api_sse_wait_for_dispatch_shutdown_reached_for_testing(
+            REST_API_SSE_CLIENT_POLL_WAIT_MS + 1000U);
+    }
+#endif
+
     if (s_sse_state.dispatch_task != NULL) {
+#if defined(REST_API_ENABLE_TESTING_API)
+        s_testing_state.dispatch_task_deleted_by_stop = true;
+#endif
         rest_api_task_watchdog_delete(s_sse_state.dispatch_task, "rest_api_sse_dispatch");
         vTaskDelete(s_sse_state.dispatch_task);
         s_sse_state.dispatch_task = NULL;
@@ -1154,6 +1217,10 @@ static void rest_api_sse_stop(void)
     }
 
     memset(s_sse_state.clients, 0, sizeof(s_sse_state.clients));
+
+#if defined(REST_API_ENABLE_TESTING_API)
+    s_testing_state.hold_dispatch_task_on_shutdown = false;
+#endif
 }
 
 static esp_err_t rest_api_read_request_body(httpd_req_t *req,

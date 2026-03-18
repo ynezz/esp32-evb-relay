@@ -1179,6 +1179,29 @@ TEST_CASE("rest_api device enforces the SSE client limit", "[qa][rest_api][devic
     }
 }
 
+TEST_CASE("rest_api device stop owns SSE dispatch task deletion", "[qa][rest_api][device]")
+{
+    static const uint16_t test_port = 18100U;
+    static const rest_api_config_t config = {
+        .port = test_port,
+        .auth_handler = allow_auth_handler,
+        .status_provider = status_provider,
+    };
+    char response[1024];
+    int sock = -1;
+
+    ensure_tcpip_ready();
+    TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
+
+    sock = open_http_stream_request(test_port, "/api/v1/events", NULL);
+    read_stream_until_contains(sock, ":connected", response, sizeof(response));
+    rest_api_sse_hold_dispatch_task_on_shutdown_for_testing(true);
+    TEST_ASSERT_EQUAL(ESP_OK, rest_api_stop());
+    TEST_ASSERT_TRUE(rest_api_sse_dispatch_task_deleted_by_stop_for_testing());
+
+    close(sock);
+}
+
 TEST_CASE("rest_api device accepts OTA uploads and switches the boot partition",
           "[qa][rest_api][device]")
 {
