@@ -121,9 +121,11 @@ type stubServerState struct {
 type stubServerControl struct {
 	server *httptest.Server
 
-	mu    sync.Mutex
-	token string
-	state stubServerState
+	mu           sync.Mutex
+	token        string
+	state        stubServerState
+	requestCount int
+	relayErrors  map[string]stubAPIError
 }
 
 func newStubServer(tb testing.TB) (*httptest.Server, *stubServerControl) {
@@ -155,6 +157,34 @@ func (c *stubServerControl) SetModIOPresent(present bool) {
 	c.state.modioPresent = present
 }
 
+func (c *stubServerControl) SetRelayAPIError(target string, status int, code string, message string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.relayErrors == nil {
+		c.relayErrors = make(map[string]stubAPIError)
+	}
+	c.relayErrors[target] = stubAPIError{
+		Code:    code,
+		Message: message,
+		Status:  status,
+	}
+}
+
+func (c *stubServerControl) RequestCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.requestCount
+}
+
+func (c *stubServerControl) ResetRequestCount() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.requestCount = 0
+}
+
 func (c *stubServerControl) HostPort(tb testing.TB) string {
 	tb.Helper()
 
@@ -174,9 +204,15 @@ func (c *stubServerControl) resetLocked() {
 		digital:      [4]bool{true, false, true, false},
 		analog:       [4]int{128, 256, 512, 768},
 	}
+	c.requestCount = 0
+	c.relayErrors = make(map[string]stubAPIError)
 }
 
 func (c *stubServerControl) serveHTTP(w http.ResponseWriter, r *http.Request) {
+	c.mu.Lock()
+	c.requestCount++
+	c.mu.Unlock()
+
 	switch {
 	// Mirrors rest_api_status_handler() in firmware/components/rest_api/rest_api.c.
 	case r.Method == http.MethodGet && r.URL.Path == "/api/v1/status":
@@ -375,6 +411,11 @@ func (c *stubServerControl) handleRelayMutation(
 ) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if apiErr, ok := c.relayErrors[relayTargetKey(group, relayID)]; ok {
+		c.writeAPIErrorLocked(w, apiErr.Status, apiErr.Code, apiErr.Message, true)
+		return
+	}
 
 	switch group {
 	case "onboard":
@@ -691,6 +732,10 @@ func parseTrailingID(path string) (int, bool) {
 
 func stringPtr(value string) *string {
 	return &value
+}
+
+func relayTargetKey(group string, relayID int) string {
+	return group + ":" + strconv.Itoa(relayID)
 }
 
 func TestStubServerAuthFailureOmitsDeviceContextHeaders(t *testing.T) {

@@ -74,6 +74,12 @@ func newCLIRunner(tb testing.TB, server *stubServerControl) *cliRunner {
 	}
 }
 
+func (r *cliRunner) withAPIToken(token string) *cliRunner {
+	clone := *r
+	clone.apiToken = token
+	return &clone
+}
+
 func (r *cliRunner) run(args ...string) (string, string, int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
