@@ -127,8 +127,8 @@ TEST_CASE("mod_io device publishes relay_changed event after write", "[qa][mod_i
 {
     esp_event_handler_instance_t handler_instance = NULL;
     mod_io_event_capture_t capture = {0};
-    bool handler_registered = false;
-    bool mod_io_ready = false;
+    volatile bool handler_registered = false;
+    volatile bool mod_io_ready = false;
 
     ensure_default_event_loop();
     if (TEST_PROTECT()) {
