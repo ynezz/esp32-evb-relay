@@ -13,6 +13,7 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "input_monitor.h"
 #include "mod_io.h"
 #include "relay.h"
 #include "relay_events.h"
@@ -32,6 +33,10 @@ static const char *REST_API_ONBOARD_RELAY_ID_PREFIX = "/api/v1/relays/onboard/";
 static const char *REST_API_ONBOARD_RELAY_TOGGLE_SUFFIX = "/toggle";
 static const char *REST_API_MODIO_RELAYS_URI = "/api/v1/relays/modio";
 static const char *REST_API_MODIO_RELAY_ID_PREFIX = "/api/v1/relays/modio/";
+static const char *REST_API_DIGITAL_INPUTS_URI = "/api/v1/inputs/digital";
+static const char *REST_API_DIGITAL_INPUT_ID_PREFIX = "/api/v1/inputs/digital/";
+static const char *REST_API_ANALOG_INPUTS_URI = "/api/v1/inputs/analog";
+static const char *REST_API_ANALOG_INPUT_ID_PREFIX = "/api/v1/inputs/analog/";
 static const char *REST_API_CONFIG_URI = "/api/v1/config";
 
 typedef struct {
@@ -45,6 +50,13 @@ typedef struct {
     bool modio_boot_policy_present;
     device_config_modio_boot_policy_t modio_boot_policy;
 } rest_api_config_update_request_t;
+
+static esp_err_t rest_api_send_error_with_retryable(httpd_req_t *req,
+                                                    int http_status,
+                                                    const char *code,
+                                                    const char *message,
+                                                    bool authenticated,
+                                                    bool retryable);
 
 static const char *rest_api_http_status_text(int http_status)
 {
@@ -282,6 +294,31 @@ static esp_err_t rest_api_parse_modio_relay_id(httpd_req_t *req, uint8_t *out_re
     return ESP_OK;
 }
 
+static esp_err_t rest_api_parse_input_id(httpd_req_t *req,
+                                         const char *prefix,
+                                         uint8_t max_input_id,
+                                         uint8_t *out_input_id)
+{
+    uint32_t parsed_id = 0;
+    esp_err_t err;
+
+    ESP_RETURN_ON_FALSE(req != NULL, ESP_ERR_INVALID_ARG, TAG, "HTTP request is required");
+    ESP_RETURN_ON_FALSE(prefix != NULL, ESP_ERR_INVALID_ARG, TAG, "Input URI prefix is required");
+    ESP_RETURN_ON_FALSE(out_input_id != NULL, ESP_ERR_INVALID_ARG, TAG, "Input id output is required");
+
+    if (!rest_api_parse_id_from_uri(req->uri, prefix, &parsed_id) || (parsed_id == 0U) ||
+            (parsed_id > max_input_id)) {
+        err = rest_api_send_error(req, 404, "INPUT_NOT_FOUND", "Input not found", true);
+        if (err != ESP_OK) {
+            return err;
+        }
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    *out_input_id = (uint8_t)parsed_id;
+    return ESP_OK;
+}
+
 static cJSON *rest_api_create_onboard_relay_object(uint8_t relay_id, bool state)
 {
     cJSON *relay = cJSON_CreateObject();
@@ -317,6 +354,32 @@ static cJSON *rest_api_create_relay_with_sync_object(const char *group,
         cJSON_AddNullToObject(relay, "sync");
     }
     return relay;
+}
+
+static cJSON *rest_api_create_digital_input_object(uint8_t input_id, bool state)
+{
+    cJSON *input = cJSON_CreateObject();
+
+    if (input == NULL) {
+        return NULL;
+    }
+
+    cJSON_AddNumberToObject(input, "id", input_id);
+    cJSON_AddBoolToObject(input, "state", state);
+    return input;
+}
+
+static cJSON *rest_api_create_analog_input_object(uint8_t input_id, uint16_t value)
+{
+    cJSON *input = cJSON_CreateObject();
+
+    if (input == NULL) {
+        return NULL;
+    }
+
+    cJSON_AddNumberToObject(input, "id", input_id);
+    cJSON_AddNumberToObject(input, "value", value);
+    return input;
 }
 
 static esp_err_t rest_api_send_onboard_relay_response(httpd_req_t *req,
@@ -416,6 +479,65 @@ static esp_err_t rest_api_append_combined_relay_objects(cJSON *relays,
     }
 
     return ESP_OK;
+}
+
+static esp_err_t rest_api_append_digital_input_objects(cJSON *inputs, uint8_t digital_mask)
+{
+    ESP_RETURN_ON_FALSE(inputs != NULL, ESP_ERR_INVALID_ARG, TAG, "Input array is required");
+
+    for (uint8_t input_id = 1U; input_id <= MOD_IO_DIGITAL_INPUT_COUNT; ++input_id) {
+        cJSON *input = NULL;
+        bool state = (digital_mask & (uint8_t)(1U << (input_id - 1U))) != 0U;
+
+        input = rest_api_create_digital_input_object(input_id, state);
+        if (input == NULL) {
+            return ESP_ERR_NO_MEM;
+        }
+
+        cJSON_AddItemToArray(inputs, input);
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t rest_api_append_analog_input_objects(
+    cJSON *inputs,
+    const uint16_t analog_values[MOD_IO_ANALOG_INPUT_COUNT])
+{
+    ESP_RETURN_ON_FALSE(inputs != NULL, ESP_ERR_INVALID_ARG, TAG, "Input array is required");
+    ESP_RETURN_ON_FALSE(analog_values != NULL, ESP_ERR_INVALID_ARG, TAG, "Analog values are required");
+
+    for (uint8_t input_id = 1U; input_id <= MOD_IO_ANALOG_INPUT_COUNT; ++input_id) {
+        cJSON *input = NULL;
+
+        input = rest_api_create_analog_input_object(input_id, analog_values[input_id - 1U]);
+        if (input == NULL) {
+            return ESP_ERR_NO_MEM;
+        }
+
+        cJSON_AddItemToArray(inputs, input);
+    }
+
+    return ESP_OK;
+}
+
+static uint64_t rest_api_timestamp_ms(void)
+{
+    return (uint64_t)(esp_timer_get_time() / 1000LL);
+}
+
+static void rest_api_add_sample_metadata(cJSON *root,
+                                         uint64_t sample_ts_ms,
+                                         uint64_t staleness_ms,
+                                         uint32_t poll_interval_ms)
+{
+    if (root == NULL) {
+        return;
+    }
+
+    cJSON_AddNumberToObject(root, "sample_ts_ms", (double)sample_ts_ms);
+    cJSON_AddNumberToObject(root, "staleness_ms", (double)staleness_ms);
+    cJSON_AddNumberToObject(root, "poll_interval_ms", (double)poll_interval_ms);
 }
 
 static esp_err_t rest_api_read_request_body(httpd_req_t *req,
@@ -630,6 +752,83 @@ static esp_err_t rest_api_sync_status_with_modio_driver(rest_api_status_view_t *
 
     if (out_relay_mask != NULL) {
         *out_relay_mask = modio_status.relay_mask;
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t rest_api_prepare_input_snapshot(httpd_req_t *req,
+                                                 rest_api_status_view_t *out_status,
+                                                 input_monitor_snapshot_t *out_snapshot,
+                                                 uint32_t *out_poll_interval_ms,
+                                                 uint64_t *out_staleness_ms)
+{
+    esp_err_t err;
+
+    ESP_RETURN_ON_FALSE(req != NULL, ESP_ERR_INVALID_ARG, TAG, "HTTP request is required");
+    ESP_RETURN_ON_FALSE(out_status != NULL, ESP_ERR_INVALID_ARG, TAG, "Status output is required");
+    ESP_RETURN_ON_FALSE(out_snapshot != NULL, ESP_ERR_INVALID_ARG, TAG, "Input snapshot is required");
+    ESP_RETURN_ON_FALSE(out_poll_interval_ms != NULL,
+                        ESP_ERR_INVALID_ARG,
+                        TAG,
+                        "Poll interval output is required");
+    ESP_RETURN_ON_FALSE(out_staleness_ms != NULL,
+                        ESP_ERR_INVALID_ARG,
+                        TAG,
+                        "Staleness output is required");
+
+    err = rest_api_require_authenticated_status(req, out_status);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = input_monitor_get_snapshot(out_snapshot);
+    if (err == ESP_ERR_INVALID_STATE) {
+        if (!out_status->modio_present) {
+            out_status->modio_sync = REST_API_MODIO_SYNC_ABSENT;
+            return rest_api_send_error(req, 503, "MODIO_NOT_PRESENT", "MOD-IO is not present", true);
+        }
+
+        return rest_api_send_error_with_retryable(req,
+                                                  503,
+                                                  "MODIO_SAMPLE_UNAVAILABLE",
+                                                  "MOD-IO input sample is not available yet",
+                                                  true,
+                                                  true);
+    }
+    if (err != ESP_OK) {
+        return rest_api_send_error(req, 500, "INPUT_UNAVAILABLE", "Failed to read input snapshot", true);
+    }
+
+    out_status->modio_present = out_snapshot->modio_present;
+    if (!out_snapshot->modio_present) {
+        out_status->modio_sync = REST_API_MODIO_SYNC_ABSENT;
+        return rest_api_send_error(req, 503, "MODIO_NOT_PRESENT", "MOD-IO is not present", true);
+    }
+
+    if (!out_snapshot->sample_valid) {
+        return rest_api_send_error_with_retryable(req,
+                                                  503,
+                                                  "MODIO_SAMPLE_UNAVAILABLE",
+                                                  "MOD-IO input sample is not available yet",
+                                                  true,
+                                                  true);
+    }
+
+    err = device_config_get_poll_interval_ms(out_poll_interval_ms);
+    if (err != ESP_OK) {
+        return rest_api_send_error(req,
+                                   500,
+                                   "INPUT_UNAVAILABLE",
+                                   "Failed to read input polling interval",
+                                   true);
+    }
+
+    *out_staleness_ms = rest_api_timestamp_ms();
+    if (*out_staleness_ms >= out_snapshot->sample_ts_ms) {
+        *out_staleness_ms -= out_snapshot->sample_ts_ms;
+    } else {
+        *out_staleness_ms = 0U;
     }
 
     return ESP_OK;
@@ -1478,6 +1677,192 @@ static esp_err_t rest_api_modio_relays_set_handler(httpd_req_t *req)
     return rest_api_send_json_response(req, 200, root, &status, true);
 }
 
+static esp_err_t rest_api_digital_inputs_handler(httpd_req_t *req)
+{
+    rest_api_status_view_t status;
+    input_monitor_snapshot_t snapshot;
+    uint32_t poll_interval_ms = 0;
+    uint64_t staleness_ms = 0U;
+    cJSON *root = NULL;
+    cJSON *inputs = NULL;
+    esp_err_t err;
+
+    err = rest_api_prepare_input_snapshot(req,
+                                          &status,
+                                          &snapshot,
+                                          &poll_interval_ms,
+                                          &staleness_ms);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    root = cJSON_CreateObject();
+    inputs = cJSON_CreateArray();
+    if ((root == NULL) || (inputs == NULL)) {
+        cJSON_Delete(root);
+        cJSON_Delete(inputs);
+        return rest_api_send_error(req,
+                                   500,
+                                   "INTERNAL_ERROR",
+                                   "Failed to allocate JSON response",
+                                   true);
+    }
+
+    rest_api_add_sample_metadata(root, snapshot.sample_ts_ms, staleness_ms, poll_interval_ms);
+    err = rest_api_append_digital_input_objects(inputs, snapshot.digital_mask);
+    if (err != ESP_OK) {
+        cJSON_Delete(root);
+        cJSON_Delete(inputs);
+        return rest_api_send_error(req,
+                                   500,
+                                   "INTERNAL_ERROR",
+                                   "Failed to allocate JSON response",
+                                   true);
+    }
+
+    cJSON_AddItemToObject(root, "inputs", inputs);
+    return rest_api_send_json_response(req, 200, root, &status, true);
+}
+
+static esp_err_t rest_api_digital_input_handler(httpd_req_t *req)
+{
+    rest_api_status_view_t status;
+    input_monitor_snapshot_t snapshot;
+    uint32_t poll_interval_ms = 0;
+    uint64_t staleness_ms = 0U;
+    uint8_t input_id = 0U;
+    cJSON *root = NULL;
+    cJSON *input = NULL;
+    esp_err_t err;
+
+    err = rest_api_prepare_input_snapshot(req,
+                                          &status,
+                                          &snapshot,
+                                          &poll_interval_ms,
+                                          &staleness_ms);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = rest_api_parse_input_id(req,
+                                  REST_API_DIGITAL_INPUT_ID_PREFIX,
+                                  MOD_IO_DIGITAL_INPUT_COUNT,
+                                  &input_id);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    root = cJSON_CreateObject();
+    input = rest_api_create_digital_input_object(
+                input_id,
+                (snapshot.digital_mask & (uint8_t)(1U << (input_id - 1U))) != 0U);
+    if ((root == NULL) || (input == NULL)) {
+        cJSON_Delete(root);
+        cJSON_Delete(input);
+        return rest_api_send_error(req,
+                                   500,
+                                   "INTERNAL_ERROR",
+                                   "Failed to allocate JSON response",
+                                   true);
+    }
+
+    rest_api_add_sample_metadata(root, snapshot.sample_ts_ms, staleness_ms, poll_interval_ms);
+    cJSON_AddItemToObject(root, "input", input);
+    return rest_api_send_json_response(req, 200, root, &status, true);
+}
+
+static esp_err_t rest_api_analog_inputs_handler(httpd_req_t *req)
+{
+    rest_api_status_view_t status;
+    input_monitor_snapshot_t snapshot;
+    uint32_t poll_interval_ms = 0;
+    uint64_t staleness_ms = 0U;
+    cJSON *root = NULL;
+    cJSON *inputs = NULL;
+    esp_err_t err;
+
+    err = rest_api_prepare_input_snapshot(req,
+                                          &status,
+                                          &snapshot,
+                                          &poll_interval_ms,
+                                          &staleness_ms);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    root = cJSON_CreateObject();
+    inputs = cJSON_CreateArray();
+    if ((root == NULL) || (inputs == NULL)) {
+        cJSON_Delete(root);
+        cJSON_Delete(inputs);
+        return rest_api_send_error(req,
+                                   500,
+                                   "INTERNAL_ERROR",
+                                   "Failed to allocate JSON response",
+                                   true);
+    }
+
+    rest_api_add_sample_metadata(root, snapshot.sample_ts_ms, staleness_ms, poll_interval_ms);
+    err = rest_api_append_analog_input_objects(inputs, snapshot.analog_values);
+    if (err != ESP_OK) {
+        cJSON_Delete(root);
+        cJSON_Delete(inputs);
+        return rest_api_send_error(req,
+                                   500,
+                                   "INTERNAL_ERROR",
+                                   "Failed to allocate JSON response",
+                                   true);
+    }
+
+    cJSON_AddItemToObject(root, "inputs", inputs);
+    return rest_api_send_json_response(req, 200, root, &status, true);
+}
+
+static esp_err_t rest_api_analog_input_handler(httpd_req_t *req)
+{
+    rest_api_status_view_t status;
+    input_monitor_snapshot_t snapshot;
+    uint32_t poll_interval_ms = 0;
+    uint64_t staleness_ms = 0U;
+    uint8_t input_id = 0U;
+    cJSON *root = NULL;
+    cJSON *input = NULL;
+    esp_err_t err;
+
+    err = rest_api_prepare_input_snapshot(req,
+                                          &status,
+                                          &snapshot,
+                                          &poll_interval_ms,
+                                          &staleness_ms);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = rest_api_parse_input_id(req,
+                                  REST_API_ANALOG_INPUT_ID_PREFIX,
+                                  MOD_IO_ANALOG_INPUT_COUNT,
+                                  &input_id);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    root = cJSON_CreateObject();
+    input = rest_api_create_analog_input_object(input_id, snapshot.analog_values[input_id - 1U]);
+    if ((root == NULL) || (input == NULL)) {
+        cJSON_Delete(root);
+        cJSON_Delete(input);
+        return rest_api_send_error(req,
+                                   500,
+                                   "INTERNAL_ERROR",
+                                   "Failed to allocate JSON response",
+                                   true);
+    }
+
+    rest_api_add_sample_metadata(root, snapshot.sample_ts_ms, staleness_ms, poll_interval_ms);
+    cJSON_AddItemToObject(root, "input", input);
+    return rest_api_send_json_response(req, 200, root, &status, true);
+}
+
 static esp_err_t rest_api_status_handler(httpd_req_t *req)
 {
     rest_api_status_view_t status;
@@ -1518,11 +1903,13 @@ static esp_err_t rest_api_status_handler(httpd_req_t *req)
     return rest_api_send_json_response(req, 200, root, &status, true);
 }
 
-esp_err_t rest_api_send_error(httpd_req_t *req,
-                              int http_status,
-                              const char *code,
-                              const char *message,
-                              bool authenticated)
+static esp_err_t rest_api_send_error_internal(httpd_req_t *req,
+                                              int http_status,
+                                              const char *code,
+                                              const char *message,
+                                              bool authenticated,
+                                              bool include_retryable,
+                                              bool retryable)
 {
     rest_api_status_view_t status;
     cJSON *root = NULL;
@@ -1548,6 +1935,9 @@ esp_err_t rest_api_send_error(httpd_req_t *req,
     cJSON_AddStringToObject(error_obj, "code", code);
     cJSON_AddStringToObject(error_obj, "message", message);
     cJSON_AddNumberToObject(error_obj, "status", http_status);
+    if (include_retryable) {
+        cJSON_AddBoolToObject(error_obj, "retryable", retryable);
+    }
     cJSON_AddItemToObject(root, "error", error_obj);
 
     response = cJSON_PrintUnformatted(root);
@@ -1572,6 +1962,37 @@ esp_err_t rest_api_send_error(httpd_req_t *req,
     err = httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
     cJSON_free(response);
     return err;
+}
+
+static esp_err_t rest_api_send_error_with_retryable(httpd_req_t *req,
+                                                    int http_status,
+                                                    const char *code,
+                                                    const char *message,
+                                                    bool authenticated,
+                                                    bool retryable)
+{
+    return rest_api_send_error_internal(req,
+                                        http_status,
+                                        code,
+                                        message,
+                                        authenticated,
+                                        true,
+                                        retryable);
+}
+
+esp_err_t rest_api_send_error(httpd_req_t *req,
+                              int http_status,
+                              const char *code,
+                              const char *message,
+                              bool authenticated)
+{
+    return rest_api_send_error_internal(req,
+                                        http_status,
+                                        code,
+                                        message,
+                                        authenticated,
+                                        false,
+                                        false);
 }
 
 bool rest_api_parse_id_from_uri(const char *uri, const char *prefix, uint32_t *out_id)
@@ -1658,6 +2079,30 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
         .uri = REST_API_MODIO_RELAYS_URI,
         .method = HTTP_PUT,
         .handler = rest_api_modio_relays_set_handler,
+        .user_ctx = NULL,
+    };
+    httpd_uri_t digital_inputs_uri = {
+        .uri = REST_API_DIGITAL_INPUTS_URI,
+        .method = HTTP_GET,
+        .handler = rest_api_digital_inputs_handler,
+        .user_ctx = NULL,
+    };
+    httpd_uri_t digital_input_uri = {
+        .uri = "/api/v1/inputs/digital/*",
+        .method = HTTP_GET,
+        .handler = rest_api_digital_input_handler,
+        .user_ctx = NULL,
+    };
+    httpd_uri_t analog_inputs_uri = {
+        .uri = REST_API_ANALOG_INPUTS_URI,
+        .method = HTTP_GET,
+        .handler = rest_api_analog_inputs_handler,
+        .user_ctx = NULL,
+    };
+    httpd_uri_t analog_input_uri = {
+        .uri = "/api/v1/inputs/analog/*",
+        .method = HTTP_GET,
+        .handler = rest_api_analog_input_handler,
         .user_ctx = NULL,
     };
     httpd_uri_t config_uri = {
@@ -1756,6 +2201,38 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
     }
 
     err = httpd_register_uri_handler(s_server, &modio_relays_set_uri);
+    if (err != ESP_OK) {
+        httpd_stop(s_server);
+        s_server = NULL;
+        memset(&s_config, 0, sizeof(s_config));
+        return err;
+    }
+
+    err = httpd_register_uri_handler(s_server, &digital_inputs_uri);
+    if (err != ESP_OK) {
+        httpd_stop(s_server);
+        s_server = NULL;
+        memset(&s_config, 0, sizeof(s_config));
+        return err;
+    }
+
+    err = httpd_register_uri_handler(s_server, &digital_input_uri);
+    if (err != ESP_OK) {
+        httpd_stop(s_server);
+        s_server = NULL;
+        memset(&s_config, 0, sizeof(s_config));
+        return err;
+    }
+
+    err = httpd_register_uri_handler(s_server, &analog_inputs_uri);
+    if (err != ESP_OK) {
+        httpd_stop(s_server);
+        s_server = NULL;
+        memset(&s_config, 0, sizeof(s_config));
+        return err;
+    }
+
+    err = httpd_register_uri_handler(s_server, &analog_input_uri);
     if (err != ESP_OK) {
         httpd_stop(s_server);
         s_server = NULL;

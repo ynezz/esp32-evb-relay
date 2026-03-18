@@ -1,3 +1,4 @@
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
@@ -9,6 +10,7 @@
 #include "esp_netif.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "input_monitor.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
 #include "mod_io.h"
@@ -615,6 +617,170 @@ TEST_CASE("rest_api device rejects invalid config updates without partial apply"
         TEST_ASSERT_EQUAL_UINT32(100U, snapshot.poll_interval_ms);
         TEST_ASSERT_EQUAL_STRING("esp32-evb-relay", snapshot.hostname);
         TEST_ASSERT_EQUAL(DEVICE_CONFIG_MODIO_BOOT_POLICY_LEAVE_UNCHANGED, snapshot.modio_boot_policy);
+    }
+
+    if (fixture_captured) {
+        restore_device_config_fixture(&fixture);
+    }
+}
+
+TEST_CASE("rest_api device reports input sample unavailable before the monitor starts",
+          "[qa][rest_api][device]")
+{
+    static const uint16_t test_port = 18092U;
+    static const rest_api_config_t config = {
+        .port = test_port,
+        .auth_handler = allow_auth_handler,
+        .status_provider = status_provider,
+    };
+    char response[1024];
+
+    ensure_tcpip_ready();
+    TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
+
+    perform_http_request(test_port, "GET", "/api/v1/inputs/digital", NULL, NULL, response, sizeof(response));
+
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 503 Service Unavailable"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"MODIO_SAMPLE_UNAVAILABLE\""));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"retryable\":true"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Present: true"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Sync: synchronized"));
+}
+
+TEST_CASE("rest_api device reports absent MOD-IO on input routes", "[qa][rest_api][device]")
+{
+    static const uint16_t test_port = 18093U;
+    static const rest_api_config_t config = {
+        .port = test_port,
+        .auth_handler = allow_auth_handler,
+        .status_provider = modio_absent_status_provider,
+    };
+    char response[1024];
+
+    ensure_tcpip_ready();
+    TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
+
+    perform_http_request(test_port, "GET", "/api/v1/inputs/analog/1", NULL, NULL, response, sizeof(response));
+
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 503 Service Unavailable"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"MODIO_NOT_PRESENT\""));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Present: false"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Sync: absent"));
+}
+
+TEST_CASE("rest_api device exposes cached digital and analog input snapshots",
+          "[qa][rest_api][device]")
+{
+    static const uint16_t test_port = 18094U;
+    static const rest_api_config_t config = {
+        .port = test_port,
+        .auth_handler = allow_auth_handler,
+        .status_provider = status_provider,
+    };
+    device_config_fixture_t fixture = {0};
+    input_monitor_snapshot_t snapshot = {0};
+    char response[2048];
+    char expected_fragment[128];
+    volatile bool fixture_captured = false;
+
+    ensure_tcpip_ready();
+    if (TEST_PROTECT()) {
+        capture_device_config_fixture(&fixture);
+        fixture_captured = true;
+
+        TEST_ASSERT_EQUAL(ESP_OK, device_config_set_poll_interval_ms(10000U, NULL));
+        TEST_ASSERT_EQUAL(ESP_OK, board_init());
+        TEST_ASSERT_EQUAL(ESP_OK, mod_io_init(board_i2c_bus_handle()));
+        TEST_ASSERT_EQUAL(ESP_OK, mod_io_probe());
+        TEST_ASSERT_EQUAL(ESP_OK, input_monitor_start());
+        TEST_ASSERT_EQUAL(ESP_OK, input_monitor_poll_once_for_testing());
+        TEST_ASSERT_EQUAL(ESP_OK, input_monitor_get_snapshot(&snapshot));
+        TEST_ASSERT_TRUE(snapshot.modio_present);
+        TEST_ASSERT_TRUE(snapshot.sample_valid);
+
+        TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
+
+        perform_http_request(test_port, "GET", "/api/v1/inputs/digital", NULL, NULL, response, sizeof(response));
+        TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+        TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Present: true"));
+        TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Sync: synchronized"));
+        TEST_ASSERT_NOT_NULL(strstr(response, "\"staleness_ms\":"));
+        TEST_ASSERT_NOT_NULL(strstr(response, "\"poll_interval_ms\":10000"));
+        TEST_ASSERT_NOT_NULL(strstr(response, "\"sample_ts_ms\":"));
+        for (uint8_t input_id = 1U; input_id <= MOD_IO_DIGITAL_INPUT_COUNT; ++input_id) {
+            TEST_ASSERT_GREATER_THAN_INT32(
+                0,
+                snprintf(expected_fragment,
+                         sizeof(expected_fragment),
+                         "\"id\":%u,\"state\":%s",
+                         (unsigned)input_id,
+                         (snapshot.digital_mask & (uint8_t)(1U << (input_id - 1U))) != 0U ? "true"
+                         : "false"));
+            TEST_ASSERT_NOT_NULL(strstr(response, expected_fragment));
+        }
+
+        TEST_ASSERT_GREATER_THAN_INT32(0,
+                                       snprintf(expected_fragment,
+                                                sizeof(expected_fragment),
+                                                "\"sample_ts_ms\":%" PRIu64,
+                                                snapshot.sample_ts_ms));
+        TEST_ASSERT_NOT_NULL(strstr(response, expected_fragment));
+
+        perform_http_request(test_port,
+                             "GET",
+                             "/api/v1/inputs/digital/1",
+                             NULL,
+                             NULL,
+                             response,
+                             sizeof(response));
+        TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+        TEST_ASSERT_GREATER_THAN_INT32(
+            0,
+            snprintf(expected_fragment,
+                     sizeof(expected_fragment),
+                     "\"input\":{\"id\":1,\"state\":%s}",
+                     (snapshot.digital_mask & 0x01U) != 0U ? "true" : "false"));
+        TEST_ASSERT_NOT_NULL(strstr(response, expected_fragment));
+
+        perform_http_request(test_port, "GET", "/api/v1/inputs/analog", NULL, NULL, response, sizeof(response));
+        TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+        TEST_ASSERT_NOT_NULL(strstr(response, "\"staleness_ms\":"));
+        TEST_ASSERT_NOT_NULL(strstr(response, "\"poll_interval_ms\":10000"));
+        for (uint8_t input_id = 1U; input_id <= MOD_IO_ANALOG_INPUT_COUNT; ++input_id) {
+            TEST_ASSERT_GREATER_THAN_INT32(
+                0,
+                snprintf(expected_fragment,
+                         sizeof(expected_fragment),
+                         "\"id\":%u,\"value\":%u",
+                         (unsigned)input_id,
+                         (unsigned)snapshot.analog_values[input_id - 1U]));
+            TEST_ASSERT_NOT_NULL(strstr(response, expected_fragment));
+        }
+
+        perform_http_request(test_port,
+                             "GET",
+                             "/api/v1/inputs/analog/1",
+                             NULL,
+                             NULL,
+                             response,
+                             sizeof(response));
+        TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+        TEST_ASSERT_GREATER_THAN_INT32(0,
+                                       snprintf(expected_fragment,
+                                                sizeof(expected_fragment),
+                                                "\"input\":{\"id\":1,\"value\":%u}",
+                                                (unsigned)snapshot.analog_values[0]));
+        TEST_ASSERT_NOT_NULL(strstr(response, expected_fragment));
+
+        perform_http_request(test_port,
+                             "GET",
+                             "/api/v1/inputs/digital/9",
+                             NULL,
+                             NULL,
+                             response,
+                             sizeof(response));
+        TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 404 Not Found"));
+        TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"INPUT_NOT_FOUND\""));
     }
 
     if (fixture_captured) {
