@@ -238,6 +238,31 @@ func TestOTAFlashRobotModeWrapsMissingFirmwareFileErrors(t *testing.T) {
 	}
 }
 
+func TestOTAFlashReturnsClientInitializationErrors(t *testing.T) {
+	t.Parallel()
+
+	firmwarePath, _ := writeTempFirmware(t, []byte{0xde, 0xad, 0xbe, 0xef})
+	command := newRootCommand()
+	command.SetOut(io.Discard)
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{
+		"--host", ":8080",
+		"--api-token", "ota-token",
+		"ota", "flash", firmwarePath,
+	})
+
+	err := command.Execute()
+	if err == nil {
+		t.Fatal("Execute() succeeded; want error")
+	}
+	if got := exitcodes.FromError(err); got != exitcodes.BadArgument {
+		t.Fatalf("exit code = %d, want %d", got, exitcodes.BadArgument)
+	}
+	if !strings.Contains(err.Error(), "host must include a hostname or IP address") {
+		t.Fatalf("error = %v, want wrapped client.New host validation failure", err)
+	}
+}
+
 func TestOTATimeoutUsesLongerDefault(t *testing.T) {
 	t.Parallel()
 

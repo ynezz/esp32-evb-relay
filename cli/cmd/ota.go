@@ -101,9 +101,6 @@ func runOTAFlash(cmd *cobra.Command, args []string) error {
 		Timeout:  otaTimeout(runtime.Timeout),
 	})
 	if err != nil {
-		if closeErr := closeFirmwareUpload(firmware); closeErr != nil && err == nil {
-			err = closeErr
-		}
 		return wrapOTARobotResult(cmd, runtime, host, nil, nil, startedAt, err)
 	}
 	host = uploadClient.Host()
