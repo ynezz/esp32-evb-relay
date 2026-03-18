@@ -1,0 +1,130 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  firmware:
+    name: firmware artifact
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Build firmware with release version
+        uses: espressif/esp-idf-ci-action@v1
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        with:
+          esp_idf_version: v5.4
+          target: esp32
+          path: firmware
+          command: >-
+            bash -lc 'idf.py -DPROJECT_VER="${RELEASE_TAG#v}" build'
+
+      - name: Prepare firmware release assets
+        run: |
+          set -euo pipefail
+
+          mkdir -p dist
+          artifact="esp32-evb-relay-${GITHUB_REF_NAME}.bin"
+
+          cp firmware/build/evb_relay_firmware.bin "dist/${artifact}"
+          sha256sum "dist/${artifact}" > "dist/${artifact}.sha256"
+
+      - name: Upload firmware release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-release
+          if-no-files-found: error
+          path: dist/*
+
+  cli:
+    name: cli release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean --config cli/.goreleaser.yaml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  changelog:
+    name: changelog
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Generate release notes
+        id: git-cliff
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: release-notes.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Upload changelog artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          if-no-files-found: error
+          path: release-notes.md
+
+  release:
+    name: publish release
+    runs-on: ubuntu-latest
+    needs:
+      - firmware
+      - cli
+      - changelog
+    steps:
+      - name: Download firmware artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware-release
+          path: dist/firmware
+
+      - name: Download changelog artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: dist/changelog
+
+      - name: Attach firmware assets and publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          tag="${GITHUB_REF_NAME}"
+          notes_file="dist/changelog/release-notes.md"
+
+          gh release view "${tag}" >/dev/null
+          gh release upload "${tag}" dist/firmware/* --clobber
+          gh release edit "${tag}" --notes-file "${notes_file}" --draft=false
