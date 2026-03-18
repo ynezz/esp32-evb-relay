@@ -10,7 +10,7 @@ Probe ESP32 ROM download mode with a minimal esptool chip_id command.
 
 Options:
   --port <serial-port>  Serial port to probe. Defaults to EVB_FLASH_PORT,
-                        then EVB_SERIAL_PORT, then /dev/ttyS4.
+                        then EVB_SERIAL_PORT, then /dev/esp32-evb.
   --console-port <serial-port>
                         Optional live UART console port. Defaults to
                         EVB_SERIAL_PORT when it differs from --port.
@@ -108,7 +108,7 @@ PY
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
-port="${EVB_FLASH_PORT:-${EVB_SERIAL_PORT:-/dev/ttyS4}}"
+port="${EVB_FLASH_PORT:-${EVB_SERIAL_PORT:-/dev/esp32-evb}}"
 console_port="${EVB_SERIAL_PORT:-}"
 baud="${EVB_FLASH_BAUD:-115200}"
 
@@ -175,8 +175,8 @@ EOF
 
 check-download-mode.sh: Failed to enter ESP32 ROM download mode on ${port}.
 This runner is known to expose ambiguous control and console paths.
-See ${repo_root}/docs/hardware-reference.md for the current /dev/ttyS4 and
-/dev/ttyS5 mapping, expected failure signatures, and the Olimex R46/R14
+See ${repo_root}/docs/hardware-reference.md for the stable serial alias
+workflow, any current guest tty observations, and the Olimex R46/R14
 hardware rework note.
 EOF
     exit 1

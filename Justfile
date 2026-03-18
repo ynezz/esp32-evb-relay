@@ -1,4 +1,4 @@
-serial_port := env("EVB_SERIAL_PORT", "/dev/ttyS4")
+serial_port := env("EVB_SERIAL_PORT", "/dev/esp32-evb")
 flash_port := env("EVB_FLASH_PORT", serial_port)
 test_app_sdkconfig_defaults := env(
     "EVB_TEST_APP_SDKCONFIG_DEFAULTS",

@@ -5,8 +5,9 @@
 - **Chip:** ESP32-D0WD (revision v1.0)
 - **MAC:** `bc:dd:c2:f2:aa:19`
 - **Flash:** 4 MB
-- **Flash/control port:** `/dev/ttyS4` on the current self-hosted runner
-- **Console port:** `/dev/ttyS5` on the current self-hosted runner
+- **Preferred single-port alias:** `/dev/esp32-evb`
+- **Preferred split flash alias:** `/dev/esp32-evb-flash`
+- **Preferred split console alias:** `/dev/esp32-evb-console`
 - **Serial baud:** 115200
 - **Board FQBN:** `esp32:esp32:esp32-evb`
 
@@ -36,41 +37,63 @@
   retries and Ethernet comes up normally on the second pass.
 - DHCP-assigned IP is reachable from the host.
 
+### Serial Device Naming
+
+- Do not hardcode guest `/dev/ttyS*` paths in repo defaults, CI, or
+  runner notes. Under QEMU/virsh, the guest numbering is dynamic and may
+  change when the domain XML or PCI layout changes.
+- Prefer stable guest-side udev aliases:
+  - `/dev/esp32-evb` for single-port setups
+  - `/dev/esp32-evb-flash` and `/dev/esp32-evb-console` for split
+    flash/control and live-UART setups
+- An example guest-side rule file lives at
+  [`tools/udev/99-esp32-evb-qemu-serial.rules.example`](../tools/udev/99-esp32-evb-qemu-serial.rules.example).
+- For the current virsh/QEMU runner, `udevadm info` shows the pinned PCI
+  addresses `0000:00:07.0` and `0000:00:08.0` for the two guest serial
+  adapters. The example udev rules bind aliases to those PCI addresses,
+  not to transient tty node names.
+
 ### Flashing
 
 ```bash
-# Repo QA recipes prefer EVB_FLASH_PORT for flashing. Set EVB_SERIAL_PORT
-# as well when a runner exposes a separate live UART console path.
-# Example split-port invocation:
-EVB_FLASH_PORT=/dev/ttyS4 EVB_SERIAL_PORT=/dev/ttyS5 just test-device
+# Single-port setup using the stable default alias:
+EVB_SERIAL_PORT=/dev/esp32-evb just test-device
+
+# Split flash/control and live UART aliases:
+EVB_FLASH_PORT=/dev/esp32-evb-flash \
+EVB_SERIAL_PORT=/dev/esp32-evb-console \
+just test-device
 
 # Probe ROM download mode directly. flash.sh, provision.sh, test-device,
 # and test-integration run this guardrail automatically before flashing.
-./scripts/check-download-mode.sh --port /dev/ttyS4
+./scripts/check-download-mode.sh --port /dev/esp32-evb
 
-# On the current split-port runner, pass the live UART path as well so
-# the helper can show whether the probe only reset the app instead of
-# reaching the ROM downloader.
-./scripts/check-download-mode.sh --port /dev/ttyS4 --console-port /dev/ttyS5
+# For split-port runners, pass the live UART alias as well so the helper
+# can show whether the probe only reset the app instead of reaching the
+# ROM downloader.
+./scripts/check-download-mode.sh \
+  --port /dev/esp32-evb-flash \
+  --console-port /dev/esp32-evb-console
 
 # Compile
 /tmp/arduino-cli compile --fqbn esp32:esp32:esp32-evb <sketch_dir>
 
 # Upload (must use 115200 — 921600 causes sync timeouts)
-/tmp/arduino-cli upload --port /dev/ttyS4 \
+/tmp/arduino-cli upload --port /dev/esp32-evb \
   --fqbn esp32:esp32:esp32-evb \
   --upload-property upload.speed=115200 <sketch_dir>
 
 # Low-level flash (esptool, use --no-stub to avoid stub crashes)
-python3 -m esptool --no-stub --chip esp32 --port /dev/ttyS4 \
+python3 -m esptool --no-stub --chip esp32 --port /dev/esp32-evb \
   write_flash 0x10000 <binary.bin>
 ```
 
 ### Current Runner Caveat (2026-03-18)
 
-- The self-hosted QEMU runner currently exposes two PCI 16550 ports:
-  `/dev/ttyS4` affects reset/control lines, while `/dev/ttyS5` carries
-  the live ESP32 UART console output.
+- The self-hosted QEMU runner currently exposes two PCI 16550 guest
+  ports. The live UART console most recently enumerated as
+  `/dev/ttyS5`, but the guest `/dev/ttyS*` numbering itself is not
+  stable and should only be treated as a diagnostic detail.
 - `udevadm info` and `lspci` show both ports are guest-visible QEMU PCI
   16550A adapters (`Red Hat, Inc. QEMU PCI 16550A Adapter`), not a
   directly enumerated USB UART on the Linux guest.
@@ -78,27 +101,31 @@ python3 -m esptool --no-stub --chip esp32 --port /dev/ttyS4 \
   `/dev/gpiochip*` devices for a separate GPIO0/EN control path, which
   strongly suggests the missing download-mode assertion lives in the VM
   bridge or host-side wiring rather than in repo scripts.
-- Brute-force probing of all 64 3-step DTR/RTS sequences on `/dev/ttyS4`
-  while monitoring `/dev/ttyS5` never entered ROM download mode. Every
-  reboot stayed in `boot:0x1b (SPI_FAST_FLASH_BOOT)`.
+- The guest PCI device at `0000:00:07.0` appears to be the control path
+  and `0000:00:08.0` carries the live UART console. The example udev
+  aliases map those to `/dev/esp32-evb-flash` and
+  `/dev/esp32-evb-console` respectively.
+- Brute-force probing of all 64 3-step DTR/RTS sequences on the control
+  path while monitoring the live UART never entered ROM download mode.
+  Every reboot stayed in `boot:0x1b (SPI_FAST_FLASH_BOOT)`.
 - Re-running exact emulations of esptool's `ClassicReset` and
-  `UnixTightReset` sequences on `/dev/ttyS4` still only produces a
-  software reset on `/dev/ttyS5`; the board continues to boot the app
+  `UnixTightReset` sequences on the control path still only produces a
+  software reset on the live UART; the board continues to boot the app
   with `boot:0x1b` instead of entering the ROM downloader.
-- A manual split-port probe that used `/dev/ttyS4` only for control
-  pulses and `/dev/ttyS5` for esptool data also failed. `esptool
-  --before no_reset` on `/dev/ttyS5` returned `Invalid head of packet`,
+- A manual split-port probe that used the control path only for control
+  pulses and the live UART for esptool data also failed. `esptool
+  --before no_reset` on the live UART returned `Invalid head of packet`,
   which confirms the runner can reset the board but still cannot hold
   GPIO0 in the ROM-loader state.
 - Re-running raw `esptool` probes from the guest still shows the same
-  split behavior: `/dev/ttyS4` returns `No serial data received`, while
-  `/dev/ttyS5` reads boot/app console bytes such as `Invalid head of
-  packet (0x5B)` because the board keeps rebooting into the flashed app
+  split behavior: the control path returns `No serial data received`,
+  while the live UART reads boot/app console bytes such as `Invalid head
+  of packet (0x20)` because the board keeps rebooting into the flashed app
   instead of entering ROM download mode.
 - `scripts/check-download-mode.sh` now accepts `--console-port` (and
   defaults it from `EVB_SERIAL_PORT` when distinct) so failed download
-  probes print a short live UART preview from `/dev/ttyS5`. That makes
-  the split control-vs-console mapping explicit without re-running
+  probes print a short live UART preview from the console path. That
+  makes the split control-vs-console mapping explicit without re-running
   manual ad-hoc probes.
 - The image currently flashed on the board reports app version
   `2ae9772-dirty` with build time `2026-03-18 07:46:58 UTC`, which
@@ -112,7 +139,7 @@ python3 -m esptool --no-stub --chip esp32 --port /dev/ttyS4 \
 - Treat `Wrong boot mode detected` and `No serial data received` failures
   on this runner as hardware or infrastructure blockers until GPIO0/EN
   download-mode control is fixed outside the repo.
-- Treat the current boot loop on `/dev/ttyS5` as stale-firmware evidence
+- Treat the current boot loop on the live UART path as stale-firmware evidence
   until download-mode control is restored and a post-`7815069` firmware
   build can be flashed onto the board.
 - `scripts/check-download-mode.sh` now surfaces those signatures before

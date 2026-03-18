@@ -11,7 +11,7 @@ firmware/ tree.
 
 Options:
   --port <serial-port>  Serial port to flash. Defaults to EVB_FLASH_PORT,
-                        then EVB_SERIAL_PORT, then /dev/ttyS4.
+                        then EVB_SERIAL_PORT, then /dev/esp32-evb.
   --baud <baud>         Flash baud rate. Defaults to EVB_FLASH_BAUD or
                         115200.
   -h, --help            Show this help text.
@@ -34,7 +34,7 @@ require_idf() {
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 firmware_dir="${repo_root}/firmware"
-port="${EVB_FLASH_PORT:-${EVB_SERIAL_PORT:-/dev/ttyS4}}"
+port="${EVB_FLASH_PORT:-${EVB_SERIAL_PORT:-/dev/esp32-evb}}"
 baud="${EVB_FLASH_BAUD:-115200}"
 
 while (($# > 0)); do

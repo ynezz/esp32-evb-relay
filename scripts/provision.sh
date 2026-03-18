@@ -11,7 +11,7 @@ only the NVS partition over the ESP32 serial bootloader path.
 
 Options:
   --port <serial-port>  Serial port to use. Defaults to EVB_FLASH_PORT,
-                        then EVB_SERIAL_PORT, then /dev/ttyS4.
+                        then EVB_SERIAL_PORT, then /dev/esp32-evb.
   --baud <baud>         Serial baud rate. Defaults to EVB_FLASH_BAUD or
                         115200.
   --token <value>       Provision this API token.
@@ -50,7 +50,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 firmware_dir="${repo_root}/firmware"
 partition_table="${firmware_dir}/partitions.csv"
-port="${EVB_FLASH_PORT:-${EVB_SERIAL_PORT:-/dev/ttyS4}}"
+port="${EVB_FLASH_PORT:-${EVB_SERIAL_PORT:-/dev/esp32-evb}}"
 baud="${EVB_FLASH_BAUD:-115200}"
 token=""
 mode="generate"

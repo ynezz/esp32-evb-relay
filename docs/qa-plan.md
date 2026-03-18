@@ -15,10 +15,10 @@
 - Build and QA automation exists via `Justfile` recipes including
   `just ci`, `just test-device`, and `just test-integration`
 - Hardware-backed QA runs on a self-hosted runner; repo recipes default to
-  `/dev/ttyS4` and can optionally split flash/control
+  `/dev/esp32-evb` and can optionally split flash/control
   (`EVB_FLASH_PORT`) from live UART monitoring (`EVB_SERIAL_PORT`)
-- Use the runner port mapping documented in `docs/hardware-reference.md`
-  instead of assuming a single serial path
+- Under QEMU/virsh guests, use the stable udev aliases documented in
+  `docs/hardware-reference.md` instead of hardcoding `/dev/ttyS*`
 
 ### Critical QA Prerequisites
 
@@ -438,7 +438,7 @@ working unchanged.
 
 ```just
 # Default serial port for hardware tests
-serial_port := env("EVB_SERIAL_PORT", "/dev/ttyS4")
+serial_port := env("EVB_SERIAL_PORT", "/dev/esp32-evb")
 flash_port := env("EVB_FLASH_PORT", serial_port)
 test_app_sdkconfig_defaults := env("EVB_TEST_APP_SDKCONFIG_DEFAULTS", "sdkconfig.defaults")
 

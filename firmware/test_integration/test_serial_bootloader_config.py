@@ -63,7 +63,7 @@ def test_integration_parttool_uses_rom_bootloader_only() -> None:
     command = module._parttool_command(
         Path("/tmp/parttool.py"),
         Path("/tmp/partitions.csv"),
-        "/dev/ttyS4",
+        "/dev/esp32-evb",
         "115200",
         "read_partition",
         "--partition-name",
@@ -78,7 +78,7 @@ def test_integration_parttool_uses_rom_bootloader_only() -> None:
         "--esptool-args",
         "no-stub",
         "-p",
-        "/dev/ttyS4",
+        "/dev/esp32-evb",
         "-b",
         "115200",
     ]
@@ -87,7 +87,7 @@ def test_integration_parttool_uses_rom_bootloader_only() -> None:
 def test_provision_script_disables_stub_for_parttool() -> None:
     script_text = (_repo_root() / "scripts/provision.sh").read_text(encoding="utf-8")
     assert "parttool_esptool_args=(--esptool-args no-stub)" in script_text
-    assert 'port="${EVB_FLASH_PORT:-${EVB_SERIAL_PORT:-/dev/ttyS4}}"' in script_text
+    assert 'port="${EVB_FLASH_PORT:-${EVB_SERIAL_PORT:-/dev/esp32-evb}}"' in script_text
     assert '"${download_mode_check}" --port "${port}" --baud "${baud}"' in script_text
 
 
@@ -114,14 +114,24 @@ def test_flash_port_defaults_prefer_explicit_override(monkeypatch: pytest.Monkey
 
     monkeypatch.delenv("EVB_FLASH_PORT", raising=False)
     monkeypatch.delenv("EVB_SERIAL_PORT", raising=False)
-    assert module._default_flash_port() == "/dev/ttyS4"
+    assert module._default_flash_port() == "/dev/esp32-evb"
 
     monkeypatch.setenv("EVB_SERIAL_PORT", "/dev/ttyUSB0")
     assert module._default_flash_port() == "/dev/ttyUSB0"
 
-    monkeypatch.setenv("EVB_FLASH_PORT", "/dev/ttyS4")
-    monkeypatch.setenv("EVB_SERIAL_PORT", "/dev/ttyS5")
-    assert module._default_flash_port() == "/dev/ttyS4"
+    monkeypatch.setenv("EVB_FLASH_PORT", "/dev/esp32-evb-flash")
+    monkeypatch.setenv("EVB_SERIAL_PORT", "/dev/esp32-evb-console")
+    assert module._default_flash_port() == "/dev/esp32-evb-flash"
+
+
+def test_qemu_udev_example_defines_stable_serial_aliases() -> None:
+    rule_text = (_repo_root() / "tools/udev/99-esp32-evb-qemu-serial.rules.example").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'SYMLINK+="esp32-evb-flash"' in rule_text
+    assert 'SYMLINK+="esp32-evb-console"' in rule_text
+    assert 'SYMLINK+="esp32-evb"' in rule_text
 
 
 def test_dut_endpoint_resolution_uses_resolved_host_ip(monkeypatch: pytest.MonkeyPatch) -> None:
