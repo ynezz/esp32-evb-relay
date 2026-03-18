@@ -1,5 +1,6 @@
 .ntm
 docs/olimex-esp32-evb-project
+__pycache__/
 
 # bv (beads viewer) local config and caches
 .bv/
@@ -16,4 +17,3 @@ firmware/test_app/sdkconfig.old
 firmware/test_app/managed_components/
 firmware/.pytest_cache/
 firmware/test_app/.pytest_cache/
-firmware/test_app/__pycache__/
