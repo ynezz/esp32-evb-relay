@@ -1,4 +1,5 @@
 serial_port := env("EVB_SERIAL_PORT", "/dev/esp32-evb")
+serial_baud := env("EVB_SERIAL_BAUD", "115200")
 flash_port := env("EVB_FLASH_PORT", serial_port)
 test_app_sdkconfig_defaults := env(
     "EVB_TEST_APP_SDKCONFIG_DEFAULTS",
@@ -52,7 +53,9 @@ test-integration: _ensure-python-tools
     cd firmware && \
         ../{{venv_python}} -m pytest --target esp32 -p no:cacheprovider \
         test_integration \
-        --port {{flash_port}}
+        --port {{flash_port}} \
+        --monitor-port {{serial_port}} \
+        --monitor-baud {{serial_baud}}
 
 format: _ensure-python-tools
     {{venv_astyle_py}} --astyle-version=3.4.7 --style=otbs \

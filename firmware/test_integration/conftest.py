@@ -21,7 +21,8 @@ os.environ.setdefault("ESPBAUD", "115200")
 DEFAULT_DUT_HOST = "esp32-evb-relay.local"
 DEFAULT_HTTP_PORT = 80
 DEFAULT_FLASH_PORT = "/dev/esp32-evb"
-DEFAULT_SERIAL_BAUD = "115200"
+DEFAULT_FLASH_BAUD = "115200"
+DEFAULT_MONITOR_BAUD = "115200"
 DEFAULT_REQUEST_TIMEOUT = 5.0
 DEFAULT_DISCOVERY_TIMEOUT = 15.0
 DEFAULT_SERIAL_ENDPOINT_TIMEOUT = 30.0
@@ -64,8 +65,50 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    group = parser.getgroup("evb-relay")
+    group.addoption("--monitor-port",
+                    action="store",
+                    dest="monitor_port",
+                    default=None,
+                    help="Runtime console port for serial endpoint fallback")
+    group.addoption("--monitor-baud",
+                    action="store",
+                    dest="monitor_baud",
+                    default=None,
+                    help="Runtime console baud for serial endpoint fallback")
+
+
 def _default_flash_port() -> str:
     return os.environ.get("EVB_FLASH_PORT") or os.environ.get("EVB_SERIAL_PORT") or DEFAULT_FLASH_PORT
+
+
+def _default_flash_baud() -> str:
+    return os.environ.get("EVB_FLASH_BAUD", DEFAULT_FLASH_BAUD)
+
+
+def _default_monitor_port(flash_port: str) -> str:
+    return os.environ.get("EVB_SERIAL_PORT") or flash_port
+
+
+def _default_monitor_baud() -> str:
+    return os.environ.get("EVB_SERIAL_BAUD", DEFAULT_MONITOR_BAUD)
+
+
+def _flash_port_from_config(pytestconfig: pytest.Config) -> str:
+    return str(pytestconfig.getoption("port") or _default_flash_port())
+
+
+def _flash_baud_from_config(pytestconfig: pytest.Config) -> str:
+    return str(pytestconfig.getoption("baud") or _default_flash_baud())
+
+
+def _monitor_port_from_config(pytestconfig: pytest.Config, flash_port: str) -> str:
+    return str(pytestconfig.getoption("monitor_port") or _default_monitor_port(flash_port))
+
+
+def _monitor_baud_from_config(pytestconfig: pytest.Config) -> str:
+    return str(pytestconfig.getoption("monitor_baud") or _default_monitor_baud())
 
 
 def _run_command(args: list[str], cwd: Path | None = None) -> str:
@@ -82,8 +125,8 @@ def _run_command(args: list[str], cwd: Path | None = None) -> str:
 def _parttool_command(
     parttool_py: Path,
     partition_table: Path,
-    serial_port: str,
-    serial_baud: str,
+    flash_port: str,
+    flash_baud: str,
     *args: str,
 ) -> list[str]:
     return [
@@ -93,14 +136,14 @@ def _parttool_command(
         str(partition_table),
         *PARTTOOL_ESPTOOL_ARGS,
         "-p",
-        serial_port,
+        flash_port,
         "-b",
-        serial_baud,
+        flash_baud,
         *args,
     ]
 
 
-def _read_device_config_values(repo_root: Path, serial_port: str, serial_baud: str) -> dict[str, str]:
+def _read_device_config_values(repo_root: Path, flash_port: str, flash_baud: str) -> dict[str, str]:
     idf_path = os.environ.get("IDF_PATH")
     if not idf_path:
         raise RuntimeError("IDF_PATH must be set for integration tests")
@@ -114,8 +157,8 @@ def _read_device_config_values(repo_root: Path, serial_port: str, serial_baud: s
         _run_command(_parttool_command(
             parttool_py,
             partition_table,
-            serial_port,
-            serial_baud,
+            flash_port,
+            flash_baud,
             "read_partition",
             "--partition-name",
             "nvs",
@@ -194,23 +237,23 @@ def _resolve_dut_endpoint(
     host: str,
     port: int,
     timeout_seconds: float,
-    serial_port: str | None = None,
-    serial_baud: str = DEFAULT_SERIAL_BAUD,
+    monitor_port: str | None = None,
+    monitor_baud: str = DEFAULT_MONITOR_BAUD,
 ) -> DutEndpoint:
     try:
         ip = _wait_for_host(host, timeout_seconds)
     except RuntimeError as exc:
-        if serial_port is None:
+        if monitor_port is None:
             pytest.fail(f"could not resolve DUT host {host!r}: {exc}")
 
         try:
-            ip = _wait_for_ip_on_serial(serial_port,
-                                        serial_baud,
+            ip = _wait_for_ip_on_serial(monitor_port,
+                                        monitor_baud,
                                         max(timeout_seconds, DEFAULT_SERIAL_ENDPOINT_TIMEOUT))
         except RuntimeError as serial_exc:
             pytest.fail(
                 f"could not resolve DUT host {host!r}: {exc}; "
-                f"serial fallback on {serial_port!r} also failed: {serial_exc}"
+                f"serial fallback on {monitor_port!r} also failed: {serial_exc}"
             )
 
     return DutEndpoint(host=host, ip=ip, port=port, base_url=f"http://{ip}:{port}")
@@ -230,41 +273,51 @@ def _restore_safe_relays(http_client: IntegrationHttpClient) -> None:
 
 
 @pytest.fixture(scope="session")
-def serial_port(pytestconfig: pytest.Config) -> str:
-    return str(pytestconfig.getoption("port") or _default_flash_port())
+def flash_port(pytestconfig: pytest.Config) -> str:
+    return _flash_port_from_config(pytestconfig)
 
 
 @pytest.fixture(scope="session")
-def serial_baud(pytestconfig: pytest.Config) -> str:
-    return str(pytestconfig.getoption("baud") or os.environ.get("EVB_FLASH_BAUD", DEFAULT_SERIAL_BAUD))
+def flash_baud(pytestconfig: pytest.Config) -> str:
+    return _flash_baud_from_config(pytestconfig)
 
 
 @pytest.fixture(scope="session")
-def firmware_flashed(serial_port: str, serial_baud: str) -> None:
+def monitor_port(pytestconfig: pytest.Config, flash_port: str) -> str:
+    return _monitor_port_from_config(pytestconfig, flash_port)
+
+
+@pytest.fixture(scope="session")
+def monitor_baud(pytestconfig: pytest.Config) -> str:
+    return _monitor_baud_from_config(pytestconfig)
+
+
+@pytest.fixture(scope="session")
+def firmware_flashed(flash_port: str, flash_baud: str) -> None:
     repo_root = _repo_root()
     _run_command([
         str(repo_root / "scripts/flash.sh"),
         "--port",
-        serial_port,
+        flash_port,
         "--baud",
-        serial_baud,
+        flash_baud,
     ], cwd=repo_root)
     time.sleep(float(os.environ.get("EVB_BOOT_SETTLE_SECONDS", DEFAULT_BOOT_SETTLE_SECONDS)))
 
 
 @pytest.fixture(scope="session")
-def auth_token(serial_port: str, serial_baud: str, firmware_flashed: None) -> Iterator[str]:
+def auth_token(flash_port: str, flash_baud: str, firmware_flashed: None) -> Iterator[str]:
     repo_root = _repo_root()
-    previous_values = _read_device_config_values(repo_root, serial_port, serial_baud)
+    previous_values = _read_device_config_values(repo_root, flash_port, flash_baud)
     previous_token = previous_values.get("api_token")
     token = secrets.token_hex(16)
 
     _run_command([
         str(repo_root / "scripts/provision.sh"),
         "--port",
-        serial_port,
+        flash_port,
         "--baud",
-        serial_baud,
+        flash_baud,
         "--token",
         token,
     ], cwd=repo_root)
@@ -277,9 +330,9 @@ def auth_token(serial_port: str, serial_baud: str, firmware_flashed: None) -> It
             restore_args = [
                 str(repo_root / "scripts/provision.sh"),
                 "--port",
-                serial_port,
+                flash_port,
                 "--baud",
-                serial_baud,
+                flash_baud,
                 "--token",
                 previous_token,
             ]
@@ -287,9 +340,9 @@ def auth_token(serial_port: str, serial_baud: str, firmware_flashed: None) -> It
             restore_args = [
                 str(repo_root / "scripts/provision.sh"),
                 "--port",
-                serial_port,
+                flash_port,
                 "--baud",
-                serial_baud,
+                flash_baud,
                 "--clear",
             ]
 
@@ -298,11 +351,11 @@ def auth_token(serial_port: str, serial_baud: str, firmware_flashed: None) -> It
 
 
 @pytest.fixture(scope="session")
-def dut_endpoint(auth_token: str, serial_port: str, serial_baud: str) -> DutEndpoint:
+def dut_endpoint(auth_token: str, monitor_port: str, monitor_baud: str) -> DutEndpoint:
     host = os.environ.get("EVB_DUT_HOST") or os.environ.get("EVB_DUT_HOSTNAME", DEFAULT_DUT_HOST)
     port = int(os.environ.get("EVB_DUT_HTTP_PORT", DEFAULT_HTTP_PORT))
     timeout = float(os.environ.get("EVB_DISCOVERY_TIMEOUT_SECONDS", DEFAULT_DISCOVERY_TIMEOUT))
-    return _resolve_dut_endpoint(host, port, timeout, serial_port, serial_baud)
+    return _resolve_dut_endpoint(host, port, timeout, monitor_port, monitor_baud)
 
 
 @pytest.fixture(scope="session")

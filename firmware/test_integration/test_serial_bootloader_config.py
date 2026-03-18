@@ -11,6 +11,14 @@ import pytest
 FLASH_SIZE_BYTES = 0x400000
 
 
+class DummyConfig:
+    def __init__(self, **options: object) -> None:
+        self._options = options
+
+    def getoption(self, name: str) -> object | None:
+        return self._options.get(name)
+
+
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
@@ -153,6 +161,52 @@ def test_flash_port_defaults_prefer_explicit_override(monkeypatch: pytest.Monkey
     assert module._default_flash_port() == "/dev/esp32-evb-flash"
 
 
+def test_monitor_port_defaults_prefer_runtime_console(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_integration_conftest()
+
+    monkeypatch.delenv("EVB_SERIAL_PORT", raising=False)
+    assert module._default_monitor_port("/dev/esp32-evb-flash") == "/dev/esp32-evb-flash"
+
+    monkeypatch.setenv("EVB_SERIAL_PORT", "/dev/esp32-evb-console")
+    assert module._default_monitor_port("/dev/esp32-evb-flash") == "/dev/esp32-evb-console"
+
+
+def test_monitor_baud_defaults_do_not_reuse_flash_baud(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_integration_conftest()
+
+    monkeypatch.delenv("EVB_FLASH_BAUD", raising=False)
+    monkeypatch.delenv("EVB_SERIAL_BAUD", raising=False)
+    assert module._default_monitor_baud() == "115200"
+
+    monkeypatch.setenv("EVB_FLASH_BAUD", "921600")
+    assert module._default_monitor_baud() == "115200"
+
+    monkeypatch.setenv("EVB_SERIAL_BAUD", "74880")
+    assert module._default_monitor_baud() == "74880"
+
+
+def test_monitor_transport_from_config_prefers_explicit_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_integration_conftest()
+    config = DummyConfig(
+        port="/dev/cli-flash",
+        baud="460800",
+        monitor_port="/dev/cli-console",
+        monitor_baud="57600",
+    )
+
+    monkeypatch.setenv("EVB_FLASH_PORT", "/dev/env-flash")
+    monkeypatch.setenv("EVB_FLASH_BAUD", "921600")
+    monkeypatch.setenv("EVB_SERIAL_PORT", "/dev/env-console")
+    monkeypatch.setenv("EVB_SERIAL_BAUD", "115200")
+
+    assert module._flash_port_from_config(config) == "/dev/cli-flash"
+    assert module._flash_baud_from_config(config) == "460800"
+    assert module._monitor_port_from_config(config, "/dev/cli-flash") == "/dev/cli-console"
+    assert module._monitor_baud_from_config(config) == "57600"
+
+
 def test_qemu_udev_example_defines_stable_serial_aliases() -> None:
     rule_text = (_repo_root() / "tools/udev/99-esp32-evb-qemu-serial.rules.example").read_text(
         encoding="utf-8"
@@ -186,30 +240,48 @@ def test_dut_endpoint_resolution_failures_are_fatal(monkeypatch: pytest.MonkeyPa
         module._resolve_dut_endpoint("esp32-evb-relay.local", 80, 15.0)
 
 
-def test_dut_endpoint_resolution_falls_back_to_serial_ip(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_dut_endpoint_resolution_falls_back_to_monitor_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     module = _load_integration_conftest()
+    serial_fallback_calls: list[tuple[str, str, float]] = []
 
     def _raise_runtime_error(host: str, timeout_seconds: float) -> str:
         raise RuntimeError("failed to resolve 'esp32-evb-relay.local': [Errno -3] Temporary failure in name resolution")
 
     monkeypatch.setattr(module, "_wait_for_host", _raise_runtime_error)
-    monkeypatch.setattr(module, "_wait_for_ip_on_serial", lambda port, baud, timeout_seconds: "192.0.2.55")
+    monkeypatch.setattr(
+        module,
+        "_wait_for_ip_on_serial",
+        lambda port, baud, timeout_seconds: serial_fallback_calls.append((port, baud, timeout_seconds)) or "192.0.2.55",
+    )
 
-    endpoint = module._resolve_dut_endpoint("esp32-evb-relay.local", 80, 15.0, "/dev/esp32-evb", "115200")
+    endpoint = module._resolve_dut_endpoint(
+        "esp32-evb-relay.local",
+        80,
+        15.0,
+        "/dev/esp32-evb-console",
+        "74880",
+    )
 
     assert endpoint.host == "esp32-evb-relay.local"
     assert endpoint.ip == "192.0.2.55"
     assert endpoint.port == 80
     assert endpoint.base_url == "http://192.0.2.55:80"
+    assert serial_fallback_calls == [("/dev/esp32-evb-console", "74880", 30.0)]
 
 
 def test_justfile_supports_split_flash_and_monitor_ports() -> None:
     justfile_text = (_repo_root() / "Justfile").read_text(encoding="utf-8")
 
+    assert 'serial_port := env("EVB_SERIAL_PORT", "/dev/esp32-evb")' in justfile_text
+    assert 'serial_baud := env("EVB_SERIAL_BAUD", "115200")' in justfile_text
     assert 'flash_port := env("EVB_FLASH_PORT", serial_port)' in justfile_text
     assert "./scripts/check-download-mode.sh --port {{flash_port}} --baud 115200" in justfile_text
     assert "--flash-port {{flash_port}}" in justfile_text
-    assert "test_integration \\\n        --port {{flash_port}}" in justfile_text
+    assert "--port {{flash_port}}" in justfile_text
+    assert "--monitor-port {{serial_port}}" in justfile_text
+    assert "--monitor-baud {{serial_baud}}" in justfile_text
 
 
 def test_cleanup_ignores_modio_not_present_service_unavailable() -> None:
