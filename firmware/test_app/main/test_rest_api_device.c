@@ -359,6 +359,20 @@ TEST_CASE("rest_api device fails closed when no auth handler is configured",
     TEST_ASSERT_NULL(rest_api_get_server());
 }
 
+TEST_CASE("rest_api device fails closed when no status provider is configured",
+          "[qa][rest_api][device]")
+{
+    const rest_api_config_t config = {
+        .port = 18080U,
+        .auth_handler = allow_auth_handler,
+        .status_provider = NULL,
+    };
+
+    ensure_tcpip_ready();
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, rest_api_start(&config));
+    TEST_ASSERT_NULL(rest_api_get_server());
+}
+
 TEST_CASE("rest_api device returns 401 when auth handler reports unauthorized",
           "[qa][rest_api][device]")
 {

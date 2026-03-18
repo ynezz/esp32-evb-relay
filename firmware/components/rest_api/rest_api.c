@@ -5,7 +5,6 @@
 #include <string.h>
 
 #include "cJSON.h"
-#include "device_config.h"
 #include "esp_app_desc.h"
 #include "esp_check.h"
 #include "esp_event.h"
@@ -69,27 +68,14 @@ const char *rest_api_modio_sync_to_string(rest_api_modio_sync_t sync_state)
 
 static esp_err_t rest_api_build_status_view(rest_api_status_view_t *status)
 {
-    esp_err_t err;
-
     ESP_RETURN_ON_FALSE(status != NULL, ESP_ERR_INVALID_ARG, TAG, "Status output buffer is required");
+    ESP_RETURN_ON_FALSE(s_config.status_provider != NULL,
+                        ESP_ERR_INVALID_STATE,
+                        TAG,
+                        "Status provider is required");
 
     memset(status, 0, sizeof(*status));
-    status->modio_present = false;
-    status->modio_sync = REST_API_MODIO_SYNC_ABSENT;
-
-    err = device_config_get_hostname(status->network.hostname, sizeof(status->network.hostname));
-    if (err != ESP_OK) {
-        return err;
-    }
-
-    if (s_config.status_provider != NULL) {
-        err = s_config.status_provider(status, s_config.status_ctx);
-        if (err != ESP_OK) {
-            return err;
-        }
-    }
-
-    return ESP_OK;
+    return s_config.status_provider(status, s_config.status_ctx);
 }
 
 static esp_err_t rest_api_require_authenticated_status(httpd_req_t *req,
@@ -668,6 +654,10 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
                         ESP_ERR_INVALID_ARG,
                         TAG,
                         "REST API auth handler is required");
+    ESP_RETURN_ON_FALSE(config->status_provider != NULL,
+                        ESP_ERR_INVALID_ARG,
+                        TAG,
+                        "REST API status provider is required");
     ESP_RETURN_ON_FALSE(s_server == NULL, ESP_ERR_INVALID_STATE, TAG, "REST API server already started");
 
     err = esp_event_loop_create_default();
