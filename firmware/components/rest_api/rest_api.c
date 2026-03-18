@@ -286,30 +286,40 @@ static esp_err_t rest_api_build_status_view(rest_api_status_view_t *status)
     return s_config.status_provider(status, s_config.status_ctx);
 }
 
-static esp_err_t rest_api_require_authenticated_status(httpd_req_t *req,
-                                                       rest_api_status_view_t *out_status)
+static bool rest_api_require_authenticated_status(httpd_req_t *req,
+                                                  rest_api_status_view_t *out_status,
+                                                  esp_err_t *out_err)
 {
     rest_api_auth_result_t auth_result;
     esp_err_t err;
 
-    ESP_RETURN_ON_FALSE(req != NULL, ESP_ERR_INVALID_ARG, TAG, "HTTP request is required");
-    ESP_RETURN_ON_FALSE(out_status != NULL, ESP_ERR_INVALID_ARG, TAG, "Status output buffer is required");
+    if ((req == NULL) || (out_status == NULL) || (out_err == NULL)) {
+        if (out_err != NULL) {
+            *out_err = ESP_ERR_INVALID_ARG;
+        }
+        ESP_LOGE(TAG, "HTTP request, status output, and error output are required");
+        return false;
+    }
 
     auth_result = rest_api_authorize_request(req);
     if (auth_result == REST_API_AUTH_RESULT_UNAUTHORIZED) {
-        return rest_api_send_error(req, 401, "AUTH_REQUIRED", "Authentication required", false);
+        *out_err = rest_api_send_error(req, 401, "AUTH_REQUIRED", "Authentication required", false);
+        return false;
     }
 
     if (auth_result == REST_API_AUTH_RESULT_FORBIDDEN) {
-        return rest_api_send_error(req, 403, "AUTH_FORBIDDEN", "Access denied", false);
+        *out_err = rest_api_send_error(req, 403, "AUTH_FORBIDDEN", "Access denied", false);
+        return false;
     }
 
     err = rest_api_build_status_view(out_status);
     if (err != ESP_OK) {
-        return rest_api_send_error(req, 500, "STATUS_UNAVAILABLE", "Failed to gather status", true);
+        *out_err = rest_api_send_error(req, 500, "STATUS_UNAVAILABLE", "Failed to gather status", true);
+        return false;
     }
 
-    return ESP_OK;
+    *out_err = ESP_OK;
+    return true;
 }
 
 static void rest_api_try_attach_device_context_headers(httpd_req_t *req,
@@ -1041,8 +1051,7 @@ static esp_err_t rest_api_events_handler(httpd_req_t *req)
     BaseType_t task_result;
     esp_err_t err;
 
-    err = rest_api_require_authenticated_status(req, &status);
-    if (err != ESP_OK) {
+    if (!rest_api_require_authenticated_status(req, &status, &err)) {
         return err;
     }
 
@@ -1465,8 +1474,7 @@ static esp_err_t rest_api_prepare_input_snapshot(httpd_req_t *req,
                         TAG,
                         "Staleness output is required");
 
-    err = rest_api_require_authenticated_status(req, out_status);
-    if (err != ESP_OK) {
+    if (!rest_api_require_authenticated_status(req, out_status, &err)) {
         return err;
     }
 
@@ -1782,8 +1790,7 @@ static esp_err_t rest_api_config_handler(httpd_req_t *req)
     cJSON *config = NULL;
     esp_err_t err;
 
-    err = rest_api_require_authenticated_status(req, &status);
-    if (err != ESP_OK) {
+    if (!rest_api_require_authenticated_status(req, &status, &err)) {
         return err;
     }
 
@@ -1840,8 +1847,7 @@ static esp_err_t rest_api_ota_handler(httpd_req_t *req)
     esp_err_t err;
     esp_err_t response_err;
 
-    err = rest_api_require_authenticated_status(req, &status);
-    if (err != ESP_OK) {
+    if (!rest_api_require_authenticated_status(req, &status, &err)) {
         return err;
     }
 
@@ -1988,8 +1994,7 @@ static esp_err_t rest_api_config_update_handler(httpd_req_t *req)
     bool restart_required = false;
     esp_err_t err;
 
-    err = rest_api_require_authenticated_status(req, &status);
-    if (err != ESP_OK) {
+    if (!rest_api_require_authenticated_status(req, &status, &err)) {
         return err;
     }
 
@@ -2140,8 +2145,7 @@ static esp_err_t rest_api_onboard_relays_handler(httpd_req_t *req)
     cJSON *relays = NULL;
     esp_err_t err;
 
-    err = rest_api_require_authenticated_status(req, &status);
-    if (err != ESP_OK) {
+    if (!rest_api_require_authenticated_status(req, &status, &err)) {
         return err;
     }
 
@@ -2198,8 +2202,7 @@ static esp_err_t rest_api_onboard_relay_set_handler(httpd_req_t *req)
     bool actual_state = false;
     esp_err_t err;
 
-    err = rest_api_require_authenticated_status(req, &status);
-    if (err != ESP_OK) {
+    if (!rest_api_require_authenticated_status(req, &status, &err)) {
         return err;
     }
 
@@ -2233,8 +2236,7 @@ static esp_err_t rest_api_onboard_relay_toggle_handler(httpd_req_t *req)
     bool actual_state = false;
     esp_err_t err;
 
-    err = rest_api_require_authenticated_status(req, &status);
-    if (err != ESP_OK) {
+    if (!rest_api_require_authenticated_status(req, &status, &err)) {
         return err;
     }
 
@@ -2268,8 +2270,7 @@ static esp_err_t rest_api_relays_handler(httpd_req_t *req)
     uint8_t modio_mask = 0;
     esp_err_t err;
 
-    err = rest_api_require_authenticated_status(req, &status);
-    if (err != ESP_OK) {
+    if (!rest_api_require_authenticated_status(req, &status, &err)) {
         return err;
     }
 
@@ -2337,8 +2338,7 @@ static esp_err_t rest_api_modio_relays_handler(httpd_req_t *req)
     uint8_t relay_mask = 0;
     esp_err_t err;
 
-    err = rest_api_require_authenticated_status(req, &status);
-    if (err != ESP_OK) {
+    if (!rest_api_require_authenticated_status(req, &status, &err)) {
         return err;
     }
 
@@ -2391,8 +2391,7 @@ static esp_err_t rest_api_modio_relay_set_handler(httpd_req_t *req)
     bool requested_state = false;
     esp_err_t err;
 
-    err = rest_api_require_authenticated_status(req, &status);
-    if (err != ESP_OK) {
+    if (!rest_api_require_authenticated_status(req, &status, &err)) {
         return err;
     }
 
@@ -2443,8 +2442,7 @@ static esp_err_t rest_api_modio_relay_toggle_handler(httpd_req_t *req)
     uint8_t relay_mask = 0;
     esp_err_t err;
 
-    err = rest_api_require_authenticated_status(req, &status);
-    if (err != ESP_OK) {
+    if (!rest_api_require_authenticated_status(req, &status, &err)) {
         return err;
     }
 
@@ -2491,8 +2489,7 @@ static esp_err_t rest_api_modio_relays_set_handler(httpd_req_t *req)
     uint8_t relay_mask = 0;
     esp_err_t err;
 
-    err = rest_api_require_authenticated_status(req, &status);
-    if (err != ESP_OK) {
+    if (!rest_api_require_authenticated_status(req, &status, &err)) {
         return err;
     }
 
@@ -2760,8 +2757,7 @@ static esp_err_t rest_api_status_handler(httpd_req_t *req)
     cJSON *modio = NULL;
     esp_err_t err;
 
-    err = rest_api_require_authenticated_status(req, &status);
-    if (err != ESP_OK) {
+    if (!rest_api_require_authenticated_status(req, &status, &err)) {
         return err;
     }
 
