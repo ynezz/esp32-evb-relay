@@ -37,21 +37,19 @@
 
 ### Serial Device Naming
 
-- Do not hardcode guest `/dev/ttyS*` paths in repo defaults, CI, or
-  runner notes. Under QEMU/virsh, the guest numbering is dynamic and may
-  change when the domain XML or PCI layout changes.
+- The runner passes the CH340 USB-serial adapter (`1a86:7523`) into the
+  guest via USB device passthrough. The guest sees a native USB-serial
+  port at `/dev/ttyUSB*` (ch341 driver).
+- Do not hardcode `/dev/ttyUSB0` or any other transient device path in
+  repo defaults, CI, or runner notes.
 - Prefer the stable guest-side udev alias `/dev/esp32-evb` for the
   current single-port runner.
 - Reserve `/dev/esp32-evb-flash` and `/dev/esp32-evb-console` for
   setups that really expose separate flash/control and live-UART paths.
 - An example guest-side rule file lives at
   [`tools/udev/99-esp32-evb-qemu-serial.rules.example`](../tools/udev/99-esp32-evb-qemu-serial.rules.example).
-- That example rule currently creates only the single-port
-  `/dev/esp32-evb` alias.
-- For the current virsh/QEMU runner, `udevadm info` shows the ESP32-EVB
-  UART under guest PCI slot `0000:00:09.0`. The tty node itself is
-  dynamic, so bind aliases to that PCI address instead of a transient
-  `/dev/ttyS*` path.
+- That example rule matches the CH340 USB VID/PID (`1a86:7523`) and
+  creates the single-port `/dev/esp32-evb` alias.
 
 ### Flashing
 
@@ -88,24 +86,25 @@ python3 -m esptool --no-stub --chip esp32 --port /dev/esp32-evb \
   write_flash 0x10000 <binary.bin>
 ```
 
-### Current Runner Caveat (2026-03-18)
+### Current Runner Caveat
 
-- The self-hosted QEMU runner currently exposes the board as a single
-  guest-visible QEMU PCI 16550A adapter (`Red Hat, Inc. QEMU PCI 16550A
-  Adapter`) under PCI slot `0000:00:09.0`.
-- The guest currently exposes no `/dev/serial/by-id` aliases, so the
-  repo-standard `/dev/esp32-evb` alias should be created with a guest
-  udev rule that matches the stable PCI parent slot.
-- On 2026-03-18 the guest tty node happened to enumerate as
-  `/dev/ttyS4`. Treat that only as historical diagnostics, not an
-  operational default.
-- `udevadm info -a -n /dev/ttyS4` was the command used to confirm the
-  correct parent match for the alias rule is `KERNELS=="0000:00:09.0"`.
-- Runnable commands in this repo should continue to use
-  `/dev/esp32-evb`, not a transient `/dev/ttyS*` node.
-- The image flashed after restoring download-mode access reports
-  app version `0.0.0-dev` and reaches Ethernet DHCP successfully before
-  starting the REST API.
+- The self-hosted QEMU runner passes the ESP32-EVB's CH340 USB-serial
+  adapter (`1a86:7523`) into the guest via libvirt `<hostdev type='usb'>`
+  USB device passthrough. The guest sees the device as a native
+  USB-serial port (`/dev/ttyUSB0` via the ch341 driver) with full modem
+  control lines (DTR/RTS).
+- ROM download mode works reliably under this setup. esptool connects
+  and identifies the chip as ESP32-D0WD rev v1.0
+  (MAC `bc:dd:c2:f2:aa:19`).
+- The earlier PCI serial chardev approach (`<serial type='dev'>` in the
+  libvirt XML) created a QEMU PCI 16550A UART in the guest. That only
+  forwarded RX/TX data; modem control lines (DTR/RTS) were not
+  forwarded, so esptool could not toggle the boot strapping pins to
+  enter ROM download mode. That approach has been retired.
+- The guest udev rule matches the CH340 USB VID/PID
+  (`ATTRS{idVendor}=="1a86"`, `ATTRS{idProduct}=="7523"`), not a PCI
+  slot. Runnable commands in this repo should continue to use the
+  `/dev/esp32-evb` alias, not a transient `/dev/ttyUSB*` node.
 - The bundled Olimex board docs state that ESP32-EVB boards do not expose
   BOOT-button functionality by default. Manual forced boot mode requires
   a hardware rework around resistors `R46` and `R14`.
