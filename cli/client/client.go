@@ -50,10 +50,8 @@ func New(config Config) (*Client, error) {
 
 	timeout := config.Timeout
 	switch {
-	case timeout == 0:
-		timeout = 10 * time.Second
-	case timeout < 0:
-		return nil, exitcodes.Wrap(exitcodes.BadArgument, errors.New("timeout must not be negative"))
+	case timeout <= 0:
+		return nil, exitcodes.Wrap(exitcodes.BadArgument, errors.New("timeout must be greater than zero"))
 	}
 
 	return &Client{

@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDeviceContextJSONUsesFirmwareVersionField(t *testing.T) {
@@ -51,5 +52,36 @@ func TestNormalizeBaseURLAcceptsHostWithExplicitPort(t *testing.T) {
 	}
 	if got.String() != want.String() {
 		t.Fatalf("normalizeBaseURL(relay-box:8080) = %q; want %q", got.String(), want.String())
+	}
+}
+
+func TestNewRejectsZeroTimeout(t *testing.T) {
+	t.Parallel()
+
+	_, err := New(Config{
+		Host:    "relay-box",
+		Timeout: 0,
+	})
+	if err == nil {
+		t.Fatal("New() succeeded; want timeout validation error")
+	}
+	if !strings.Contains(err.Error(), "timeout must be greater than zero") {
+		t.Fatalf("New() error = %v", err)
+	}
+}
+
+func TestNewPreservesConfiguredTimeout(t *testing.T) {
+	t.Parallel()
+
+	client, err := New(Config{
+		Host:    "relay-box",
+		Timeout: 3 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	if got := client.httpClient.Timeout; got != 3*time.Second {
+		t.Fatalf("http timeout = %v; want %v", got, 3*time.Second)
 	}
 }
