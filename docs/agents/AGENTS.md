@@ -71,7 +71,7 @@ If you aren't 100% sure how to use a third-party library, **SEARCH ONLINE** to f
 
 Beads provides a lightweight, dependency-aware issue database and CLI (`br` - beads_rust) for selecting "ready work," setting priorities, and tracking status. It complements MCP Agent Mail's messaging and file reservations.
 
-**Important:** `br` is non-invasive—it NEVER runs git commands automatically. You must manually commit changes after `br sync --flush-only`.
+**Important:** Mutating `br` commands auto-flush JSONL updates, but `br` is still non-invasive and NEVER runs git commands automatically. `br sync --flush-only` is only a manual force/verify step when you want to confirm there is nothing left to export before staging `.beads/`.
 
 ### Conventions
 
@@ -100,8 +100,8 @@ Beads provides a lightweight, dependency-aware issue database and CLI (`br` - be
 
 5. **Complete and release:**
    ```bash
-   br close 123 --reason "Completed"
-   br sync --flush-only  # Export to JSONL (no git operations)
+   br close 123 --reason "Completed"  # Auto-flushes JSONL
+   br sync --flush-only               # Optional: force/verify export
    ```
    ```
    release_file_reservations(project_key, agent_name, paths=["src/**"])
@@ -354,8 +354,8 @@ When you need clarification or user input, format questions in a structured way:
 just ci                 # Quality gate (MUST pass)
 git status              # Check what changed
 git add <files>         # Stage code changes
-br sync --flush-only    # Export beads to JSONL
-git add .beads/         # Stage beads changes
+# Optional: br sync --flush-only    # Force/verify bead export
+git add .beads/         # Stage auto-flushed bead changes
 git commit -m "..."     # Commit everything together
 git push                # Push to remote
 ```
@@ -366,7 +366,9 @@ git push                # Push to remote
 - Update status as you work (in_progress -> closed)
 - Create new issues with `br create` when you discover tasks
 - Use descriptive titles and set appropriate priority/type
-- Always `br sync --flush-only && git add .beads/` before ending session
+- `br` auto-flushes after mutating commands; use `br sync --flush-only`
+  only as a manual export check, then `git add .beads/` before ending
+  session
 
 <!-- end-bv-agent-instructions -->
 
@@ -379,7 +381,7 @@ git push                # Push to remote
 1. **File issues for remaining work** - Create issues for anything that needs follow-up
 2. **Run quality gates** (if code changed) - `just ci` (or `just ci-full` when the self-hosted hardware lane is available)
 3. **Update issue status** - Close finished work, update in-progress items
-4. **Sync beads** - `br sync --flush-only` to export to JSONL
+4. **Stage bead state** - `br` usually auto-flushes JSONL updates; run `br sync --flush-only` only to force/verify export before `git add .beads/`
 5. **Hand off** - Provide context for next session
 
 ---
