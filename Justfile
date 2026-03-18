@@ -14,7 +14,7 @@ venv_astyle_py := ".venv/bin/astyle_py"
 
 # Source ESP-IDF export.sh if idf.py is not already on PATH.
 # Recipes that call idf.py should prefix commands with {{idf_activate}}.
-idf_activate := "command -v idf.py >/dev/null 2>&1 || . " + idf_path / "export.sh" + " >/dev/null 2>&1;"
+idf_activate := "command -v idf.py >/dev/null 2>&1 || . " + idf_path / "export.sh" + " >/dev/null;"
 
 build:
     {{idf_activate}} cd firmware && idf.py build
