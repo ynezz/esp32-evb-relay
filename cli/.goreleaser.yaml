@@ -3,7 +3,8 @@ version: 2
 project_name: evb-relay
 
 builds:
-  - main: .
+  - dir: cli
+    main: .
     binary: evb-relay
     env:
       - CGO_ENABLED=0

@@ -773,7 +773,7 @@ history is available to GoReleaser and `git-cliff`:
    - After checkout, uses `actions/setup-go@v6` with
      `go-version-file: cli/go.mod`, `cache-dependency-path: cli/go.sum`
    - Uses `goreleaser/goreleaser-action@v6` with `version: "~> v2"`,
-     `workdir: cli`, and `args: release --clean`
+     `args: release --clean --config cli/.goreleaser.yaml`
    - Creates a draft GitHub Release with 6 CLI archives
      (linux/darwin/windows × amd64/arm64) + checksums file
    - GoReleaser creates the release; later jobs augment it
@@ -802,7 +802,8 @@ GoReleaser v2 format. Key settings:
 project_name: evb-relay
 version: 2
 builds:
-  - main: .
+  - dir: cli
+    main: .
     binary: evb-relay
     env:
       - CGO_ENABLED=0
@@ -836,8 +837,9 @@ changelog:
   disable: true       # git-cliff handles changelog
 ```
 
-- The release workflow runs GoReleaser from `cli/`, so `main: .` resolves to
-  the CLI module without needing `dir: cli`
+- The release workflow can invoke GoReleaser from the repository root with
+  `--config cli/.goreleaser.yaml`; `dir: cli` makes the build step resolve the
+  CLI module correctly in that mode
 - `project_name: evb-relay` keeps archive names aligned with the documented
   release assets instead of inheriting the repository name
 - `binary: evb-relay` makes the extracted executable match the CLI command name
