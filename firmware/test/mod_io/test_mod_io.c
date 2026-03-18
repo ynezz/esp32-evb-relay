@@ -73,6 +73,7 @@ static void test_mod_io_requires_initialization(void)
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mod_io_probe());
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mod_io_set_relays(0x01U));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mod_io_set_relay(1U, true));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mod_io_toggle_relay(1U, NULL));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mod_io_read_digital_inputs(&relay_mask));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mod_io_read_analog_input(1U, &analog_value));
 }
@@ -191,6 +192,39 @@ static void test_mod_io_set_relay_publishes_change_event(void)
     assert_last_relay_changed_event(2U, true);
 }
 
+static void test_mod_io_toggle_relay_validates_ids_and_flips_cached_state(void)
+{
+    const uint8_t expected_write_off[] = {0x10U, 0x04U};
+    const uint8_t expected_write_on[] = {0x10U, 0x06U};
+    bool actual_state = false;
+
+    init_present_mod_io(0x05U);
+
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, mod_io_toggle_relay(0U, &actual_state));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, mod_io_toggle_relay(5U, &actual_state));
+
+    TEST_ASSERT_EQUAL(ESP_OK, mod_io_toggle_relay(1U, &actual_state));
+    TEST_ASSERT_FALSE(actual_state);
+    assert_last_transaction_equals(expected_write_off, sizeof(expected_write_off));
+    assert_status(true, MOD_IO_RELAY_SYNC_SYNCHRONIZED, 0x04U);
+
+    TEST_ASSERT_EQUAL(ESP_OK, mod_io_toggle_relay(2U, &actual_state));
+    TEST_ASSERT_TRUE(actual_state);
+    assert_last_transaction_equals(expected_write_on, sizeof(expected_write_on));
+    assert_status(true, MOD_IO_RELAY_SYNC_SYNCHRONIZED, 0x06U);
+}
+
+static void test_mod_io_toggle_relay_publishes_change_event(void)
+{
+    bool actual_state = false;
+
+    init_present_mod_io(0x05U);
+
+    TEST_ASSERT_EQUAL(ESP_OK, mod_io_toggle_relay(1U, &actual_state));
+    TEST_ASSERT_FALSE(actual_state);
+    assert_last_relay_changed_event(1U, false);
+}
+
 static void test_mod_io_digital_input_mask_tracks_input_count(void)
 {
     TEST_ASSERT_EQUAL_HEX8((uint8_t)((1U << MOD_IO_DIGITAL_INPUT_COUNT) - 1U),
@@ -296,6 +330,8 @@ void test_mod_io_suite(void)
     RUN_TEST(test_mod_io_set_relay_validates_ids_and_uses_read_modify_write);
     RUN_TEST(test_mod_io_set_relay_skips_reprobe_when_board_is_already_present);
     RUN_TEST(test_mod_io_set_relay_publishes_change_event);
+    RUN_TEST(test_mod_io_toggle_relay_validates_ids_and_flips_cached_state);
+    RUN_TEST(test_mod_io_toggle_relay_publishes_change_event);
     RUN_TEST(test_mod_io_digital_input_mask_tracks_input_count);
     RUN_TEST(test_mod_io_read_digital_inputs_uses_protocol_command);
     RUN_TEST(test_mod_io_read_analog_input_validates_ids_and_decodes_samples);

@@ -334,17 +334,7 @@ func runRelayToggle(cmd *cobra.Command, args []string) error {
 		return wrapRelayResult(cmd, runtime, relayToggleCommandName, host, nil, nil, startedAt, err, false)
 	}
 
-	var payload relaySingleResult
-	var result client.Result
-
-	switch target.Group {
-	case relayGroupOnboard:
-		payload, result, err = toggleOnboardRelay(cmd, relayClient, target)
-	case relayGroupModIO:
-		payload, result, err = toggleModIORelay(cmd, relayClient, target)
-	default:
-		err = exitcodes.Wrap(exitcodes.BadArgument, fmt.Errorf("unsupported relay group %q", target.Group))
-	}
+	payload, result, err := toggleRelay(cmd, relayClient, target)
 
 	return wrapRelayResult(
 		cmd,
@@ -582,7 +572,7 @@ func setRelayState(cmd *cobra.Command, relayClient *client.Client, target relayT
 	return payload, result, err
 }
 
-func toggleOnboardRelay(cmd *cobra.Command, relayClient *client.Client, target relayTarget) (relaySingleResult, client.Result, error) {
+func toggleRelay(cmd *cobra.Command, relayClient *client.Client, target relayTarget) (relaySingleResult, client.Result, error) {
 	var payload relaySingleResult
 	result, err := relayClient.DoJSON(
 		cmd.Context(),
@@ -592,27 +582,6 @@ func toggleOnboardRelay(cmd *cobra.Command, relayClient *client.Client, target r
 		&payload,
 	)
 	return payload, result, err
-}
-
-func toggleModIORelay(cmd *cobra.Command, relayClient *client.Client, target relayTarget) (relaySingleResult, client.Result, error) {
-	current, currentResult, err := fetchModIORelayArray(cmd, relayClient)
-	if err != nil {
-		return relaySingleResult{}, currentResult, err
-	}
-
-	relay, ok := relayByID(current.Relays, target.ID)
-	if !ok {
-		return relaySingleResult{}, currentResult, exitcodes.Wrap(
-			exitcodes.NotFound,
-			&client.APIError{
-				Code:    "RELAY_NOT_FOUND",
-				Message: fmt.Sprintf("relay %s was not present in the device response", target),
-				Status:  http.StatusNotFound,
-			},
-		)
-	}
-
-	return setRelayState(cmd, relayClient, target, !relay.State)
 }
 
 func fetchModIORelayArray(cmd *cobra.Command, relayClient *client.Client) (relayArrayResponse, client.Result, error) {

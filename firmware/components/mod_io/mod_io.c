@@ -467,6 +467,37 @@ esp_err_t mod_io_set_relay(uint8_t relay_id, bool state)
     return err;
 }
 
+esp_err_t mod_io_toggle_relay(uint8_t relay_id, bool *out_state)
+{
+    uint8_t changed_mask = 0;
+    uint8_t relay_mask;
+    bool actual_state;
+    esp_err_t err;
+
+    ESP_RETURN_ON_ERROR(mod_io_validate_relay_id(relay_id), TAG, "Invalid relay id");
+    ESP_RETURN_ON_ERROR(mod_io_lock(), TAG, "Failed to lock MOD-IO state");
+    err = mod_io_ensure_present_locked();
+    if (err != ESP_OK) {
+        mod_io_unlock();
+        return err;
+    }
+
+    relay_mask = (uint8_t)(s_state.relay_mask ^ (uint8_t)(1U << (relay_id - 1U)));
+    actual_state = (relay_mask & (uint8_t)(1U << (relay_id - 1U))) != 0U;
+
+    err = mod_io_write_relays_locked(relay_mask, &changed_mask);
+    mod_io_unlock();
+
+    if (err == ESP_OK) {
+        if (out_state != NULL) {
+            *out_state = actual_state;
+        }
+        mod_io_publish_change_events(changed_mask, relay_mask);
+    }
+
+    return err;
+}
+
 esp_err_t mod_io_read_digital_inputs(uint8_t *out_mask)
 {
     const uint8_t command = MOD_IO_DIGITAL_INPUT_READ_COMMAND;

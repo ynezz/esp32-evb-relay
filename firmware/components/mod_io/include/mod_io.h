@@ -37,6 +37,7 @@ esp_err_t mod_io_get_relays(uint8_t *out_mask, mod_io_relay_sync_t *out_sync);
 
 esp_err_t mod_io_set_relays(uint8_t relay_mask);
 esp_err_t mod_io_set_relay(uint8_t relay_id, bool state);
+esp_err_t mod_io_toggle_relay(uint8_t relay_id, bool *out_state);
 
 esp_err_t mod_io_read_digital_inputs(uint8_t *out_mask);
 esp_err_t mod_io_read_analog_input(uint8_t input_id, uint16_t *out_value);

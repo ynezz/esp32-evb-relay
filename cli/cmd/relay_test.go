@@ -118,31 +118,15 @@ func TestRelayOnUsesDirectRelayEndpoint(t *testing.T) {
 	}
 }
 
-func TestRelayToggleModIOReadsCurrentStateBeforeWriting(t *testing.T) {
+func TestRelayToggleModIOUsesNativeToggleEndpoint(t *testing.T) {
 	t.Parallel()
 
-	var modioGetCount int
-	var modioPutCount int
+	var modioPostCount int
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/relays/modio":
-			modioGetCount++
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(
-				w,
-				`{"relays":[{"group":"modio","id":1,"state":false,"sync":"synchronized"},{"group":"modio","id":2,"state":true,"sync":"synchronized"},{"group":"modio","id":3,"state":false,"sync":"synchronized"},{"group":"modio","id":4,"state":false,"sync":"synchronized"}]}`,
-			)
-		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/relays/modio/2":
-			modioPutCount++
-			var requestBody map[string]bool
-			if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
-				t.Fatalf("Decode() error = %v", err)
-			}
-			if got := requestBody["state"]; got != false {
-				t.Fatalf("state = %t, want false", got)
-			}
-
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/relays/modio/2/toggle":
+			modioPostCount++
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = io.WriteString(w, `{"relay":{"group":"modio","id":2,"state":false,"sync":"synchronized"}}`)
 		default:
@@ -166,11 +150,8 @@ func TestRelayToggleModIOReadsCurrentStateBeforeWriting(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	if modioGetCount != 1 {
-		t.Fatalf("modio GET count = %d, want 1", modioGetCount)
-	}
-	if modioPutCount != 1 {
-		t.Fatalf("modio PUT count = %d, want 1", modioPutCount)
+	if modioPostCount != 1 {
+		t.Fatalf("modio POST count = %d, want 1", modioPostCount)
 	}
 
 	var payload relaySingleResult

@@ -645,6 +645,20 @@ TEST_CASE("rest_api device exposes combined and MOD-IO relay endpoints",
     TEST_ASSERT_EQUAL_INT(MOD_IO_RELAY_SYNC_SYNCHRONIZED, relay_sync);
 
     perform_http_request(test_port,
+                         "POST",
+                         "/api/v1/relays/modio/1/toggle",
+                         NULL,
+                         NULL,
+                         response,
+                         sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+    TEST_ASSERT_NOT_NULL(strstr(response,
+                                "\"relay\":{\"group\":\"modio\",\"id\":1,\"state\":false,\"sync\":\"synchronized\"}"));
+    TEST_ASSERT_EQUAL(ESP_OK, mod_io_get_relays(&relay_mask, &relay_sync));
+    TEST_ASSERT_EQUAL_HEX8(0x00U, relay_mask);
+    TEST_ASSERT_EQUAL_INT(MOD_IO_RELAY_SYNC_SYNCHRONIZED, relay_sync);
+
+    perform_http_request(test_port,
                          "PUT",
                          "/api/v1/relays/modio",
                          NULL,
@@ -695,6 +709,16 @@ TEST_CASE("rest_api device reports absent MOD-IO on relay routes", "[qa][rest_ap
     TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"MODIO_NOT_PRESENT\""));
     TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Present: false"));
     TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Sync: absent"));
+
+    perform_http_request(test_port,
+                         "POST",
+                         "/api/v1/relays/modio/1/toggle",
+                         NULL,
+                         NULL,
+                         response,
+                         sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 503 Service Unavailable"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"MODIO_NOT_PRESENT\""));
 
     perform_http_request(test_port,
                          "PUT",
