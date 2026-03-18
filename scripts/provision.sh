@@ -106,6 +106,9 @@ fi
 
 require_idf
 
+download_mode_check="${repo_root}/scripts/check-download-mode.sh"
+"${download_mode_check}" --port "${port}" --baud "${baud}"
+
 parttool_py="${IDF_PATH}/components/partition_table/parttool.py"
 nvs_gen_py="${IDF_PATH}/components/nvs_flash/nvs_partition_generator/nvs_partition_gen.py"
 nvs_tool_py="${IDF_PATH}/components/nvs_flash/nvs_partition_tool/nvs_tool.py"

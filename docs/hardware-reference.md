@@ -44,6 +44,10 @@
 # Example split-port invocation:
 EVB_FLASH_PORT=/dev/ttyS4 EVB_SERIAL_PORT=/dev/ttyS5 just test-device
 
+# Probe ROM download mode directly. flash.sh, provision.sh, test-device,
+# and test-integration run this guardrail automatically before flashing.
+./scripts/check-download-mode.sh --port /dev/ttyS4
+
 # Compile
 /tmp/arduino-cli compile --fqbn esp32:esp32:esp32-evb <sketch_dir>
 
@@ -71,6 +75,9 @@ python3 -m esptool --no-stub --chip esp32 --port /dev/ttyS4 \
 - Treat `Wrong boot mode detected` and `No serial data received` failures
   on this runner as hardware or infrastructure blockers until GPIO0/EN
   download-mode control is fixed outside the repo.
+- `scripts/check-download-mode.sh` now surfaces those signatures before
+  `scripts/flash.sh`, `scripts/provision.sh`, `just test-device`, and
+  `just test-integration` attempt more expensive flashing steps.
 
 ---
 

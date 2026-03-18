@@ -88,6 +88,22 @@ def test_provision_script_disables_stub_for_parttool() -> None:
     script_text = (_repo_root() / "scripts/provision.sh").read_text(encoding="utf-8")
     assert "parttool_esptool_args=(--esptool-args no-stub)" in script_text
     assert 'port="${EVB_FLASH_PORT:-${EVB_SERIAL_PORT:-/dev/ttyS4}}"' in script_text
+    assert '"${download_mode_check}" --port "${port}" --baud "${baud}"' in script_text
+
+
+def test_flash_script_runs_download_mode_preflight() -> None:
+    script_text = (_repo_root() / "scripts/flash.sh").read_text(encoding="utf-8")
+    assert 'download_mode_check="${repo_root}/scripts/check-download-mode.sh"' in script_text
+    assert '"${download_mode_check}" --port "${port}" --baud "${baud}"' in script_text
+
+
+def test_download_mode_helper_documents_runner_failure_signatures() -> None:
+    script_text = (_repo_root() / "scripts/check-download-mode.sh").read_text(encoding="utf-8")
+    assert "chip_id" in script_text
+    assert "--before default_reset" in script_text
+    assert "--after hard_reset" in script_text
+    assert "/docs/hardware-reference.md" in script_text
+    assert "Failed to enter ESP32 ROM download mode" in script_text
 
 
 def test_flash_port_defaults_prefer_explicit_override(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -109,6 +125,7 @@ def test_justfile_supports_split_flash_and_monitor_ports() -> None:
     justfile_text = (_repo_root() / "Justfile").read_text(encoding="utf-8")
 
     assert 'flash_port := env("EVB_FLASH_PORT", serial_port)' in justfile_text
+    assert "./scripts/check-download-mode.sh --port {{flash_port}} --baud 115200" in justfile_text
     assert "--flash-port {{flash_port}}" in justfile_text
     assert "test_integration \\\n        --port {{flash_port}}" in justfile_text
 

@@ -63,5 +63,8 @@ done
 
 require_idf
 
+download_mode_check="${repo_root}/scripts/check-download-mode.sh"
+"${download_mode_check}" --port "${port}" --baud "${baud}"
+
 cd "${firmware_dir}"
 exec idf.py -p "${port}" -b "${baud}" flash "$@"

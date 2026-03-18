@@ -35,6 +35,7 @@ cli-fmt-check:
     test -z "$files" || (gofmt -d $files && exit 1)
 
 test-device: _ensure-python-tools
+    ./scripts/check-download-mode.sh --port {{flash_port}} --baud 115200
     cd firmware/test_app && \
         idf.py -DSDKCONFIG_DEFAULTS="{{test_app_sdkconfig_defaults}}" build
     cd firmware/test_app && \
@@ -45,6 +46,7 @@ test-device: _ensure-python-tools
         --port {{serial_port}}
 
 test-integration: _ensure-python-tools
+    ./scripts/check-download-mode.sh --port {{flash_port}} --baud 115200
     cd firmware && \
         idf.py build
     cd firmware && \
