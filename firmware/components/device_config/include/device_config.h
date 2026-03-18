@@ -30,9 +30,14 @@ typedef enum {
     DEVICE_CONFIG_MODIO_BOOT_POLICY_ALL_OFF = 1,
 } device_config_modio_boot_policy_t;
 
+typedef enum {
+    DEVICE_CONFIG_APPLY_MODE_IMMEDIATE = 0,
+    DEVICE_CONFIG_APPLY_MODE_RESTART_REQUIRED,
+    DEVICE_CONFIG_APPLY_MODE_NEXT_BOOT,
+} device_config_apply_mode_t;
+
 typedef struct {
-    bool live;
-    bool restart_required;
+    device_config_apply_mode_t apply_mode;
 } device_config_apply_result_t;
 
 typedef struct {
@@ -46,8 +51,7 @@ typedef struct {
     device_config_key_t key;
     const char *name;
     bool secret;
-    bool live;
-    bool restart_required;
+    device_config_apply_mode_t apply_mode;
 } device_config_key_descriptor_t;
 
 esp_err_t device_config_init(void);
@@ -67,6 +71,7 @@ esp_err_t device_config_set_modio_boot_policy(device_config_modio_boot_policy_t 
                                               device_config_apply_result_t *result);
 
 const device_config_key_descriptor_t *device_config_get_key_descriptor(device_config_key_t key);
+const char *device_config_apply_mode_to_string(device_config_apply_mode_t apply_mode);
 const char *device_config_modio_boot_policy_to_string(device_config_modio_boot_policy_t policy);
 esp_err_t device_config_parse_modio_boot_policy(const char *value,
                                                 device_config_modio_boot_policy_t *out);

@@ -33,8 +33,7 @@ static const device_config_key_metadata_t s_key_metadata[DEVICE_CONFIG_KEY_COUNT
             .key = DEVICE_CONFIG_KEY_API_TOKEN,
             .name = "api_token",
             .secret = true,
-            .live = true,
-            .restart_required = false,
+            .apply_mode = DEVICE_CONFIG_APPLY_MODE_IMMEDIATE,
         },
         .nvs_key = "api_token",
     },
@@ -44,8 +43,7 @@ static const device_config_key_metadata_t s_key_metadata[DEVICE_CONFIG_KEY_COUNT
             .key = DEVICE_CONFIG_KEY_POLL_INTERVAL_MS,
             .name = "poll_interval_ms",
             .secret = false,
-            .live = true,
-            .restart_required = false,
+            .apply_mode = DEVICE_CONFIG_APPLY_MODE_IMMEDIATE,
         },
         .nvs_key = "poll_ms",
     },
@@ -55,8 +53,7 @@ static const device_config_key_metadata_t s_key_metadata[DEVICE_CONFIG_KEY_COUNT
             .key = DEVICE_CONFIG_KEY_HOSTNAME,
             .name = "hostname",
             .secret = false,
-            .live = false,
-            .restart_required = true,
+            .apply_mode = DEVICE_CONFIG_APPLY_MODE_RESTART_REQUIRED,
         },
         .nvs_key = "hostname",
     },
@@ -66,8 +63,7 @@ static const device_config_key_metadata_t s_key_metadata[DEVICE_CONFIG_KEY_COUNT
             .key = DEVICE_CONFIG_KEY_MODIO_BOOT_POLICY,
             .name = "modio_boot_policy",
             .secret = false,
-            .live = false,
-            .restart_required = false,
+            .apply_mode = DEVICE_CONFIG_APPLY_MODE_NEXT_BOOT,
         },
         .nvs_key = "modio_policy",
     },
@@ -170,8 +166,7 @@ static void device_config_fill_apply_result(device_config_key_t key, device_conf
         return;
     }
 
-    result->live = s_key_metadata[key].descriptor.live;
-    result->restart_required = s_key_metadata[key].descriptor.restart_required;
+    result->apply_mode = s_key_metadata[key].descriptor.apply_mode;
 }
 
 static esp_err_t device_config_load_api_token(nvs_handle_t handle, device_config_state_t *state, bool *dirty)
@@ -386,6 +381,20 @@ const device_config_key_descriptor_t *device_config_get_key_descriptor(device_co
     }
 
     return &s_key_metadata[key].descriptor;
+}
+
+const char *device_config_apply_mode_to_string(device_config_apply_mode_t apply_mode)
+{
+    switch (apply_mode) {
+    case DEVICE_CONFIG_APPLY_MODE_IMMEDIATE:
+        return "immediate";
+    case DEVICE_CONFIG_APPLY_MODE_RESTART_REQUIRED:
+        return "restart_required";
+    case DEVICE_CONFIG_APPLY_MODE_NEXT_BOOT:
+        return "next_boot";
+    default:
+        return "unknown";
+    }
 }
 
 const char *device_config_modio_boot_policy_to_string(device_config_modio_boot_policy_t policy)

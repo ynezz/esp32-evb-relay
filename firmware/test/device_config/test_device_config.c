@@ -15,8 +15,7 @@ static void assert_hostname_accepts(const char *hostname)
     device_config_apply_result_t result = {0};
 
     TEST_ASSERT_EQUAL(ESP_OK, device_config_set_hostname(hostname, &result));
-    TEST_ASSERT_FALSE(result.live);
-    TEST_ASSERT_TRUE(result.restart_required);
+    TEST_ASSERT_EQUAL_INT(DEVICE_CONFIG_APPLY_MODE_RESTART_REQUIRED, result.apply_mode);
     TEST_ASSERT_EQUAL(ESP_OK, device_config_get_hostname(actual, sizeof(actual)));
     TEST_ASSERT_EQUAL_STRING(hostname, actual);
 }
@@ -46,8 +45,7 @@ static void test_device_config_poll_interval_validation(void)
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, device_config_set_poll_interval_ms(49U, NULL));
 
     TEST_ASSERT_EQUAL(ESP_OK, device_config_set_poll_interval_ms(50U, &result));
-    TEST_ASSERT_TRUE(result.live);
-    TEST_ASSERT_FALSE(result.restart_required);
+    TEST_ASSERT_EQUAL_INT(DEVICE_CONFIG_APPLY_MODE_IMMEDIATE, result.apply_mode);
     TEST_ASSERT_EQUAL(ESP_OK, device_config_get_poll_interval_ms(&poll_interval_ms));
     TEST_ASSERT_EQUAL_UINT32(50U, poll_interval_ms);
 
@@ -113,13 +111,11 @@ static void test_device_config_api_token_validation(void)
     fill_repeated_string(too_long_token, sizeof(too_long_token), 't');
 
     TEST_ASSERT_EQUAL(ESP_OK, device_config_set_api_token(NULL, &result));
-    TEST_ASSERT_TRUE(result.live);
-    TEST_ASSERT_FALSE(result.restart_required);
+    TEST_ASSERT_EQUAL_INT(DEVICE_CONFIG_APPLY_MODE_IMMEDIATE, result.apply_mode);
     TEST_ASSERT_EQUAL(ESP_OK, device_config_set_api_token("", NULL));
 
     TEST_ASSERT_EQUAL(ESP_OK, device_config_set_api_token(max_token, &result));
-    TEST_ASSERT_TRUE(result.live);
-    TEST_ASSERT_FALSE(result.restart_required);
+    TEST_ASSERT_EQUAL_INT(DEVICE_CONFIG_APPLY_MODE_IMMEDIATE, result.apply_mode);
     TEST_ASSERT_EQUAL(ESP_OK, device_config_get_api_token(actual, sizeof(actual), &is_set));
     TEST_ASSERT_TRUE(is_set);
     TEST_ASSERT_EQUAL_STRING(max_token, actual);
@@ -132,6 +128,28 @@ static void test_device_config_api_token_validation(void)
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, device_config_set_api_token(too_long_token, NULL));
     TEST_ASSERT_EQUAL(ESP_OK, device_config_get_snapshot(&snapshot));
     TEST_ASSERT_FALSE(snapshot.api_token_set);
+}
+
+static void test_device_config_apply_mode_metadata(void)
+{
+    device_config_apply_result_t result = {0};
+
+    TEST_ASSERT_EQUAL(ESP_OK,
+                      device_config_set_modio_boot_policy(DEVICE_CONFIG_MODIO_BOOT_POLICY_ALL_OFF,
+                                                          &result));
+    TEST_ASSERT_EQUAL_INT(DEVICE_CONFIG_APPLY_MODE_NEXT_BOOT, result.apply_mode);
+    TEST_ASSERT_EQUAL_STRING("next_boot", device_config_apply_mode_to_string(result.apply_mode));
+
+    TEST_ASSERT_EQUAL(ESP_OK,
+                      device_config_set_hostname("metadata-host", &result));
+    TEST_ASSERT_EQUAL_INT(DEVICE_CONFIG_APPLY_MODE_RESTART_REQUIRED, result.apply_mode);
+    TEST_ASSERT_EQUAL_STRING("restart_required",
+                             device_config_apply_mode_to_string(result.apply_mode));
+
+    TEST_ASSERT_EQUAL_STRING("immediate",
+                             device_config_apply_mode_to_string(DEVICE_CONFIG_APPLY_MODE_IMMEDIATE));
+    TEST_ASSERT_EQUAL_STRING("unknown",
+                             device_config_apply_mode_to_string((device_config_apply_mode_t)99));
 }
 
 static void test_device_config_snapshot_persists_values(void)
@@ -167,15 +185,14 @@ static void test_device_config_key_descriptors(void)
         device_config_key_t key;
         const char *name;
         bool secret;
-        bool live;
-        bool restart_required;
+        device_config_apply_mode_t apply_mode;
     } expected_key_descriptor_t;
 
     static const expected_key_descriptor_t expected[] = {
-        {DEVICE_CONFIG_KEY_API_TOKEN, "api_token", true, true, false},
-        {DEVICE_CONFIG_KEY_POLL_INTERVAL_MS, "poll_interval_ms", false, true, false},
-        {DEVICE_CONFIG_KEY_HOSTNAME, "hostname", false, false, true},
-        {DEVICE_CONFIG_KEY_MODIO_BOOT_POLICY, "modio_boot_policy", false, false, false},
+        {DEVICE_CONFIG_KEY_API_TOKEN, "api_token", true, DEVICE_CONFIG_APPLY_MODE_IMMEDIATE},
+        {DEVICE_CONFIG_KEY_POLL_INTERVAL_MS, "poll_interval_ms", false, DEVICE_CONFIG_APPLY_MODE_IMMEDIATE},
+        {DEVICE_CONFIG_KEY_HOSTNAME, "hostname", false, DEVICE_CONFIG_APPLY_MODE_RESTART_REQUIRED},
+        {DEVICE_CONFIG_KEY_MODIO_BOOT_POLICY, "modio_boot_policy", false, DEVICE_CONFIG_APPLY_MODE_NEXT_BOOT},
     };
 
     for (size_t i = 0; i < (sizeof(expected) / sizeof(expected[0])); ++i) {
@@ -186,8 +203,7 @@ static void test_device_config_key_descriptors(void)
         TEST_ASSERT_EQUAL_INT(expected[i].key, descriptor->key);
         TEST_ASSERT_EQUAL_STRING(expected[i].name, descriptor->name);
         TEST_ASSERT_EQUAL(expected[i].secret, descriptor->secret);
-        TEST_ASSERT_EQUAL(expected[i].live, descriptor->live);
-        TEST_ASSERT_EQUAL(expected[i].restart_required, descriptor->restart_required);
+        TEST_ASSERT_EQUAL_INT(expected[i].apply_mode, descriptor->apply_mode);
     }
 
     TEST_ASSERT_NULL(device_config_get_key_descriptor((device_config_key_t) -1));
@@ -201,6 +217,7 @@ void test_device_config_suite(void)
     RUN_TEST(test_device_config_hostname_validation);
     RUN_TEST(test_device_config_modio_boot_policy_parse_and_round_trip);
     RUN_TEST(test_device_config_api_token_validation);
+    RUN_TEST(test_device_config_apply_mode_metadata);
     RUN_TEST(test_device_config_snapshot_persists_values);
     RUN_TEST(test_device_config_key_descriptors);
 }
