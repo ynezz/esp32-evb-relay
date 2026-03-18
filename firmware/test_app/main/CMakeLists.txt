@@ -1,7 +1,8 @@
 idf_component_register(SRC_DIRS "."
                        INCLUDE_DIRS "."
                        PRIV_REQUIRES app_update auth board bootloader_support device_config esp_netif
-                                     input_monitor lwip mod_io ota relay relay_events rest_api unity)
+                                     input_monitor lwip mod_io ota relay relay_events rest_api unity
+                       WHOLE_ARCHIVE)
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
                            DEVICE_CONFIG_ENABLE_TESTING_API=1
