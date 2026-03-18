@@ -60,6 +60,7 @@ TEST_CASE("relay device toggles real gpio level", "[qa][relay][device]")
     TEST_ASSERT_EQUAL(ESP_OK, relay_set(1U, true));
     TEST_ASSERT_EQUAL(1, gpio_get_level(BOARD_RELAY1_GPIO));
     TEST_ASSERT_EQUAL(0, gpio_get_level(BOARD_RELAY2_GPIO));
+    vTaskDelay(pdMS_TO_TICKS(50));
 
     TEST_ASSERT_EQUAL(ESP_OK, relay_set(1U, false));
     TEST_ASSERT_EQUAL(0, gpio_get_level(BOARD_RELAY1_GPIO));
