@@ -15,7 +15,7 @@
 
 static const char *TAG = "auth";
 
-static void auth_generate_token(char *buffer, size_t buffer_size)
+static void auth_generate_token(char *buffer)
 {
     static const char hex[] = "0123456789abcdef";
     uint8_t random_bytes[AUTH_FIRST_BOOT_TOKEN_BYTES];
@@ -26,7 +26,6 @@ static void auth_generate_token(char *buffer, size_t buffer_size)
         buffer[(i * 2U) + 1U] = hex[random_bytes[i] & 0x0FU];
     }
     buffer[sizeof(random_bytes) * 2U] = '\0';
-    (void)buffer_size;
 }
 
 static bool auth_constant_time_equals(const char *lhs, const char *rhs)
@@ -73,7 +72,7 @@ esp_err_t auth_init(void)
         return ESP_OK;
     }
 
-    auth_generate_token(token, sizeof(token));
+    auth_generate_token(token);
     err = device_config_set_api_token(token, NULL);
     if (err != ESP_OK) {
         return err;
