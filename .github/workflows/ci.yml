@@ -68,6 +68,30 @@ jobs:
             firmware/build/bootloader/bootloader.bin
             firmware/build/partition_table/partition-table.bin
 
+  firmware-test:
+    name: firmware host test
+    needs: changes
+    if: ${{ needs.changes.outputs.firmware == 'true' || needs.changes.outputs.shared == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Run firmware host tests
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.4
+          target: esp32
+          path: firmware
+          command: >-
+            python -m pip install pytest requests pyserial &&
+            cmake -S test -B test/build -DCMAKE_BUILD_TYPE=Debug
+            -DENABLE_SANITIZERS=ON && cmake --build test/build &&
+            cd test/build && ctest --output-on-failure &&
+            cd ../.. &&
+            python -m pytest -p no:cacheprovider
+            test_integration/test_serial_bootloader_config.py
+
   cli-lint:
     name: cli lint
     needs: changes

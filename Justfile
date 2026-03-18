@@ -35,6 +35,9 @@ test: _ensure-python-tools
 cli-test:
     cd cli && go test -race ./...
 
+cli-lint:
+    cd cli && go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.10.0 run --timeout=5m
+
 cli-vet:
     cd cli && go vet ./...
 
@@ -90,7 +93,7 @@ format-check: _ensure-python-tools
             -g '!firmware/test_app/build/**' \
             -g '!firmware/test_app/managed_components/**')
 
-ci: format-check build test cli-fmt-check cli-vet cli-test
+ci: format-check build test cli-fmt-check cli-lint cli-vet cli-test
 
 ci-full: ci test-device test-integration
 
