@@ -254,6 +254,33 @@ func TestOTATimeoutPreservesExplicitOverride(t *testing.T) {
 	}
 }
 
+func TestCloseFirmwareUploadWrapsCloseErrors(t *testing.T) {
+	t.Parallel()
+
+	path, _ := writeTempFirmware(t, []byte{0xde, 0xad, 0xbe, 0xef})
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("os.Open() error = %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("file.Close() error = %v", err)
+	}
+
+	err = closeFirmwareUpload(&firmwareUpload{
+		Path: path,
+		File: file,
+	})
+	if err == nil {
+		t.Fatal("closeFirmwareUpload() succeeded; want error")
+	}
+	if got := exitcodes.FromError(err); got != exitcodes.GeneralError {
+		t.Fatalf("exit code = %d, want %d", got, exitcodes.GeneralError)
+	}
+	if !strings.Contains(err.Error(), "close firmware file") {
+		t.Fatalf("closeFirmwareUpload() error = %v; want wrapped close context", err)
+	}
+}
+
 func writeTempFirmware(t *testing.T, payload []byte) (string, []byte) {
 	t.Helper()
 

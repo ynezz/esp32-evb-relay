@@ -91,7 +91,6 @@ func runOTAFlash(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return wrapOTARobotResult(cmd, runtime, host, nil, nil, startedAt, err)
 	}
-	defer firmware.File.Close()
 
 	uploadClient, err := client.New(client.Config{
 		Host:     runtime.Host,
@@ -99,6 +98,9 @@ func runOTAFlash(cmd *cobra.Command, args []string) error {
 		Timeout:  otaTimeout(runtime.Timeout),
 	})
 	if err != nil {
+		if closeErr := closeFirmwareUpload(firmware); closeErr != nil && err == nil {
+			err = closeErr
+		}
 		return wrapOTARobotResult(cmd, runtime, host, nil, nil, startedAt, err)
 	}
 	host = uploadClient.Host()
@@ -233,6 +235,19 @@ func otaRebootWarning(delaySeconds int) string {
 	return fmt.Sprintf("Device will reboot in about %d seconds and disconnect.", delaySeconds)
 }
 
+func closeFirmwareUpload(firmware *firmwareUpload) error {
+	if firmware == nil || firmware.File == nil {
+		return nil
+	}
+
+	if err := firmware.File.Close(); err != nil {
+		return exitcodes.Wrap(exitcodes.GeneralError, fmt.Errorf("close firmware file %q: %w", firmware.Path, err))
+	}
+
+	firmware.File = nil
+	return nil
+}
+
 type progressReader struct {
 	reader   io.Reader
 	reporter *uploadProgressReporter
@@ -285,7 +300,7 @@ func (r *uploadProgressReporter) Advance(read int) {
 
 func (r *uploadProgressReporter) Finish(err error) {
 	if err != nil {
-		fmt.Fprintf(r.out, "Upload failed after %d/%d bytes.\n", r.written, r.total)
+		_, _ = fmt.Fprintf(r.out, "Upload failed after %d/%d bytes.\n", r.written, r.total)
 		return
 	}
 
@@ -302,7 +317,7 @@ func (r *uploadProgressReporter) printProgress() {
 	}
 
 	r.lastBucket = percent / otaProgressPercentStep
-	fmt.Fprintf(r.out, "Uploading firmware: %d%% (%d/%d bytes)\n", percent, r.written, r.total)
+	_, _ = fmt.Fprintf(r.out, "Uploading firmware: %d%% (%d/%d bytes)\n", percent, r.written, r.total)
 }
 
 func (r otaFlashResult) TableOutput() (outputformat.TableData, error) {

@@ -225,7 +225,7 @@ func wrapConfigResult(
 	}
 
 	for _, warning := range warnings {
-		fmt.Fprintln(cmd.ErrOrStderr(), warning)
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), warning)
 	}
 
 	return outputformat.Output(cmd.OutOrStdout(), payload, runtime.Format)

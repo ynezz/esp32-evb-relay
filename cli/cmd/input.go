@@ -433,28 +433,28 @@ func (m apiInputMetadata) toMetadata() inputMetadata {
 
 func (r apiDigitalInputsResponse) toResult() digitalInputsResult {
 	return digitalInputsResult{
-		inputMetadata: r.apiInputMetadata.toMetadata(),
+		inputMetadata: r.toMetadata(),
 		Inputs:        r.Inputs,
 	}
 }
 
 func (r apiDigitalInputResponse) toResult() digitalInputResult {
 	return digitalInputResult{
-		inputMetadata: r.apiInputMetadata.toMetadata(),
+		inputMetadata: r.toMetadata(),
 		Input:         r.Input,
 	}
 }
 
 func (r apiAnalogInputsResponse) toResult() analogInputsResult {
 	return analogInputsResult{
-		inputMetadata: r.apiInputMetadata.toMetadata(),
+		inputMetadata: r.toMetadata(),
 		Inputs:        r.Inputs,
 	}
 }
 
 func (r apiAnalogInputResponse) toResult() analogInputResult {
 	return analogInputResult{
-		inputMetadata: r.apiInputMetadata.toMetadata(),
+		inputMetadata: r.toMetadata(),
 		Input:         r.Input,
 	}
 }

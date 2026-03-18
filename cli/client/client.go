@@ -133,7 +133,9 @@ func (c *Client) WatchEventsOnce(
 	if err != nil {
 		return wrapError(err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		_ = response.Body.Close()
+	}()
 
 	result := Result{
 		StatusCode:    response.StatusCode,
@@ -162,7 +164,9 @@ func (c *Client) do(request *http.Request, responseBody any) (Result, error) {
 	if err != nil {
 		return Result{Elapsed: elapsed}, wrapError(err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		_ = response.Body.Close()
+	}()
 
 	result := Result{
 		StatusCode:    response.StatusCode,
