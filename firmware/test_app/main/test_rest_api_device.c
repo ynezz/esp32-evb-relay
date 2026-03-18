@@ -1211,6 +1211,35 @@ TEST_CASE("rest_api device enforces the SSE client limit", "[qa][rest_api][devic
     }
 }
 
+TEST_CASE("rest_api device returns 503 when SSE task startup fails after async detach",
+          "[qa][rest_api][device]")
+{
+    static const uint16_t test_port = 18098U;
+    static const rest_api_config_t config = {
+        .port = test_port,
+        .auth_handler = allow_auth_handler,
+        .status_provider = status_provider,
+    };
+    char response[1024];
+    int sock = -1;
+
+    ensure_tcpip_ready();
+    TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
+
+    rest_api_sse_force_next_client_task_create_failure_for_testing();
+
+    sock = open_http_stream_request(test_port, "/api/v1/events", NULL);
+    read_stream_until_contains(sock, "HTTP/1.1 503 Service Unavailable", response, sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"SSE_UNAVAILABLE\""));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"message\":\"Failed to start event stream task\""));
+    close(sock);
+
+    sock = open_http_stream_request(test_port, "/api/v1/events", NULL);
+    read_stream_until_contains(sock, ":connected", response, sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+    close(sock);
+}
+
 TEST_CASE("rest_api device stop owns SSE dispatch task deletion", "[qa][rest_api][device]")
 {
     static const uint16_t test_port = 18100U;

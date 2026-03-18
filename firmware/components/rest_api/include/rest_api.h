@@ -80,6 +80,7 @@ esp_err_t rest_api_send_error(httpd_req_t *req,
 void rest_api_sse_hold_dispatch_task_on_shutdown_for_testing(bool hold);
 bool rest_api_sse_wait_for_dispatch_shutdown_reached_for_testing(uint32_t timeout_ms);
 bool rest_api_sse_dispatch_task_deleted_by_stop_for_testing(void);
+void rest_api_sse_force_next_client_task_create_failure_for_testing(void);
 #endif
 
 #ifdef __cplusplus

@@ -115,6 +115,7 @@ typedef struct {
     volatile bool hold_dispatch_task_on_shutdown;
     volatile bool dispatch_shutdown_reached;
     volatile bool dispatch_task_deleted_by_stop;
+    volatile bool force_next_client_task_create_failure;
 } rest_api_testing_state_t;
 
 static rest_api_testing_state_t s_testing_state;
@@ -143,6 +144,11 @@ bool rest_api_sse_wait_for_dispatch_shutdown_reached_for_testing(uint32_t timeou
 bool rest_api_sse_dispatch_task_deleted_by_stop_for_testing(void)
 {
     return s_testing_state.dispatch_task_deleted_by_stop;
+}
+
+void rest_api_sse_force_next_client_task_create_failure_for_testing(void)
+{
+    s_testing_state.force_next_client_task_create_failure = true;
 }
 #endif
 
@@ -845,6 +851,43 @@ static void rest_api_sse_release_client_slot(rest_api_sse_client_t *client)
     }
 }
 
+static void rest_api_sse_clear_client_slot(rest_api_sse_client_t *client)
+{
+    QueueHandle_t queue = NULL;
+
+    if (client == NULL) {
+        return;
+    }
+
+    if (rest_api_sse_lock()) {
+        queue = client->queue;
+        memset(client, 0, sizeof(*client));
+        client->sockfd = 0;
+        rest_api_sse_unlock();
+    } else {
+        queue = client->queue;
+        memset(client, 0, sizeof(*client));
+    }
+
+    if (queue != NULL) {
+        vQueueDelete(queue);
+    }
+}
+
+static esp_err_t rest_api_sse_send_async_error_and_complete(httpd_req_t *async_req,
+                                                            int http_status,
+                                                            const char *code,
+                                                            const char *message)
+{
+    esp_err_t err;
+
+    ESP_RETURN_ON_FALSE(async_req != NULL, ESP_ERR_INVALID_ARG, TAG, "Async request is required");
+
+    err = rest_api_send_error(async_req, http_status, code, message, true);
+    (void)httpd_req_async_handler_complete(async_req);
+    return err;
+}
+
 static void rest_api_sse_dispatch_event_handler(void *arg,
                                                 esp_event_base_t event_base,
                                                 int32_t event_id,
@@ -1021,12 +1064,10 @@ static esp_err_t rest_api_events_handler(httpd_req_t *req)
     }
 
     if (!rest_api_sse_lock()) {
-        (void)httpd_req_async_handler_complete(async_req);
-        return rest_api_send_error(req,
-                                   503,
-                                   "SSE_UNAVAILABLE",
-                                   "Event stream is not available",
-                                   true);
+        return rest_api_sse_send_async_error_and_complete(async_req,
+                                                          503,
+                                                          "SSE_UNAVAILABLE",
+                                                          "Event stream is not available");
     }
 
     for (size_t index = 0; index < REST_API_SSE_MAX_CLIENTS; ++index) {
@@ -1034,46 +1075,52 @@ static esp_err_t rest_api_events_handler(httpd_req_t *req)
             client = &s_sse_state.clients[index];
             memset(client, 0, sizeof(*client));
             client->active = true;
-            client->req = async_req;
             client->status = status;
-            client->sockfd = httpd_req_to_sockfd(req);
             break;
         }
     }
     rest_api_sse_unlock();
 
     if (client == NULL) {
-        (void)httpd_req_async_handler_complete(async_req);
-        return rest_api_send_error(req,
-                                   503,
-                                   "SSE_CLIENT_LIMIT_REACHED",
-                                   "Too many SSE clients are connected",
-                                   true);
+        return rest_api_sse_send_async_error_and_complete(async_req,
+                                                          503,
+                                                          "SSE_CLIENT_LIMIT_REACHED",
+                                                          "Too many SSE clients are connected");
     }
 
     client->queue = xQueueCreate(REST_API_SSE_CLIENT_QUEUE_LENGTH, sizeof(rest_api_sse_message_t));
     if (client->queue == NULL) {
-        rest_api_sse_release_client_slot(client);
-        return rest_api_send_error(req,
-                                   503,
-                                   "SSE_UNAVAILABLE",
-                                   "Failed to allocate event stream buffers",
-                                   true);
+        rest_api_sse_clear_client_slot(client);
+        return rest_api_sse_send_async_error_and_complete(async_req,
+                                                          503,
+                                                          "SSE_UNAVAILABLE",
+                                                          "Failed to allocate event stream buffers");
     }
 
-    task_result = xTaskCreate(rest_api_sse_client_task,
-                              "rest_api_sse",
-                              REST_API_SSE_CLIENT_TASK_STACK_WORDS,
-                              client,
-                              REST_API_SSE_CLIENT_TASK_PRIORITY,
-                              &client->task_handle);
+    client->req = async_req;
+    client->sockfd = httpd_req_to_sockfd(async_req);
+
+#if defined(REST_API_ENABLE_TESTING_API)
+    if (s_testing_state.force_next_client_task_create_failure) {
+        s_testing_state.force_next_client_task_create_failure = false;
+        task_result = pdFAIL;
+    } else
+#endif
+    {
+        task_result = xTaskCreate(rest_api_sse_client_task,
+                                  "rest_api_sse",
+                                  REST_API_SSE_CLIENT_TASK_STACK_WORDS,
+                                  client,
+                                  REST_API_SSE_CLIENT_TASK_PRIORITY,
+                                  &client->task_handle);
+    }
+
     if (task_result != pdPASS) {
-        rest_api_sse_release_client_slot(client);
-        return rest_api_send_error(req,
-                                   503,
-                                   "SSE_UNAVAILABLE",
-                                   "Failed to start event stream task",
-                                   true);
+        rest_api_sse_clear_client_slot(client);
+        return rest_api_sse_send_async_error_and_complete(async_req,
+                                                          503,
+                                                          "SSE_UNAVAILABLE",
+                                                          "Failed to start event stream task");
     }
 
     return ESP_OK;
@@ -1094,6 +1141,7 @@ static esp_err_t rest_api_sse_start(void)
     s_testing_state.hold_dispatch_task_on_shutdown = false;
     s_testing_state.dispatch_shutdown_reached = false;
     s_testing_state.dispatch_task_deleted_by_stop = false;
+    s_testing_state.force_next_client_task_create_failure = false;
 #endif
 
     s_sse_state.lock = xSemaphoreCreateMutex();
@@ -1220,6 +1268,7 @@ static void rest_api_sse_stop(void)
 
 #if defined(REST_API_ENABLE_TESTING_API)
     s_testing_state.hold_dispatch_task_on_shutdown = false;
+    s_testing_state.force_next_client_task_create_failure = false;
 #endif
 }
 
