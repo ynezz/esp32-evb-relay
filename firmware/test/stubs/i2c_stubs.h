@@ -44,6 +44,7 @@ typedef struct {
 void i2c_stub_reset(void);
 void i2c_stub_set_probe_result(esp_err_t result);
 void i2c_stub_set_transmit_result(esp_err_t result);
+void i2c_stub_set_transmit_result_persistent(esp_err_t result);
 void i2c_stub_set_transmit_receive_result(esp_err_t result);
 esp_err_t i2c_stub_set_read_data(const uint8_t *data, size_t data_len);
 esp_err_t i2c_stub_queue_read_data(const uint8_t *data, size_t data_len);

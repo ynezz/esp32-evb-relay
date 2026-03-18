@@ -24,6 +24,7 @@ static i2c_device_config_t s_last_device_config;
 static esp_err_t s_probe_result = ESP_ERR_NOT_FOUND;
 static esp_err_t s_transmit_result = ESP_OK;
 static bool s_transmit_fail_once = false;
+static bool s_transmit_fail_persistent = false;
 static esp_err_t s_transmit_receive_result = ESP_OK;
 static uint8_t s_last_transaction[I2C_STUB_MAX_TRANSACTION_SIZE];
 static size_t s_last_transaction_size;
@@ -64,6 +65,7 @@ void i2c_stub_reset(void)
     s_probe_result = ESP_ERR_NOT_FOUND;
     s_transmit_result = ESP_OK;
     s_transmit_fail_once = false;
+    s_transmit_fail_persistent = false;
     s_transmit_receive_result = ESP_OK;
 }
 
@@ -75,11 +77,19 @@ void i2c_stub_set_probe_result(esp_err_t result)
 void i2c_stub_set_transmit_result(esp_err_t result)
 {
     s_transmit_result = result;
+    s_transmit_fail_persistent = false;
     /* Arm the one-shot flag so only the next write-direction transmit
      * fails.  The read-command transmit that immediately follows (as part
      * of the two-call transmit+receive pattern) must succeed so the
      * receive step can return its own result independently. */
     s_transmit_fail_once = (result != ESP_OK);
+}
+
+void i2c_stub_set_transmit_result_persistent(esp_err_t result)
+{
+    s_transmit_result = result;
+    s_transmit_fail_once = false;
+    s_transmit_fail_persistent = (result != ESP_OK);
 }
 
 void i2c_stub_set_transmit_receive_result(esp_err_t result)
@@ -201,6 +211,10 @@ esp_err_t i2c_master_transmit(i2c_master_dev_handle_t dev_handle,
     err = i2c_stub_record_transaction(write_buffer, write_size);
     if (err != ESP_OK) {
         return err;
+    }
+
+    if (s_transmit_fail_persistent) {
+        return s_transmit_result;
     }
 
     if (s_transmit_fail_once) {
