@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "board.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -293,13 +294,7 @@ const char *mod_io_relay_sync_to_string(mod_io_relay_sync_t relay_sync)
 
 esp_err_t mod_io_init(i2c_master_bus_handle_t bus_handle)
 {
-    const i2c_device_config_t device_config = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = MOD_IO_I2C_ADDRESS,
-        .scl_speed_hz = 100000U,
-        .scl_wait_us = 0,
-        .flags.disable_ack_check = false,
-    };
+    const i2c_device_config_t device_config = board_i2c_device_config(MOD_IO_I2C_ADDRESS);
     esp_err_t err;
     esp_err_t probe_err;
 

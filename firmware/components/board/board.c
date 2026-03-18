@@ -51,3 +51,14 @@ i2c_master_bus_handle_t board_i2c_bus_handle(void)
 {
     return s_i2c_bus_handle;
 }
+
+i2c_device_config_t board_i2c_device_config(uint16_t device_address)
+{
+    return (i2c_device_config_t) {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = device_address,
+        .scl_speed_hz = BOARD_I2C_SCL_SPEED_HZ,
+        .scl_wait_us = 0,
+        .flags.disable_ack_check = false,
+    };
+}

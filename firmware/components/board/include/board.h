@@ -21,6 +21,7 @@ extern "C" {
 
 esp_err_t board_init(void);
 i2c_master_bus_handle_t board_i2c_bus_handle(void);
+i2c_device_config_t board_i2c_device_config(uint16_t device_address);
 
 #ifdef __cplusplus
 }
