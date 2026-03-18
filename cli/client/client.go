@@ -70,11 +70,92 @@ func New(config Config) (*Client, error) {
 }
 
 func (c *Client) DoJSON(ctx context.Context, method, endpoint string, requestBody any, responseBody any) (Result, error) {
-	request, err := c.newRequest(ctx, method, endpoint, requestBody)
+	var requestBodyReader io.Reader
+	contentLength := int64(-1)
+	if requestBody != nil {
+		payload, err := json.Marshal(requestBody)
+		if err != nil {
+			return Result{}, exitcodes.Wrap(exitcodes.GeneralError, fmt.Errorf("encode request body: %w", err))
+		}
+		requestBodyReader = bytes.NewReader(payload)
+		contentLength = int64(len(payload))
+	}
+
+	request, err := c.newRequest(ctx, method, endpoint, requestBodyReader, "application/json", "application/json", contentLength)
 	if err != nil {
 		return Result{}, err
 	}
 
+	return c.do(request, responseBody)
+}
+
+func (c *Client) Host() string {
+	return c.baseURL.Host
+}
+
+func (c *Client) UploadBinary(ctx context.Context, endpoint string, body io.Reader, size int64, responseBody any) (Result, error) {
+	if body == nil {
+		return Result{}, exitcodes.Wrap(exitcodes.BadArgument, errors.New("upload body is required"))
+	}
+	if size <= 0 {
+		return Result{}, exitcodes.Wrap(exitcodes.BadArgument, errors.New("upload size must be greater than zero"))
+	}
+
+	request, err := c.newRequest(ctx, http.MethodPost, endpoint, body, "application/octet-stream", "application/json", size)
+	if err != nil {
+		return Result{}, err
+	}
+
+	return c.do(request, responseBody)
+}
+
+func (c *Client) WatchEventsOnce(
+	ctx context.Context,
+	onStart func(Result) error,
+	onEvent func(StreamEvent) error,
+) error {
+	if onStart == nil {
+		return exitcodes.Wrap(exitcodes.BadArgument, errors.New("stream start callback is required"))
+	}
+	if onEvent == nil {
+		return exitcodes.Wrap(exitcodes.BadArgument, errors.New("stream event callback is required"))
+	}
+
+	request, err := c.newRequest(ctx, http.MethodGet, "/events", nil, "", "text/event-stream", -1)
+	if err != nil {
+		return err
+	}
+
+	streamHTTPClient := *c.httpClient
+	streamHTTPClient.Timeout = 0
+
+	response, err := streamHTTPClient.Do(request)
+	if err != nil {
+		return wrapError(err)
+	}
+	defer response.Body.Close()
+
+	result := Result{
+		StatusCode:    response.StatusCode,
+		DeviceContext: deviceContextFromHeaders(response.Header),
+	}
+
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		payload, readErr := io.ReadAll(response.Body)
+		if readErr != nil {
+			return exitcodes.Wrap(exitcodes.GeneralError, fmt.Errorf("read response body: %w", readErr))
+		}
+		return wrapError(decodeAPIError(response.StatusCode, payload))
+	}
+
+	if err := onStart(result); err != nil {
+		return err
+	}
+
+	return decodeEventStream(ctx, response.Body, onEvent)
+}
+
+func (c *Client) do(request *http.Request, responseBody any) (Result, error) {
 	startedAt := time.Now()
 	response, err := c.httpClient.Do(request)
 	elapsed := time.Since(startedAt)
@@ -107,58 +188,15 @@ func (c *Client) DoJSON(ctx context.Context, method, endpoint string, requestBod
 	return result, nil
 }
 
-func (c *Client) Host() string {
-	return c.baseURL.Host
-}
-
-func (c *Client) WatchEventsOnce(
+func (c *Client) newRequest(
 	ctx context.Context,
-	onStart func(Result) error,
-	onEvent func(StreamEvent) error,
-) error {
-	if onStart == nil {
-		return exitcodes.Wrap(exitcodes.BadArgument, errors.New("stream start callback is required"))
-	}
-	if onEvent == nil {
-		return exitcodes.Wrap(exitcodes.BadArgument, errors.New("stream event callback is required"))
-	}
-
-	request, err := c.newRequest(ctx, http.MethodGet, "/events", nil)
-	if err != nil {
-		return err
-	}
-	request.Header.Set("Accept", "text/event-stream")
-
-	streamHTTPClient := *c.httpClient
-	streamHTTPClient.Timeout = 0
-
-	response, err := streamHTTPClient.Do(request)
-	if err != nil {
-		return wrapError(err)
-	}
-	defer response.Body.Close()
-
-	result := Result{
-		StatusCode:    response.StatusCode,
-		DeviceContext: deviceContextFromHeaders(response.Header),
-	}
-
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		payload, readErr := io.ReadAll(response.Body)
-		if readErr != nil {
-			return exitcodes.Wrap(exitcodes.GeneralError, fmt.Errorf("read response body: %w", readErr))
-		}
-		return wrapError(decodeAPIError(response.StatusCode, payload))
-	}
-
-	if err := onStart(result); err != nil {
-		return err
-	}
-
-	return decodeEventStream(ctx, response.Body, onEvent)
-}
-
-func (c *Client) newRequest(ctx context.Context, method, endpoint string, requestBody any) (*http.Request, error) {
+	method string,
+	endpoint string,
+	requestBody io.Reader,
+	contentType string,
+	accept string,
+	contentLength int64,
+) (*http.Request, error) {
 	normalizedMethod := strings.ToUpper(strings.TrimSpace(method))
 	if normalizedMethod == "" {
 		return nil, exitcodes.Wrap(exitcodes.BadArgument, errors.New("http method is required"))
@@ -169,23 +207,20 @@ func (c *Client) newRequest(ctx context.Context, method, endpoint string, reques
 		return nil, exitcodes.Wrap(exitcodes.BadArgument, err)
 	}
 
-	var requestBodyReader io.Reader
-	if requestBody != nil {
-		payload, err := json.Marshal(requestBody)
-		if err != nil {
-			return nil, exitcodes.Wrap(exitcodes.GeneralError, fmt.Errorf("encode request body: %w", err))
-		}
-		requestBodyReader = bytes.NewReader(payload)
-	}
-
-	request, err := http.NewRequestWithContext(ctx, normalizedMethod, endpointURL.String(), requestBodyReader)
+	request, err := http.NewRequestWithContext(ctx, normalizedMethod, endpointURL.String(), requestBody)
 	if err != nil {
 		return nil, exitcodes.Wrap(exitcodes.GeneralError, fmt.Errorf("create request: %w", err))
 	}
 
-	request.Header.Set("Accept", "application/json")
-	if requestBody != nil {
-		request.Header.Set("Content-Type", "application/json")
+	if strings.TrimSpace(accept) == "" {
+		accept = "application/json"
+	}
+	request.Header.Set("Accept", accept)
+	if strings.TrimSpace(contentType) != "" {
+		request.Header.Set("Content-Type", contentType)
+	}
+	if contentLength >= 0 {
+		request.ContentLength = contentLength
 	}
 	if c.apiToken != "" {
 		request.Header.Set("Authorization", "Bearer "+c.apiToken)

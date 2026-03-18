@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -119,6 +120,91 @@ func TestNewPreservesConfiguredTimeout(t *testing.T) {
 
 	if got := client.httpClient.Timeout; got != 3*time.Second {
 		t.Fatalf("http timeout = %v; want %v", got, 3*time.Second)
+	}
+}
+
+func TestUploadBinarySendsOctetStreamRequest(t *testing.T) {
+	t.Parallel()
+
+	firmware := []byte("firmware-binary")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("request method = %q, want %q", r.Method, http.MethodPost)
+		}
+		if r.URL.Path != "/api/v1/ota" {
+			t.Errorf("request path = %q, want %q", r.URL.Path, "/api/v1/ota")
+		}
+		if got := r.Header.Get("Accept"); got != "application/json" {
+			t.Errorf("Accept header = %q, want %q", got, "application/json")
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/octet-stream" {
+			t.Errorf("Content-Type header = %q, want %q", got, "application/octet-stream")
+		}
+		if got := r.ContentLength; got != int64(len(firmware)) {
+			t.Errorf("Content-Length = %d, want %d", got, len(firmware))
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer upload-token" {
+			t.Errorf("Authorization header = %q, want %q", got, "Bearer upload-token")
+		}
+
+		payload, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("io.ReadAll() error = %v", err)
+		}
+		if !bytes.Equal(payload, firmware) {
+			t.Fatalf("uploaded payload = %q, want %q", payload, firmware)
+		}
+
+		w.Header().Set("X-FW-Version", "0.4.0")
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	uploadClient, err := New(Config{
+		Host:     server.URL,
+		APIToken: "upload-token",
+		Timeout:  time.Second,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := uploadClient.UploadBinary(
+		context.Background(),
+		"/ota",
+		bytes.NewReader(firmware),
+		int64(len(firmware)),
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("UploadBinary() error = %v", err)
+	}
+
+	if result.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", result.StatusCode, http.StatusAccepted)
+	}
+	if result.DeviceContext == nil || result.DeviceContext.FirmwareVersion != "0.4.0" {
+		t.Fatalf("device context = %#v; want firmware version", result.DeviceContext)
+	}
+}
+
+func TestUploadBinaryRejectsNonPositiveSize(t *testing.T) {
+	t.Parallel()
+
+	uploadClient, err := New(Config{
+		Host:    "relay-box",
+		Timeout: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	_, err = uploadClient.UploadBinary(context.Background(), "/ota", bytes.NewReader(nil), 0, nil)
+	if err == nil {
+		t.Fatal("UploadBinary() succeeded; want validation error")
+	}
+	if !strings.Contains(err.Error(), "upload size must be greater than zero") {
+		t.Fatalf("UploadBinary() error = %v", err)
 	}
 }
 
