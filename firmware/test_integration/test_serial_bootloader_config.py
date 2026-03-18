@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -33,6 +34,10 @@ def _load_integration_conftest():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _watchdog_script_path() -> Path:
+    return _repo_root() / "scripts/run_with_watchdog.py"
 
 
 def _load_partition_table():
@@ -116,6 +121,60 @@ def test_download_mode_helper_documents_runner_failure_signatures() -> None:
     assert "Detected console activity on" in script_text
     assert "/docs/hardware-reference.md" in script_text
     assert "Failed to enter ESP32 ROM download mode" in script_text
+
+
+def test_test_device_recipe_wraps_pytest_in_whole_run_watchdog() -> None:
+    justfile_text = (_repo_root() / "Justfile").read_text(encoding="utf-8")
+
+    assert 'test_device_watchdog_seconds := env("EVB_TEST_DEVICE_WATCHDOG_SECONDS", "1200")' in justfile_text
+    assert "../../scripts/run_with_watchdog.py \\" in justfile_text
+    assert "--timeout-seconds {{test_device_watchdog_seconds}} \\" in justfile_text
+
+
+def test_watchdog_wrapper_preserves_child_output_and_exit_code() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(_watchdog_script_path()),
+            "--timeout-seconds",
+            "5",
+            "--",
+            sys.executable,
+            "-c",
+            "import sys; print('watchdog-ok'); sys.exit(3)",
+        ],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 3
+    assert result.stdout.strip() == "watchdog-ok"
+    assert result.stderr == ""
+
+
+def test_watchdog_wrapper_times_out_and_reports_the_command() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(_watchdog_script_path()),
+            "--timeout-seconds",
+            "0.2",
+            "--",
+            sys.executable,
+            "-c",
+            "import time; print('watchdog-start', flush=True); time.sleep(10)",
+        ],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 124
+    assert result.stdout.strip() == "watchdog-start"
+    assert "command timed out after" in result.stderr
+    assert "limit 0.2s" in result.stderr
+    assert "time.sleep(10)" in result.stderr
 
 
 def test_rest_api_reserves_uri_slots_for_all_registered_routes() -> None:

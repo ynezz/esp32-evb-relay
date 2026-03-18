@@ -9,6 +9,7 @@ test_app_sdkconfig_defaults := env(
 )
 idf_path := env("IDF_PATH", home_directory() / "esp/esp-idf")
 pytest_args := env("EVB_PYTEST_ARGS", "")
+test_device_watchdog_seconds := env("EVB_TEST_DEVICE_WATCHDOG_SECONDS", "1200")
 venv_dir := ".venv"
 venv_python := ".venv/bin/python"
 venv_astyle_py := ".venv/bin/astyle_py"
@@ -48,15 +49,20 @@ cli-fmt-check:
 
 test-device: _ensure-python-tools
     {{idf_activate}} ./scripts/check-download-mode.sh --port {{flash_port}} --baud 115200
+    [ ! firmware/test_app/sdkconfig -ot firmware/test_app/{{test_app_sdkconfig_defaults}} ] || \
+        rm -f firmware/test_app/sdkconfig
     {{idf_activate}} cd firmware/test_app && \
         idf.py -DSDKCONFIG_DEFAULTS="{{test_app_sdkconfig_defaults}}" build
     {{idf_activate}} cd firmware/test_app && \
+        ../../{{venv_python}} ../../scripts/run_with_watchdog.py \
+        --timeout-seconds {{test_device_watchdog_seconds}} \
+        -- \
         ../../{{venv_python}} -m pytest --target esp32 -p no:cacheprovider \
-        pytest_evb_relay.py \
-        --esptool-baud 115200 \
-        --flash-port {{flash_port}} \
-        --port {{serial_port}} \
-        {{pytest_args}}
+            pytest_evb_relay.py \
+            --esptool-baud 115200 \
+            --flash-port {{flash_port}} \
+            --port {{serial_port}} \
+            {{pytest_args}}
 
 test-integration: _ensure-python-tools
     {{idf_activate}} ./scripts/check-download-mode.sh --port {{flash_port}} --baud 115200

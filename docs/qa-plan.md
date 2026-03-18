@@ -464,6 +464,9 @@ Current QA-critical behaviors:
 - `just test-device` and `just test-integration` both run
   `./scripts/check-download-mode.sh --port {{flash_port}} --baud 115200`
   before flashing
+- `just test-device` wraps the `pytest-embedded` invocation in a
+  repo-owned wall-clock watchdog, configurable via
+  `EVB_TEST_DEVICE_WATCHDOG_SECONDS`
 - `just test-integration` passes both `--monitor-port {{serial_port}}`
   and `--monitor-baud {{serial_baud}}` to pytest so split-port runners
   and captured UART logs stay aligned
