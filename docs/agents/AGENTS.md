@@ -244,6 +244,19 @@ ci: add firmware binary size tracking to CI
 docs: document QA gates for agents
 ```
 
+### Versioning
+
+- Single source of truth for releases: git tags in the form `vX.Y.Z`
+- Local firmware builds fall back to `firmware/version.txt` when
+  `PROJECT_VER` is not injected by the build/release pipeline
+- Release CLI builds inject `cmd.Version`, `cmd.Commit`, and `cmd.Date`
+  via ldflags so `--version` and `--robot-capabilities` stay on the
+  same metadata source
+- Semver policy:
+  - Major: breaking REST API changes, breaking CLI interface changes
+  - Minor: new endpoints, new commands, new features
+  - Patch: bug fixes, docs, internal refactors
+
 ### Git workflow after QA
   - Now, based on your knowledge of the project, commit all changed files now in
     a series of logically connected groupings with super detailed commit messages

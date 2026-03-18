@@ -32,13 +32,19 @@ func withVersionMetadata(version string, commit string, date string, fn func()) 
 }
 
 func TestFormattedVersion(t *testing.T) {
-	withVersionMetadata("1.2.3", "abc123", "2026-03-17T00:00:00Z", func() {
-		got := formattedVersion()
-		want := "1.2.3\ncommit: abc123\nbuilt: 2026-03-17T00:00:00Z"
-		if got != want {
-			t.Fatalf("formattedVersion() = %q, want %q", got, want)
-		}
-	})
+    withVersionMetadata("1.2.3", "abc123", "2026-03-17T00:00:00Z", func() {
+        got := formattedVersion()
+        want := "1.2.3\ncommit: abc123\nbuilt: 2026-03-17T00:00:00Z"
+        if got != want {
+            t.Fatalf("formattedVersion() = %q, want %q", got, want)
+        }
+    })
+}
+
+func TestDefaultVersionUsesDevSemverFallback(t *testing.T) {
+    if Version != "0.0.0-dev" {
+        t.Fatalf("Version = %q, want %q", Version, "0.0.0-dev")
+    }
 }
 
 func TestVersionFlagPrintsVersionMetadata(t *testing.T) {

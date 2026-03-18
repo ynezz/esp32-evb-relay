@@ -3,9 +3,9 @@ package cmd
 import "fmt"
 
 var (
-	Version = "dev"
-	Commit  = "unknown"
-	Date    = "unknown"
+    Version = "0.0.0-dev"
+    Commit  = "unknown"
+    Date    = "unknown"
 )
 
 func formattedVersion() string {
