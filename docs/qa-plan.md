@@ -438,6 +438,8 @@ test-device:
         idf.py -DSDKCONFIG_DEFAULTS="{{test_app_sdkconfig_defaults}}" build
     cd firmware/test_app && \
         pytest --target esp32 -p no:cacheprovider \
+        pytest_evb_relay.py \
+        --esptool-baud 115200 \
         --port {{serial_port}}
 
 test-integration:
