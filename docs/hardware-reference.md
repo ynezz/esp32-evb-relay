@@ -66,6 +66,13 @@ python3 -m esptool --no-stub --chip esp32 --port /dev/ttyS4 \
 - The self-hosted QEMU runner currently exposes two PCI 16550 ports:
   `/dev/ttyS4` affects reset/control lines, while `/dev/ttyS5` carries
   the live ESP32 UART console output.
+- `udevadm info` and `lspci` show both ports are guest-visible QEMU PCI
+  16550A adapters (`Red Hat, Inc. QEMU PCI 16550A Adapter`), not a
+  directly enumerated USB UART on the Linux guest.
+- The guest currently exposes no `/dev/serial/by-id` aliases and no
+  `/dev/gpiochip*` devices for a separate GPIO0/EN control path, which
+  strongly suggests the missing download-mode assertion lives in the VM
+  bridge or host-side wiring rather than in repo scripts.
 - Brute-force probing of all 64 3-step DTR/RTS sequences on `/dev/ttyS4`
   while monitoring `/dev/ttyS5` never entered ROM download mode. Every
   reboot stayed in `boot:0x1b (SPI_FAST_FLASH_BOOT)`.
@@ -78,6 +85,11 @@ python3 -m esptool --no-stub --chip esp32 --port /dev/ttyS4 \
   --before no_reset` on `/dev/ttyS5` returned `Invalid head of packet`,
   which confirms the runner can reset the board but still cannot hold
   GPIO0 in the ROM-loader state.
+- Re-running raw `esptool` probes from the guest still shows the same
+  split behavior: `/dev/ttyS4` returns `No serial data received`, while
+  `/dev/ttyS5` reads boot/app console bytes such as `Invalid head of
+  packet (0x5B)` because the board keeps rebooting into the flashed app
+  instead of entering ROM download mode.
 - The image currently flashed on the board reports app version
   `2ae9772-dirty` with build time `2026-03-18 07:46:58 UTC`, which
   predates commit `7815069` that added `network_init()` before
