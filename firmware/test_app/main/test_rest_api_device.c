@@ -7,13 +7,16 @@
 #include "auth.h"
 #include "board.h"
 #include "device_config.h"
+#include "esp_image_format.h"
 #include "esp_netif.h"
+#include "esp_ota_ops.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "input_monitor.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
 #include "mod_io.h"
+#include "ota.h"
 #include "relay.h"
 #include "relay_events.h"
 #include "rest_api.h"
@@ -346,6 +349,129 @@ static void read_stream_until_contains(int sock,
     }
 
     TEST_FAIL_MESSAGE("Expected stream fragment was not received");
+}
+
+static void read_response_to_close(int sock, char *response, size_t response_size)
+{
+    size_t total = 0U;
+
+    TEST_ASSERT_GREATER_OR_EQUAL_INT32(0, sock);
+    TEST_ASSERT_NOT_NULL(response);
+    TEST_ASSERT_GREATER_THAN_UINT32(0U, response_size);
+
+    memset(response, 0, response_size);
+    while (total < (response_size - 1U)) {
+        ssize_t received = recv(sock, response + total, response_size - total - 1U, 0);
+
+        if (received <= 0) {
+            break;
+        }
+
+        total += (size_t)received;
+        response[total] = '\0';
+    }
+
+    TEST_ASSERT_GREATER_THAN_UINT32(0U, total);
+}
+
+static size_t get_running_app_image_size(void)
+{
+    const esp_partition_t *running_partition = esp_ota_get_running_partition();
+    esp_partition_pos_t partition_pos = {0};
+    esp_image_metadata_t metadata = {0};
+
+    TEST_ASSERT_NOT_NULL(running_partition);
+    partition_pos.offset = running_partition->address;
+    partition_pos.size = running_partition->size;
+    TEST_ASSERT_EQUAL(ESP_OK, esp_image_get_metadata(&partition_pos, &metadata));
+    return metadata.image_len;
+}
+
+static void perform_partition_upload_request(uint16_t port,
+                                             const char *path,
+                                             const char *authorization_header,
+                                             const esp_partition_t *partition,
+                                             size_t image_size,
+                                             char *response,
+                                             size_t response_size)
+{
+    char request[768];
+    uint8_t chunk[1024];
+    struct sockaddr_in dest_addr = {
+        .sin_family = AF_INET,
+        .sin_port = htons(port),
+        .sin_addr.s_addr = htonl(INADDR_LOOPBACK),
+    };
+    struct timeval timeout = {
+        .tv_sec = 2,
+        .tv_usec = 0,
+    };
+    int sock;
+    int written;
+    size_t request_len = 0U;
+    size_t offset = 0U;
+    ssize_t sent;
+
+    TEST_ASSERT_NOT_NULL(path);
+    TEST_ASSERT_NOT_NULL(partition);
+
+    written = snprintf(request + request_len,
+                       sizeof(request) - request_len,
+                       "POST %s HTTP/1.1\r\n"
+                       "Host: localhost\r\n"
+                       "Content-Type: application/octet-stream\r\n"
+                       "Content-Length: %u\r\n",
+                       path,
+                       (unsigned)image_size);
+    TEST_ASSERT_GREATER_THAN_INT32(0, written);
+    request_len += (size_t)written;
+    TEST_ASSERT_LESS_THAN_UINT32(sizeof(request), request_len);
+
+    if (authorization_header != NULL) {
+        written = snprintf(request + request_len,
+                           sizeof(request) - request_len,
+                           "%s\r\n",
+                           authorization_header);
+        TEST_ASSERT_GREATER_THAN_INT32(0, written);
+        request_len += (size_t)written;
+        TEST_ASSERT_LESS_THAN_UINT32(sizeof(request), request_len);
+    }
+
+    written = snprintf(request + request_len,
+                       sizeof(request) - request_len,
+                       "Connection: close\r\n"
+                       "\r\n");
+    TEST_ASSERT_GREATER_THAN_INT32(0, written);
+    request_len += (size_t)written;
+    TEST_ASSERT_LESS_THAN_UINT32(sizeof(request), request_len + 1U);
+
+    sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+    TEST_ASSERT_GREATER_OR_EQUAL_INT32(0, sock);
+    TEST_ASSERT_GREATER_OR_EQUAL_INT32(0,
+                                       setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)));
+    TEST_ASSERT_GREATER_OR_EQUAL_INT32(0,
+                                       setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)));
+    TEST_ASSERT_GREATER_OR_EQUAL_INT32(0,
+                                       connect(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr)));
+
+    sent = send(sock, request, request_len, 0);
+    TEST_ASSERT_EQUAL_INT((int)request_len, sent);
+
+    while (offset < image_size) {
+        size_t chunk_len = image_size - offset;
+
+        if (chunk_len > sizeof(chunk)) {
+            chunk_len = sizeof(chunk);
+        }
+
+        TEST_ASSERT_EQUAL(ESP_OK, esp_partition_read(partition, offset, chunk, chunk_len));
+        sent = send(sock, chunk, chunk_len, 0);
+        TEST_ASSERT_EQUAL_INT((int)chunk_len, sent);
+        offset += chunk_len;
+    }
+
+    read_response_to_close(sock, response, response_size);
+    close(sock);
 }
 
 TEST_CASE("rest_api device starts the HTTP server on the configured port",
@@ -974,6 +1100,49 @@ TEST_CASE("rest_api device enforces the SSE client limit", "[qa][rest_api][devic
     for (size_t index = 0; index < max_sse_clients; ++index) {
         close(sockets[index]);
     }
+}
+
+TEST_CASE("rest_api device accepts OTA uploads and switches the boot partition",
+          "[qa][rest_api][device]")
+{
+    static const uint16_t test_port = 18098U;
+    static const rest_api_config_t config = {
+        .port = test_port,
+        .auth_handler = allow_auth_handler,
+        .status_provider = status_provider,
+    };
+    const esp_partition_t *running_partition = esp_ota_get_running_partition();
+    const esp_partition_t *boot_partition;
+    char response[1024];
+    char expected_bytes[64];
+    size_t image_size;
+
+    ensure_tcpip_ready();
+    TEST_ASSERT_NOT_NULL(running_partition);
+    TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
+
+    image_size = get_running_app_image_size();
+    perform_partition_upload_request(test_port,
+                                     "/api/v1/ota",
+                                     NULL,
+                                     running_partition,
+                                     image_size,
+                                     response,
+                                     sizeof(response));
+
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"partition\":\"ota_"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"reboot_delay_ms\":2000"));
+    snprintf(expected_bytes,
+             sizeof(expected_bytes),
+             "\"bytes_received\":%u",
+             (unsigned)image_size);
+    TEST_ASSERT_NOT_NULL(strstr(response, expected_bytes));
+    TEST_ASSERT_TRUE(ota_reboot_scheduled_for_testing());
+
+    boot_partition = esp_ota_get_boot_partition();
+    TEST_ASSERT_NOT_NULL(boot_partition);
+    TEST_ASSERT_NOT_EQUAL(running_partition, boot_partition);
 }
 
 TEST_CASE("rest_api device parses relay IDs from wildcard URIs",

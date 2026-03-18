@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdarg.h>
 #include <stdint.h>
 
@@ -21,3 +22,5 @@ void esp_check_stub_log_error(const char *tag, esp_err_t err, const char *format
 void esp_stub_reset_time_override(void);
 void esp_stub_set_time_us(int64_t time_us);
 void esp_stub_advance_time_us(int64_t delta_us);
+void esp_stub_reset_restart_count(void);
+size_t esp_stub_get_restart_count(void);

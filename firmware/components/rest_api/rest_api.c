@@ -12,6 +12,7 @@
 #include "esp_event.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_ota_ops.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -20,6 +21,7 @@
 #include "freertos/task.h"
 #include "input_monitor.h"
 #include "mod_io.h"
+#include "ota.h"
 #include "relay.h"
 #include "relay_events.h"
 
@@ -43,6 +45,7 @@ static rest_api_auth_result_t rest_api_authorize_request(httpd_req_t *req);
 #define REST_API_SSE_CONNECTED_COMMENT ":connected\n\n"
 #define REST_API_SSE_HEARTBEAT_COMMENT ":heartbeat\n\n"
 #define REST_API_SSE_CLIENT_POLL_WAIT_MS 1000U
+#define REST_API_OTA_UPLOAD_CHUNK_LEN 1024U
 
 #if defined(REST_API_ENABLE_TESTING_API)
 #define REST_API_SSE_HEARTBEAT_MS 250U
@@ -61,6 +64,7 @@ static const char *REST_API_DIGITAL_INPUT_ID_PREFIX = "/api/v1/inputs/digital/";
 static const char *REST_API_ANALOG_INPUTS_URI = "/api/v1/inputs/analog";
 static const char *REST_API_ANALOG_INPUT_ID_PREFIX = "/api/v1/inputs/analog/";
 static const char *REST_API_EVENTS_URI = "/api/v1/events";
+static const char *REST_API_OTA_URI = "/api/v1/ota";
 static const char *REST_API_CONFIG_URI = "/api/v1/config";
 
 typedef struct {
@@ -125,6 +129,8 @@ static const char *rest_api_http_status_text(int http_status)
         return "404 Not Found";
     case 409:
         return "409 Conflict";
+    case 413:
+        return "413 Payload Too Large";
     case 500:
         return "500 Internal Server Error";
     case 503:
@@ -1614,6 +1620,167 @@ static esp_err_t rest_api_config_handler(httpd_req_t *req)
     return rest_api_send_json_response(req, 200, root, &status, true);
 }
 
+static esp_err_t rest_api_send_ota_success_response(httpd_req_t *req,
+                                                    const rest_api_status_view_t *status,
+                                                    const ota_target_info_t *target,
+                                                    size_t bytes_received)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON *ota = cJSON_CreateObject();
+
+    if ((root == NULL) || (ota == NULL) || (target == NULL)) {
+        cJSON_Delete(root);
+        cJSON_Delete(ota);
+        return rest_api_send_error(req,
+                                   500,
+                                   "INTERNAL_ERROR",
+                                   "Failed to allocate JSON response",
+                                   true);
+    }
+
+    cJSON_AddStringToObject(ota, "partition", target->partition_label);
+    cJSON_AddNumberToObject(ota, "partition_size", (double)target->partition_size);
+    cJSON_AddNumberToObject(ota, "bytes_received", (double)bytes_received);
+    cJSON_AddNumberToObject(ota, "reboot_delay_ms", (double)OTA_REBOOT_DELAY_MS);
+    cJSON_AddItemToObject(root, "ota", ota);
+    return rest_api_send_json_response(req, 200, root, status, true);
+}
+
+static esp_err_t rest_api_ota_handler(httpd_req_t *req)
+{
+    rest_api_status_view_t status;
+    ota_target_info_t target = {0};
+    uint8_t chunk[REST_API_OTA_UPLOAD_CHUNK_LEN];
+    size_t remaining;
+    size_t bytes_received = 0U;
+    esp_err_t err;
+    esp_err_t response_err;
+
+    err = rest_api_require_authenticated_status(req, &status);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    if (req->content_len <= 0) {
+        return rest_api_send_error(req,
+                                   400,
+                                   "INVALID_BODY",
+                                   "Request body must contain a firmware image",
+                                   true);
+    }
+
+    err = ota_begin_update((size_t)req->content_len, &target);
+    if (err == ESP_ERR_INVALID_SIZE) {
+        return rest_api_send_error(req,
+                                   413,
+                                   "OTA_IMAGE_TOO_LARGE",
+                                   "Firmware image does not fit the OTA slot",
+                                   true);
+    }
+    if (err == ESP_ERR_INVALID_STATE) {
+        return rest_api_send_error_with_retryable(req,
+                                                  409,
+                                                  "OTA_BUSY",
+                                                  "Device is not ready for another OTA update",
+                                                  true,
+                                                  true);
+    }
+    if (err == ESP_ERR_OTA_ROLLBACK_INVALID_STATE) {
+        return rest_api_send_error_with_retryable(req,
+                                                  409,
+                                                  "OTA_PENDING_VERIFY",
+                                                  "Running firmware must be confirmed before another OTA update",
+                                                  true,
+                                                  true);
+    }
+    if (err == ESP_ERR_NOT_FOUND) {
+        return rest_api_send_error_with_retryable(req,
+                                                  503,
+                                                  "OTA_UNAVAILABLE",
+                                                  "OTA partition is not available",
+                                                  true,
+                                                  true);
+    }
+    if (err != ESP_OK) {
+        return rest_api_send_error_with_retryable(req,
+                                                  503,
+                                                  "OTA_UNAVAILABLE",
+                                                  "Failed to start OTA update",
+                                                  true,
+                                                  true);
+    }
+
+    remaining = (size_t)req->content_len;
+    while (remaining > 0U) {
+        int received;
+        size_t chunk_len = remaining;
+
+        if (chunk_len > sizeof(chunk)) {
+            chunk_len = sizeof(chunk);
+        }
+
+        received = httpd_req_recv(req, (char *)chunk, chunk_len);
+        if (received == HTTPD_SOCK_ERR_TIMEOUT) {
+            continue;
+        }
+        if (received <= 0) {
+            ota_abort_update();
+            return rest_api_send_error_with_retryable(req,
+                                                      400,
+                                                      "INVALID_BODY",
+                                                      "Failed to receive the firmware image",
+                                                      true,
+                                                      true);
+        }
+
+        err = ota_write_chunk(chunk, (size_t)received);
+        if (err != ESP_OK) {
+            ota_abort_update();
+            if (err == ESP_ERR_OTA_VALIDATE_FAILED) {
+                return rest_api_send_error(req,
+                                           400,
+                                           "INVALID_FIRMWARE_IMAGE",
+                                           "Firmware image is not valid",
+                                           true);
+            }
+            return rest_api_send_error_with_retryable(req,
+                                                      503,
+                                                      "OTA_WRITE_FAILED",
+                                                      "Failed to write the firmware image",
+                                                      true,
+                                                      true);
+        }
+
+        remaining -= (size_t)received;
+        bytes_received += (size_t)received;
+    }
+
+    err = ota_finalize_update();
+    if (err != ESP_OK) {
+        if (err == ESP_ERR_OTA_VALIDATE_FAILED) {
+            return rest_api_send_error(req,
+                                       400,
+                                       "INVALID_FIRMWARE_IMAGE",
+                                       "Firmware image is not valid",
+                                       true);
+        }
+        return rest_api_send_error_with_retryable(req,
+                                                  503,
+                                                  "OTA_FINALIZE_FAILED",
+                                                  "Failed to finalize the firmware image",
+                                                  true,
+                                                  false);
+    }
+
+    response_err = rest_api_send_ota_success_response(req, &status, &target, bytes_received);
+    err = ota_schedule_reboot();
+    if ((response_err == ESP_OK) && (err != ESP_OK)) {
+        return err;
+    }
+
+    return response_err;
+}
+
 static esp_err_t rest_api_config_update_handler(httpd_req_t *req)
 {
     rest_api_status_view_t status;
@@ -2625,6 +2792,12 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
         .handler = rest_api_events_handler,
         .user_ctx = NULL,
     };
+    httpd_uri_t ota_uri = {
+        .uri = REST_API_OTA_URI,
+        .method = HTTP_POST,
+        .handler = rest_api_ota_handler,
+        .user_ctx = NULL,
+    };
     httpd_uri_t config_uri = {
         .uri = REST_API_CONFIG_URI,
         .method = HTTP_GET,
@@ -2761,6 +2934,14 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
     }
 
     err = httpd_register_uri_handler(s_server, &events_uri);
+    if (err != ESP_OK) {
+        httpd_stop(s_server);
+        s_server = NULL;
+        memset(&s_config, 0, sizeof(s_config));
+        return err;
+    }
+
+    err = httpd_register_uri_handler(s_server, &ota_uri);
     if (err != ESP_OK) {
         httpd_stop(s_server);
         s_server = NULL;

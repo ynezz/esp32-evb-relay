@@ -25,6 +25,7 @@ static const char *esp_stub_log_level_name(esp_log_level_t level)
 
 static bool s_time_override_enabled;
 static int64_t s_time_override_us;
+static size_t s_restart_count;
 
 const char *esp_err_to_name(esp_err_t err)
 {
@@ -45,6 +46,12 @@ const char *esp_err_to_name(esp_err_t err)
         return "ESP_ERR_NOT_FOUND";
     case ESP_ERR_INVALID_SIZE:
         return "ESP_ERR_INVALID_SIZE";
+    case ESP_ERR_NOT_SUPPORTED:
+        return "ESP_ERR_NOT_SUPPORTED";
+    case ESP_ERR_OTA_VALIDATE_FAILED:
+        return "ESP_ERR_OTA_VALIDATE_FAILED";
+    case ESP_ERR_OTA_ROLLBACK_INVALID_STATE:
+        return "ESP_ERR_OTA_ROLLBACK_INVALID_STATE";
     case ESP_ERR_NVS_NOT_FOUND:
         return "ESP_ERR_NVS_NOT_FOUND";
     case ESP_ERR_NVS_TYPE_MISMATCH:
@@ -116,4 +123,19 @@ void esp_stub_advance_time_us(int64_t delta_us)
 {
     s_time_override_enabled = true;
     s_time_override_us += delta_us;
+}
+
+void esp_stub_reset_restart_count(void)
+{
+    s_restart_count = 0U;
+}
+
+size_t esp_stub_get_restart_count(void)
+{
+    return s_restart_count;
+}
+
+void esp_restart(void)
+{
+    ++s_restart_count;
 }

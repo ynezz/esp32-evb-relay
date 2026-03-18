@@ -20,6 +20,7 @@ typedef struct {
     esp_err_t mod_io_probe_result;
     esp_err_t mod_io_get_status_result;
     esp_err_t network_init_result;
+    esp_err_t ota_confirm_result;
     esp_err_t network_wait_result;
     esp_err_t network_register_mdns_result;
     esp_err_t network_get_status_result;
@@ -54,6 +55,7 @@ void main_startup_stub_reset(void)
     s_state.mod_io_probe_result = ESP_OK;
     s_state.mod_io_get_status_result = ESP_OK;
     s_state.network_init_result = ESP_OK;
+    s_state.ota_confirm_result = ESP_OK;
     s_state.network_wait_result = ESP_OK;
     s_state.network_register_mdns_result = ESP_OK;
     s_state.network_get_status_result = ESP_OK;
@@ -124,6 +126,11 @@ void main_startup_stub_set_mod_io_get_status_result(esp_err_t result)
 void main_startup_stub_set_network_init_result(esp_err_t result)
 {
     s_state.network_init_result = result;
+}
+
+void main_startup_stub_set_ota_confirm_result(esp_err_t result)
+{
+    s_state.ota_confirm_result = result;
 }
 
 void main_startup_stub_set_network_wait_result(esp_err_t result)
@@ -269,6 +276,12 @@ esp_err_t network_init(void)
 {
     main_startup_stub_record_call(MAIN_STARTUP_CALL_NETWORK_INIT);
     return s_state.network_init_result;
+}
+
+esp_err_t ota_confirm_running_image_if_pending(void)
+{
+    main_startup_stub_record_call(MAIN_STARTUP_CALL_OTA_CONFIRM_RUNNING_IMAGE_IF_PENDING);
+    return s_state.ota_confirm_result;
 }
 
 esp_err_t network_wait_for_ip(uint32_t timeout_ms)

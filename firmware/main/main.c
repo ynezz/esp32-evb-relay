@@ -9,6 +9,7 @@
 #include "input_monitor.h"
 #include "mod_io.h"
 #include "network.h"
+#include "ota.h"
 #include "relay.h"
 #include "rest_api.h"
 
@@ -112,6 +113,12 @@ void app_main(void)
     err = network_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize Ethernet networking: %s", esp_err_to_name(err));
+        return;
+    }
+
+    err = ota_confirm_running_image_if_pending();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to confirm the running OTA image: %s", esp_err_to_name(err));
         return;
     }
 

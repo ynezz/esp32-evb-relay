@@ -1,11 +1,12 @@
 idf_component_register(SRC_DIRS "."
                        INCLUDE_DIRS "."
-                       PRIV_REQUIRES auth board device_config esp_netif input_monitor lwip mod_io relay
-                                     relay_events rest_api unity)
+                       PRIV_REQUIRES app_update auth board bootloader_support device_config esp_netif
+                                     input_monitor lwip mod_io ota relay relay_events rest_api unity)
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
                            DEVICE_CONFIG_ENABLE_TESTING_API=1
-                           INPUT_MONITOR_ENABLE_TESTING_API=1)
+                           INPUT_MONITOR_ENABLE_TESTING_API=1
+                           OTA_ENABLE_TESTING_API=1)
 
 idf_component_get_property(device_config_lib device_config COMPONENT_LIB)
 target_compile_definitions(${device_config_lib} PRIVATE DEVICE_CONFIG_ENABLE_TESTING_API=1)
@@ -15,3 +16,6 @@ target_compile_definitions(${input_monitor_lib} PRIVATE INPUT_MONITOR_ENABLE_TES
 
 idf_component_get_property(rest_api_lib rest_api COMPONENT_LIB)
 target_compile_definitions(${rest_api_lib} PRIVATE REST_API_ENABLE_TESTING_API=1)
+
+idf_component_get_property(ota_lib ota COMPONENT_LIB)
+target_compile_definitions(${ota_lib} PRIVATE OTA_ENABLE_TESTING_API=1)

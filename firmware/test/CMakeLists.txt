@@ -31,8 +31,10 @@ add_executable(host_tests
     "${TEST_DIR}/device_config/test_device_config.c"
     "${TEST_DIR}/input_monitor/test_input_monitor.c"
     "${TEST_DIR}/mod_io/test_mod_io.c"
+    "${TEST_DIR}/ota/test_ota.c"
     "${TEST_DIR}/relay/test_relay.c"
     "${TEST_DIR}/stubs/esp_idf_stubs.c"
+    "${TEST_DIR}/stubs/esp_ota_stubs.c"
     "${TEST_DIR}/stubs/freertos_stubs.c"
     "${TEST_DIR}/stubs/gpio_stubs.c"
     "${TEST_DIR}/stubs/i2c_stubs.c"
@@ -43,6 +45,7 @@ add_executable(host_tests
     "${FIRMWARE_DIR}/components/mod_io/mod_io.c"
     "${FIRMWARE_DIR}/components/input_monitor/input_monitor.c"
     "${FIRMWARE_DIR}/components/device_config/device_config.c"
+    "${FIRMWARE_DIR}/components/ota/ota.c"
 )
 
 target_include_directories(host_tests PRIVATE
@@ -52,6 +55,7 @@ target_include_directories(host_tests PRIVATE
     "${FIRMWARE_DIR}/components/mod_io/include"
     "${FIRMWARE_DIR}/components/input_monitor/include"
     "${FIRMWARE_DIR}/components/device_config/include"
+    "${FIRMWARE_DIR}/components/ota/include"
     "${FIRMWARE_DIR}/components/relay_events/include"
 )
 
