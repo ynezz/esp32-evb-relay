@@ -13,6 +13,14 @@ test:
         -DENABLE_SANITIZERS=ON
     cmake --build firmware/test/build
     cd firmware/test/build && ctest --output-on-failure
+    python3 -m pytest -p no:cacheprovider \
+        firmware/test_integration/test_serial_bootloader_config.py
+
+cli-test:
+    cd cli && go test ./...
+
+cli-vet:
+    cd cli && go vet ./...
 
 test-device:
     cd firmware/test_app && \
@@ -57,7 +65,7 @@ format-check:
             -g '!firmware/test_app/build/**' \
             -g '!firmware/test_app/managed_components/**')
 
-ci: format-check build test
+ci: format-check build test cli-vet cli-test
 
 ci-full: ci test-device test-integration
 

@@ -109,6 +109,7 @@ require_idf
 parttool_py="${IDF_PATH}/components/partition_table/parttool.py"
 nvs_gen_py="${IDF_PATH}/components/nvs_flash/nvs_partition_generator/nvs_partition_gen.py"
 nvs_tool_py="${IDF_PATH}/components/nvs_flash/nvs_partition_tool/nvs_tool.py"
+parttool_esptool_args=(--esptool-args no-stub)
 
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "${tmpdir}"' EXIT
@@ -122,6 +123,7 @@ nvs_size="$(python3 "${parttool_py}" -f "${partition_table}" \
 
 python3 "${parttool_py}" \
     -f "${partition_table}" \
+    "${parttool_esptool_args[@]}" \
     -p "${port}" \
     -b "${baud}" \
     read_partition \
@@ -195,6 +197,7 @@ python3 "${nvs_gen_py}" generate "${csv_file}" "${updated_bin}" "${nvs_size}" >/
 
 python3 "${parttool_py}" \
     -f "${partition_table}" \
+    "${parttool_esptool_args[@]}" \
     -p "${port}" \
     -b "${baud}" \
     write_partition \

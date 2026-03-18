@@ -4,6 +4,7 @@ import os
 import secrets
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ DEFAULT_SERIAL_BAUD = "115200"
 DEFAULT_REQUEST_TIMEOUT = 5.0
 DEFAULT_DISCOVERY_TIMEOUT = 15.0
 DEFAULT_BOOT_SETTLE_SECONDS = 3.0
+PARTTOOL_ESPTOOL_ARGS = ("--esptool-args", "no-stub")
 SAFE_OFF_PATHS = (
     "/api/v1/relays/onboard/1",
     "/api/v1/relays/onboard/2",
@@ -68,6 +70,27 @@ def _run_command(args: list[str], cwd: Path | None = None) -> str:
     return result.stdout
 
 
+def _parttool_command(
+    parttool_py: Path,
+    partition_table: Path,
+    serial_port: str,
+    serial_baud: str,
+    *args: str,
+) -> list[str]:
+    return [
+        sys.executable,
+        str(parttool_py),
+        "-f",
+        str(partition_table),
+        *PARTTOOL_ESPTOOL_ARGS,
+        "-p",
+        serial_port,
+        "-b",
+        serial_baud,
+        *args,
+    ]
+
+
 def _read_device_config_values(repo_root: Path, serial_port: str, serial_baud: str) -> dict[str, str]:
     idf_path = os.environ.get("IDF_PATH")
     if not idf_path:
@@ -79,22 +102,18 @@ def _read_device_config_values(repo_root: Path, serial_port: str, serial_baud: s
 
     with tempfile.TemporaryDirectory() as tempdir:
         nvs_bin = Path(tempdir) / "nvs.bin"
-        _run_command([
-            "python3",
-            str(parttool_py),
-            "-f",
-            str(partition_table),
-            "-p",
+        _run_command(_parttool_command(
+            parttool_py,
+            partition_table,
             serial_port,
-            "-b",
             serial_baud,
             "read_partition",
             "--partition-name",
             "nvs",
             "--output",
             str(nvs_bin),
-        ])
-        minimal_dump = _run_command(["python3", str(nvs_tool_py), "-d", "minimal", str(nvs_bin)])
+        ))
+        minimal_dump = _run_command([sys.executable, str(nvs_tool_py), "-d", "minimal", str(nvs_bin)])
 
     values: dict[str, str] = {}
     for raw_line in minimal_dump.splitlines():
