@@ -218,6 +218,12 @@ func TestRobotCapabilitiesExposeCommandAndContractMetadata(t *testing.T) {
 	if !containsString(commandNames, "completion") {
 		t.Fatalf("commands missing completion: %#v", commandNames)
 	}
+	if !containsString(commandNames, "config show") {
+		t.Fatalf("commands missing config show: %#v", commandNames)
+	}
+	if !containsString(commandNames, "config set") {
+		t.Fatalf("commands missing config set: %#v", commandNames)
+	}
 	if !containsString(commandNames, "input watch") {
 		t.Fatalf("commands missing input watch: %#v", commandNames)
 	}
