@@ -196,3 +196,22 @@ func TestEncodeRejectsNilWriter(t *testing.T) {
 		t.Fatalf("Encode(nil, ...) error = %v", err)
 	}
 }
+
+func TestEncodeHonorsJSONOmitEmptyTags(t *testing.T) {
+	t.Parallel()
+
+	type payload struct {
+		Name     string   `json:"name"`
+		Optional *string  `json:"optional,omitempty"`
+		Tags     []string `json:"tags,omitempty"`
+	}
+
+	var buffer bytes.Buffer
+	if err := Encode(&buffer, payload{Name: "Ada"}); err != nil {
+		t.Fatalf("Encode() error = %v", err)
+	}
+
+	if got := buffer.String(); got != "name: Ada" {
+		t.Fatalf("Encode() = %q, want %q", got, "name: Ada")
+	}
+}

@@ -12,11 +12,11 @@ type StreamWriter struct {
 }
 
 type streamHeader struct {
-	V             int    `json:"v"`
-	Stream        string `json:"stream"`
-	Host          string `json:"host"`
-	StartedAt     string `json:"started_at"`
-	DeviceContext any    `json:"device_context,omitempty"`
+	V             int            `json:"v"`
+	Stream        string         `json:"stream"`
+	Host          string         `json:"host"`
+	StartedAt     string         `json:"started_at"`
+	DeviceContext *DeviceContext `json:"device_context,omitempty"`
 }
 
 type streamEvent struct {
@@ -36,7 +36,7 @@ func NewStreamWriter(w io.Writer) (*StreamWriter, error) {
 	return &StreamWriter{encoder: encoder}, nil
 }
 
-func (w *StreamWriter) WriteHeader(stream, host string, startedAt time.Time, deviceContext any) error {
+func (w *StreamWriter) WriteHeader(stream, host string, startedAt time.Time, deviceContext *DeviceContext) error {
 	return w.encoder.Encode(streamHeader{
 		V:             1,
 		Stream:        stream,

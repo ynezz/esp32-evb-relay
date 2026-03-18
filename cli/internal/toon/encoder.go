@@ -23,6 +23,11 @@ type field struct {
 	value any
 }
 
+type jsonTag struct {
+	name      string
+	omitEmpty bool
+}
+
 func Encode(w io.Writer, v any) error {
 	if w == nil {
 		return errors.New("toon output writer is required")
@@ -285,11 +290,15 @@ func objectFields(v any) ([]field, error) {
 			if structField.PkgPath != "" {
 				continue
 			}
-			if jsonTagName(structField) == "-" {
+			tag := parseJSONTag(structField)
+			if tag.name == "-" {
+				continue
+			}
+			if tag.omitEmpty && isEmptyValue(value.Field(index)) {
 				continue
 			}
 			result = append(result, field{
-				name:  fieldName(structField),
+				name:  fieldName(structField, tag),
 				value: value.Field(index).Interface(),
 			})
 		}
@@ -317,20 +326,47 @@ func objectFields(v any) ([]field, error) {
 	}
 }
 
-func jsonTagName(structField reflect.StructField) string {
+func parseJSONTag(structField reflect.StructField) jsonTag {
 	tag := structField.Tag.Get("json")
 	if tag == "" {
-		return ""
+		return jsonTag{}
 	}
 
-	return strings.Split(tag, ",")[0]
+	parts := strings.Split(tag, ",")
+	parsed := jsonTag{name: parts[0]}
+	for _, option := range parts[1:] {
+		if option == "omitempty" {
+			parsed.omitEmpty = true
+		}
+	}
+
+	return parsed
 }
 
-func fieldName(structField reflect.StructField) string {
-	if name := jsonTagName(structField); name != "" {
-		return name
+func fieldName(structField reflect.StructField, tag jsonTag) string {
+	if tag.name != "" {
+		return tag.name
 	}
 	return structField.Name
+}
+
+func isEmptyValue(value reflect.Value) bool {
+	switch value.Kind() {
+	case reflect.Array, reflect.Map, reflect.Slice, reflect.String:
+		return value.Len() == 0
+	case reflect.Bool:
+		return !value.Bool()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return value.Int() == 0
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return value.Uint() == 0
+	case reflect.Float32, reflect.Float64:
+		return value.Float() == 0
+	case reflect.Interface, reflect.Pointer:
+		return value.IsNil()
+	default:
+		return value.IsZero()
+	}
 }
 
 func arrayElements(v any) ([]any, error) {

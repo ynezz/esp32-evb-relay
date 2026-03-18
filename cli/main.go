@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"example.com/esp32-evb-relay/cli/cmd"
 	"example.com/esp32-evb-relay/cli/internal/exitcodes"
@@ -10,7 +11,9 @@ import (
 
 func main() {
 	if err := cmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		if message := strings.TrimSpace(err.Error()); message != "" {
+			fmt.Fprintln(os.Stderr, message)
+		}
 		os.Exit(int(exitcodes.FromError(err)))
 	}
 }

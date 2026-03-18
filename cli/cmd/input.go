@@ -64,7 +64,12 @@ func runInputWatch(cmd *cobra.Command, _ []string) error {
 					return nil
 				}
 				headerWritten = true
-				return streamWriter.WriteHeader("events", streamClient.Host(), startedAt, result.DeviceContext)
+				return streamWriter.WriteHeader(
+					"events",
+					streamClient.Host(),
+					startedAt,
+					robot.FromClientDeviceContext(result.DeviceContext),
+				)
 			},
 			func(event client.StreamEvent) error {
 				return streamWriter.WriteEvent(event.Event, event.Data, time.Now().UTC())
