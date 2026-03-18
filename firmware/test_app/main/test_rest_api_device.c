@@ -81,6 +81,12 @@ typedef struct {
     bool api_token_set;
 } auth_token_fixture_t;
 
+typedef struct {
+    device_config_snapshot_t snapshot;
+    char api_token[DEVICE_CONFIG_API_TOKEN_MAX_LEN + 1];
+    bool api_token_set;
+} device_config_fixture_t;
+
 static void capture_auth_token_fixture(auth_token_fixture_t *fixture)
 {
     TEST_ASSERT_NOT_NULL(fixture);
@@ -93,6 +99,31 @@ static void capture_auth_token_fixture(auth_token_fixture_t *fixture)
 static void restore_auth_token_fixture(const auth_token_fixture_t *fixture)
 {
     TEST_ASSERT_NOT_NULL(fixture);
+    if (fixture->api_token_set) {
+        TEST_ASSERT_EQUAL(ESP_OK, device_config_set_api_token(fixture->api_token, NULL));
+    } else {
+        TEST_ASSERT_EQUAL(ESP_OK, device_config_set_api_token(NULL, NULL));
+    }
+}
+
+static void capture_device_config_fixture(device_config_fixture_t *fixture)
+{
+    TEST_ASSERT_NOT_NULL(fixture);
+    TEST_ASSERT_EQUAL(ESP_OK, device_config_get_snapshot(&fixture->snapshot));
+    TEST_ASSERT_EQUAL(ESP_OK,
+                      device_config_get_api_token(fixture->api_token,
+                                                  sizeof(fixture->api_token),
+                                                  &fixture->api_token_set));
+}
+
+static void restore_device_config_fixture(const device_config_fixture_t *fixture)
+{
+    TEST_ASSERT_NOT_NULL(fixture);
+    TEST_ASSERT_EQUAL(ESP_OK, device_config_set_poll_interval_ms(fixture->snapshot.poll_interval_ms, NULL));
+    TEST_ASSERT_EQUAL(ESP_OK, device_config_set_hostname(fixture->snapshot.hostname, NULL));
+    TEST_ASSERT_EQUAL(ESP_OK,
+                      device_config_set_modio_boot_policy(fixture->snapshot.modio_boot_policy, NULL));
+
     if (fixture->api_token_set) {
         TEST_ASSERT_EQUAL(ESP_OK, device_config_set_api_token(fixture->api_token, NULL));
     } else {
@@ -311,6 +342,161 @@ TEST_CASE("rest_api device returns relay errors with device headers after auth",
     TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"RELAY_NOT_FOUND\""));
     TEST_ASSERT_NULL(strstr(response, "HTTP/1.1 500 Internal Server Error"));
     TEST_ASSERT_NULL(strstr(response, "\"code\":\"RELAY_SET_FAILED\""));
+}
+
+TEST_CASE("rest_api device exposes redacted config snapshots", "[qa][rest_api][device]")
+{
+    static const uint16_t test_port = 18088U;
+    static const rest_api_config_t config = {
+        .port = test_port,
+        .auth_handler = allow_auth_handler,
+        .status_provider = status_provider,
+    };
+    device_config_fixture_t fixture = {0};
+    char response[1024];
+    volatile bool fixture_captured = false;
+
+    ensure_tcpip_ready();
+    if (TEST_PROTECT()) {
+        capture_device_config_fixture(&fixture);
+        fixture_captured = true;
+
+        TEST_ASSERT_EQUAL(ESP_OK, device_config_set_poll_interval_ms(250U, NULL));
+        TEST_ASSERT_EQUAL(ESP_OK, device_config_set_hostname("lab-relay", NULL));
+        TEST_ASSERT_EQUAL(ESP_OK,
+                          device_config_set_modio_boot_policy(DEVICE_CONFIG_MODIO_BOOT_POLICY_ALL_OFF,
+                                                              NULL));
+        TEST_ASSERT_EQUAL(ESP_OK, device_config_set_api_token("loopback-secret", NULL));
+
+        TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
+        perform_http_request(test_port, "GET", "/api/v1/config", NULL, NULL, response, sizeof(response));
+
+        TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+        TEST_ASSERT_NOT_NULL(strstr(response, "X-FW-Version: "));
+        TEST_ASSERT_NOT_NULL(strstr(response, "\"poll_interval_ms\":250"));
+        TEST_ASSERT_NOT_NULL(strstr(response, "\"hostname\":\"lab-relay\""));
+        TEST_ASSERT_NOT_NULL(strstr(response, "\"modio_boot_policy\":\"all_off\""));
+        TEST_ASSERT_NOT_NULL(strstr(response, "\"api_token_set\":true"));
+        TEST_ASSERT_NULL(strstr(response, "loopback-secret"));
+    }
+
+    if (fixture_captured) {
+        restore_device_config_fixture(&fixture);
+    }
+}
+
+TEST_CASE("rest_api device updates config with live apply metadata",
+          "[qa][rest_api][device]")
+{
+    static const uint16_t test_port = 18089U;
+    static const rest_api_config_t config = {
+        .port = test_port,
+        .auth_handler = allow_auth_handler,
+        .status_provider = status_provider,
+    };
+    device_config_fixture_t fixture = {0};
+    device_config_snapshot_t snapshot;
+    char api_token[DEVICE_CONFIG_API_TOKEN_MAX_LEN + 1];
+    bool api_token_set = false;
+    char response[1536];
+    volatile bool fixture_captured = false;
+
+    ensure_tcpip_ready();
+    if (TEST_PROTECT()) {
+        capture_device_config_fixture(&fixture);
+        fixture_captured = true;
+
+        TEST_ASSERT_EQUAL(ESP_OK, device_config_set_poll_interval_ms(100U, NULL));
+        TEST_ASSERT_EQUAL(ESP_OK, device_config_set_hostname("esp32-evb-relay", NULL));
+        TEST_ASSERT_EQUAL(ESP_OK,
+                          device_config_set_modio_boot_policy(
+                              DEVICE_CONFIG_MODIO_BOOT_POLICY_LEAVE_UNCHANGED,
+                              NULL));
+        TEST_ASSERT_EQUAL(ESP_OK, device_config_set_api_token(NULL, NULL));
+
+        TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
+        perform_http_request(test_port,
+                             "PUT",
+                             "/api/v1/config",
+                             NULL,
+                             "{\"poll_interval_ms\":250,\"hostname\":\"lab-relay\","
+                             "\"modio_boot_policy\":\"all_off\","
+                             "\"api_token\":\"updated-secret\"}",
+                             response,
+                             sizeof(response));
+
+        TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+        TEST_ASSERT_NOT_NULL(strstr(response, "\"key\":\"api_token_set\",\"old\":false,\"new\":true,\"live\":true"));
+        TEST_ASSERT_NOT_NULL(strstr(response, "\"key\":\"poll_interval_ms\",\"old\":100,\"new\":250,\"live\":true"));
+        TEST_ASSERT_NOT_NULL(strstr(response, "\"key\":\"hostname\",\"old\":\"esp32-evb-relay\",\"new\":\"lab-relay\",\"live\":false"));
+        TEST_ASSERT_NOT_NULL(strstr(response, "\"key\":\"modio_boot_policy\",\"old\":\"leave_unchanged\",\"new\":\"all_off\",\"live\":false"));
+        TEST_ASSERT_NOT_NULL(strstr(response, "\"restart_required\":true"));
+        TEST_ASSERT_NULL(strstr(response, "updated-secret"));
+
+        TEST_ASSERT_EQUAL(ESP_OK, device_config_get_snapshot(&snapshot));
+        TEST_ASSERT_EQUAL_UINT32(250U, snapshot.poll_interval_ms);
+        TEST_ASSERT_EQUAL_STRING("lab-relay", snapshot.hostname);
+        TEST_ASSERT_EQUAL(DEVICE_CONFIG_MODIO_BOOT_POLICY_ALL_OFF, snapshot.modio_boot_policy);
+        TEST_ASSERT_TRUE(snapshot.api_token_set);
+
+        TEST_ASSERT_EQUAL(ESP_OK,
+                          device_config_get_api_token(api_token, sizeof(api_token), &api_token_set));
+        TEST_ASSERT_TRUE(api_token_set);
+        TEST_ASSERT_EQUAL_STRING("updated-secret", api_token);
+    }
+
+    if (fixture_captured) {
+        restore_device_config_fixture(&fixture);
+    }
+}
+
+TEST_CASE("rest_api device rejects invalid config updates without partial apply",
+          "[qa][rest_api][device]")
+{
+    static const uint16_t test_port = 18090U;
+    static const rest_api_config_t config = {
+        .port = test_port,
+        .auth_handler = allow_auth_handler,
+        .status_provider = status_provider,
+    };
+    device_config_fixture_t fixture = {0};
+    device_config_snapshot_t snapshot;
+    char response[1024];
+    volatile bool fixture_captured = false;
+
+    ensure_tcpip_ready();
+    if (TEST_PROTECT()) {
+        capture_device_config_fixture(&fixture);
+        fixture_captured = true;
+
+        TEST_ASSERT_EQUAL(ESP_OK, device_config_set_poll_interval_ms(100U, NULL));
+        TEST_ASSERT_EQUAL(ESP_OK, device_config_set_hostname("esp32-evb-relay", NULL));
+        TEST_ASSERT_EQUAL(ESP_OK,
+                          device_config_set_modio_boot_policy(
+                              DEVICE_CONFIG_MODIO_BOOT_POLICY_LEAVE_UNCHANGED,
+                              NULL));
+        TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
+
+        perform_http_request(test_port,
+                             "PUT",
+                             "/api/v1/config",
+                             NULL,
+                             "{\"poll_interval_ms\":250,\"modio_boot_policy\":\"bogus\"}",
+                             response,
+                             sizeof(response));
+
+        TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 400 Bad Request"));
+        TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"INVALID_CONFIG_VALUE\""));
+
+        TEST_ASSERT_EQUAL(ESP_OK, device_config_get_snapshot(&snapshot));
+        TEST_ASSERT_EQUAL_UINT32(100U, snapshot.poll_interval_ms);
+        TEST_ASSERT_EQUAL_STRING("esp32-evb-relay", snapshot.hostname);
+        TEST_ASSERT_EQUAL(DEVICE_CONFIG_MODIO_BOOT_POLICY_LEAVE_UNCHANGED, snapshot.modio_boot_policy);
+    }
+
+    if (fixture_captured) {
+        restore_device_config_fixture(&fixture);
+    }
 }
 
 TEST_CASE("rest_api device parses relay IDs from wildcard URIs",

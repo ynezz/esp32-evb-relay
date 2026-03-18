@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "cJSON.h"
+#include "device_config.h"
 #include "esp_app_desc.h"
 #include "esp_check.h"
 #include "esp_event.h"
@@ -24,11 +25,24 @@ static rest_api_config_t s_config;
 
 static rest_api_auth_result_t rest_api_authorize_request(httpd_req_t *req);
 
-#define REST_API_MAX_REQUEST_BODY_LEN 64U
+#define REST_API_MAX_REQUEST_BODY_LEN 512U
 
 static const char *REST_API_ONBOARD_RELAYS_URI = "/api/v1/relays/onboard";
 static const char *REST_API_ONBOARD_RELAY_ID_PREFIX = "/api/v1/relays/onboard/";
 static const char *REST_API_ONBOARD_RELAY_TOGGLE_SUFFIX = "/toggle";
+static const char *REST_API_CONFIG_URI = "/api/v1/config";
+
+typedef struct {
+    bool api_token_present;
+    bool api_token_clear;
+    char api_token[DEVICE_CONFIG_API_TOKEN_MAX_LEN + 1U];
+    bool poll_interval_present;
+    uint32_t poll_interval_ms;
+    bool hostname_present;
+    char hostname[DEVICE_CONFIG_HOSTNAME_MAX_LEN + 1U];
+    bool modio_boot_policy_present;
+    device_config_modio_boot_policy_t modio_boot_policy;
+} rest_api_config_update_request_t;
 
 static const char *rest_api_http_status_text(int http_status)
 {
@@ -363,6 +377,446 @@ static esp_err_t rest_api_parse_boolean_state_request(httpd_req_t *req, bool *ou
     return ESP_OK;
 }
 
+static const char *rest_api_config_response_key_name(device_config_key_t key)
+{
+    if (key == DEVICE_CONFIG_KEY_API_TOKEN) {
+        return "api_token_set";
+    }
+
+    return device_config_get_key_descriptor(key)->name;
+}
+
+static bool rest_api_config_apply_mode_is_live(device_config_apply_mode_t apply_mode)
+{
+    return apply_mode == DEVICE_CONFIG_APPLY_MODE_IMMEDIATE;
+}
+
+static cJSON *rest_api_create_config_snapshot_object(const device_config_snapshot_t *snapshot)
+{
+    cJSON *config = NULL;
+
+    ESP_RETURN_ON_FALSE(snapshot != NULL, NULL, TAG, "Config snapshot is required");
+
+    config = cJSON_CreateObject();
+    if (config == NULL) {
+        return NULL;
+    }
+
+    cJSON_AddNumberToObject(config, "poll_interval_ms", (double)snapshot->poll_interval_ms);
+    cJSON_AddStringToObject(config, "hostname", snapshot->hostname);
+    cJSON_AddStringToObject(config,
+                            "modio_boot_policy",
+                            device_config_modio_boot_policy_to_string(snapshot->modio_boot_policy));
+    cJSON_AddBoolToObject(config, "api_token_set", snapshot->api_token_set);
+    return config;
+}
+
+static cJSON *rest_api_create_config_change_value(device_config_key_t key,
+                                                  const device_config_snapshot_t *snapshot)
+{
+    ESP_RETURN_ON_FALSE(snapshot != NULL, NULL, TAG, "Config snapshot is required");
+
+    switch (key) {
+    case DEVICE_CONFIG_KEY_API_TOKEN:
+        return cJSON_CreateBool(snapshot->api_token_set);
+    case DEVICE_CONFIG_KEY_POLL_INTERVAL_MS:
+        return cJSON_CreateNumber((double)snapshot->poll_interval_ms);
+    case DEVICE_CONFIG_KEY_HOSTNAME:
+        return cJSON_CreateString(snapshot->hostname);
+    case DEVICE_CONFIG_KEY_MODIO_BOOT_POLICY:
+        return cJSON_CreateString(device_config_modio_boot_policy_to_string(snapshot->modio_boot_policy));
+    default:
+        return NULL;
+    }
+}
+
+static esp_err_t rest_api_append_config_change(cJSON *changes,
+                                               device_config_key_t key,
+                                               const device_config_snapshot_t *before,
+                                               const device_config_snapshot_t *after,
+                                               const device_config_apply_result_t *result)
+{
+    cJSON *change = NULL;
+    cJSON *old_value = NULL;
+    cJSON *new_value = NULL;
+
+    ESP_RETURN_ON_FALSE(changes != NULL, ESP_ERR_INVALID_ARG, TAG, "Changes array is required");
+    ESP_RETURN_ON_FALSE(before != NULL, ESP_ERR_INVALID_ARG, TAG, "Before snapshot is required");
+    ESP_RETURN_ON_FALSE(after != NULL, ESP_ERR_INVALID_ARG, TAG, "After snapshot is required");
+    ESP_RETURN_ON_FALSE(result != NULL, ESP_ERR_INVALID_ARG, TAG, "Apply result is required");
+
+    change = cJSON_CreateObject();
+    old_value = rest_api_create_config_change_value(key, before);
+    new_value = rest_api_create_config_change_value(key, after);
+    if ((change == NULL) || (old_value == NULL) || (new_value == NULL)) {
+        cJSON_Delete(change);
+        cJSON_Delete(old_value);
+        cJSON_Delete(new_value);
+        return ESP_ERR_NO_MEM;
+    }
+
+    cJSON_AddStringToObject(change, "key", rest_api_config_response_key_name(key));
+    cJSON_AddItemToObject(change, "old", old_value);
+    cJSON_AddItemToObject(change, "new", new_value);
+    cJSON_AddBoolToObject(change, "live", rest_api_config_apply_mode_is_live(result->apply_mode));
+    cJSON_AddItemToArray(changes, change);
+    return ESP_OK;
+}
+
+static void rest_api_set_config_parse_error(const char **out_code,
+                                            const char **out_message,
+                                            const char *code,
+                                            const char *message)
+{
+    if (out_code != NULL) {
+        *out_code = code;
+    }
+    if (out_message != NULL) {
+        *out_message = message;
+    }
+}
+
+static esp_err_t rest_api_parse_config_update_request(const cJSON *root,
+                                                      rest_api_config_update_request_t *out_request,
+                                                      const char **out_error_code,
+                                                      const char **out_error_message)
+{
+    bool has_updates = false;
+    const cJSON *item = NULL;
+
+    ESP_RETURN_ON_FALSE(root != NULL, ESP_ERR_INVALID_ARG, TAG, "Config JSON root is required");
+    ESP_RETURN_ON_FALSE(out_request != NULL, ESP_ERR_INVALID_ARG, TAG, "Config request output is required");
+
+    if (!cJSON_IsObject(root)) {
+        rest_api_set_config_parse_error(out_error_code,
+                                        out_error_message,
+                                        "INVALID_CONFIG",
+                                        "Request body must be a JSON object");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(out_request, 0, sizeof(*out_request));
+    cJSON_ArrayForEach(item, root) {
+        if ((item == NULL) || (item->string == NULL)) {
+            continue;
+        }
+
+        if (strcmp(item->string, "api_token") == 0) {
+            has_updates = true;
+            out_request->api_token_present = true;
+            if (cJSON_IsNull(item)) {
+                out_request->api_token_clear = true;
+                out_request->api_token[0] = '\0';
+                continue;
+            }
+            if (!cJSON_IsString(item) || (item->valuestring == NULL)) {
+                rest_api_set_config_parse_error(out_error_code,
+                                                out_error_message,
+                                                "INVALID_CONFIG_VALUE",
+                                                "api_token must be a string or null");
+                return ESP_ERR_INVALID_ARG;
+            }
+            if (strlen(item->valuestring) > DEVICE_CONFIG_API_TOKEN_MAX_LEN) {
+                rest_api_set_config_parse_error(out_error_code,
+                                                out_error_message,
+                                                "INVALID_CONFIG_VALUE",
+                                                "api_token exceeds the maximum length");
+                return ESP_ERR_INVALID_ARG;
+            }
+            strncpy(out_request->api_token, item->valuestring, sizeof(out_request->api_token) - 1U);
+            continue;
+        }
+
+        if (strcmp(item->string, "poll_interval_ms") == 0) {
+            double value = 0;
+
+            has_updates = true;
+            if (!cJSON_IsNumber(item)) {
+                rest_api_set_config_parse_error(out_error_code,
+                                                out_error_message,
+                                                "INVALID_CONFIG_VALUE",
+                                                "poll_interval_ms must be an integer");
+                return ESP_ERR_INVALID_ARG;
+            }
+
+            value = item->valuedouble;
+            if ((value < 0.0) || (value > (double)UINT32_MAX) || ((double)(uint32_t)value != value)) {
+                rest_api_set_config_parse_error(out_error_code,
+                                                out_error_message,
+                                                "INVALID_CONFIG_VALUE",
+                                                "poll_interval_ms must be an integer");
+                return ESP_ERR_INVALID_ARG;
+            }
+
+            out_request->poll_interval_present = true;
+            out_request->poll_interval_ms = (uint32_t)value;
+            continue;
+        }
+
+        if (strcmp(item->string, "hostname") == 0) {
+            has_updates = true;
+            if (!cJSON_IsString(item) || (item->valuestring == NULL)) {
+                rest_api_set_config_parse_error(out_error_code,
+                                                out_error_message,
+                                                "INVALID_CONFIG_VALUE",
+                                                "hostname must be a string");
+                return ESP_ERR_INVALID_ARG;
+            }
+            if (strlen(item->valuestring) > DEVICE_CONFIG_HOSTNAME_MAX_LEN) {
+                rest_api_set_config_parse_error(out_error_code,
+                                                out_error_message,
+                                                "INVALID_CONFIG_VALUE",
+                                                "hostname exceeds the maximum length");
+                return ESP_ERR_INVALID_ARG;
+            }
+            out_request->hostname_present = true;
+            strncpy(out_request->hostname, item->valuestring, sizeof(out_request->hostname) - 1U);
+            continue;
+        }
+
+        if (strcmp(item->string, "modio_boot_policy") == 0) {
+            has_updates = true;
+            if (!cJSON_IsString(item) || (item->valuestring == NULL)) {
+                rest_api_set_config_parse_error(out_error_code,
+                                                out_error_message,
+                                                "INVALID_CONFIG_VALUE",
+                                                "modio_boot_policy must be a string");
+                return ESP_ERR_INVALID_ARG;
+            }
+            if (device_config_parse_modio_boot_policy(item->valuestring, &out_request->modio_boot_policy)
+                    != ESP_OK) {
+                rest_api_set_config_parse_error(out_error_code,
+                                                out_error_message,
+                                                "INVALID_CONFIG_VALUE",
+                                                "modio_boot_policy must be leave_unchanged or all_off");
+                return ESP_ERR_INVALID_ARG;
+            }
+            out_request->modio_boot_policy_present = true;
+            continue;
+        }
+
+        rest_api_set_config_parse_error(out_error_code,
+                                        out_error_message,
+                                        "INVALID_CONFIG_KEY",
+                                        "Request body contains an unsupported config key");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!has_updates) {
+        rest_api_set_config_parse_error(out_error_code,
+                                        out_error_message,
+                                        "INVALID_CONFIG",
+                                        "Request body must update at least one supported key");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t rest_api_config_handler(httpd_req_t *req)
+{
+    rest_api_status_view_t status;
+    device_config_snapshot_t snapshot;
+    cJSON *root = NULL;
+    cJSON *config = NULL;
+    esp_err_t err;
+
+    err = rest_api_require_authenticated_status(req, &status);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = device_config_get_snapshot(&snapshot);
+    if (err != ESP_OK) {
+        return rest_api_send_error(req, 500, "CONFIG_UNAVAILABLE", "Failed to read device config", true);
+    }
+
+    root = cJSON_CreateObject();
+    config = rest_api_create_config_snapshot_object(&snapshot);
+    if ((root == NULL) || (config == NULL)) {
+        cJSON_Delete(root);
+        cJSON_Delete(config);
+        return rest_api_send_error(req, 500, "INTERNAL_ERROR", "Failed to allocate JSON response", true);
+    }
+
+    cJSON_AddItemToObject(root, "config", config);
+    return rest_api_send_json_response(req, 200, root, &status, true);
+}
+
+static esp_err_t rest_api_config_update_handler(httpd_req_t *req)
+{
+    rest_api_status_view_t status;
+    device_config_snapshot_t before_snapshot;
+    device_config_snapshot_t after_snapshot;
+    rest_api_config_update_request_t update_request;
+    device_config_apply_result_t apply_results[DEVICE_CONFIG_KEY_COUNT] = {0};
+    bool requested[DEVICE_CONFIG_KEY_COUNT] = {0};
+    const char *error_code = NULL;
+    const char *error_message = NULL;
+    char request_body[REST_API_MAX_REQUEST_BODY_LEN];
+    size_t request_len = 0;
+    cJSON *request_root = NULL;
+    cJSON *response_root = NULL;
+    cJSON *changes = NULL;
+    bool restart_required = false;
+    esp_err_t err;
+
+    err = rest_api_require_authenticated_status(req, &status);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = rest_api_read_request_body(req, request_body, sizeof(request_body), &request_len);
+    if (err == ESP_ERR_INVALID_SIZE) {
+        return rest_api_send_error(req,
+                                   400,
+                                   "INVALID_BODY",
+                                   "Request body is missing or too large",
+                                   true);
+    }
+    if (err != ESP_OK) {
+        return rest_api_send_error(req,
+                                   400,
+                                   "INVALID_BODY",
+                                   "Failed to read request body",
+                                   true);
+    }
+
+    request_root = cJSON_ParseWithLength(request_body, request_len);
+    if (request_root == NULL) {
+        return rest_api_send_error(req, 400, "INVALID_JSON", "Request body must be valid JSON", true);
+    }
+
+    err = rest_api_parse_config_update_request(request_root,
+                                               &update_request,
+                                               &error_code,
+                                               &error_message);
+    if (err != ESP_OK) {
+        cJSON_Delete(request_root);
+        return rest_api_send_error(req,
+                                   400,
+                                   (error_code != NULL) ? error_code : "INVALID_CONFIG",
+                                   (error_message != NULL) ? error_message : "Invalid config request",
+                                   true);
+    }
+
+    err = device_config_get_snapshot(&before_snapshot);
+    if (err != ESP_OK) {
+        cJSON_Delete(request_root);
+        return rest_api_send_error(req, 500, "CONFIG_UNAVAILABLE", "Failed to read device config", true);
+    }
+
+    if (update_request.api_token_present) {
+        requested[DEVICE_CONFIG_KEY_API_TOKEN] = true;
+        err = device_config_set_api_token(update_request.api_token_clear ? NULL : update_request.api_token,
+                                          &apply_results[DEVICE_CONFIG_KEY_API_TOKEN]);
+        if (err == ESP_ERR_INVALID_ARG) {
+            cJSON_Delete(request_root);
+            return rest_api_send_error(req, 400, "INVALID_CONFIG_VALUE", "api_token is invalid", true);
+        }
+        if (err != ESP_OK) {
+            cJSON_Delete(request_root);
+            return rest_api_send_error(req, 500, "CONFIG_UPDATE_FAILED", "Failed to update api_token", true);
+        }
+    }
+
+    if (update_request.poll_interval_present) {
+        requested[DEVICE_CONFIG_KEY_POLL_INTERVAL_MS] = true;
+        err = device_config_set_poll_interval_ms(update_request.poll_interval_ms,
+                                                 &apply_results[DEVICE_CONFIG_KEY_POLL_INTERVAL_MS]);
+        if (err == ESP_ERR_INVALID_ARG) {
+            cJSON_Delete(request_root);
+            return rest_api_send_error(req,
+                                       400,
+                                       "INVALID_CONFIG_VALUE",
+                                       "poll_interval_ms is invalid",
+                                       true);
+        }
+        if (err != ESP_OK) {
+            cJSON_Delete(request_root);
+            return rest_api_send_error(req,
+                                       500,
+                                       "CONFIG_UPDATE_FAILED",
+                                       "Failed to update poll_interval_ms",
+                                       true);
+        }
+    }
+
+    if (update_request.hostname_present) {
+        requested[DEVICE_CONFIG_KEY_HOSTNAME] = true;
+        err = device_config_set_hostname(update_request.hostname, &apply_results[DEVICE_CONFIG_KEY_HOSTNAME]);
+        if (err == ESP_ERR_INVALID_ARG) {
+            cJSON_Delete(request_root);
+            return rest_api_send_error(req, 400, "INVALID_CONFIG_VALUE", "hostname is invalid", true);
+        }
+        if (err != ESP_OK) {
+            cJSON_Delete(request_root);
+            return rest_api_send_error(req, 500, "CONFIG_UPDATE_FAILED", "Failed to update hostname", true);
+        }
+    }
+
+    if (update_request.modio_boot_policy_present) {
+        requested[DEVICE_CONFIG_KEY_MODIO_BOOT_POLICY] = true;
+        err = device_config_set_modio_boot_policy(update_request.modio_boot_policy,
+                                                  &apply_results[DEVICE_CONFIG_KEY_MODIO_BOOT_POLICY]);
+        if (err == ESP_ERR_INVALID_ARG) {
+            cJSON_Delete(request_root);
+            return rest_api_send_error(req,
+                                       400,
+                                       "INVALID_CONFIG_VALUE",
+                                       "modio_boot_policy is invalid",
+                                       true);
+        }
+        if (err != ESP_OK) {
+            cJSON_Delete(request_root);
+            return rest_api_send_error(req,
+                                       500,
+                                       "CONFIG_UPDATE_FAILED",
+                                       "Failed to update modio_boot_policy",
+                                       true);
+        }
+    }
+
+    err = device_config_get_snapshot(&after_snapshot);
+    cJSON_Delete(request_root);
+    if (err != ESP_OK) {
+        return rest_api_send_error(req, 500, "CONFIG_UNAVAILABLE", "Failed to read device config", true);
+    }
+
+    response_root = cJSON_CreateObject();
+    changes = cJSON_CreateArray();
+    if ((response_root == NULL) || (changes == NULL)) {
+        cJSON_Delete(response_root);
+        cJSON_Delete(changes);
+        return rest_api_send_error(req, 500, "INTERNAL_ERROR", "Failed to allocate JSON response", true);
+    }
+
+    for (device_config_key_t key = 0; key < DEVICE_CONFIG_KEY_COUNT; ++key) {
+        if (!requested[key]) {
+            continue;
+        }
+
+        err = rest_api_append_config_change(changes,
+                                            key,
+                                            &before_snapshot,
+                                            &after_snapshot,
+                                            &apply_results[key]);
+        if (err != ESP_OK) {
+            cJSON_Delete(response_root);
+            cJSON_Delete(changes);
+            return rest_api_send_error(req, 500, "INTERNAL_ERROR", "Failed to allocate JSON response", true);
+        }
+
+        if (!rest_api_config_apply_mode_is_live(apply_results[key].apply_mode)) {
+            restart_required = true;
+        }
+    }
+
+    cJSON_AddItemToObject(response_root, "changes", changes);
+    cJSON_AddBoolToObject(response_root, "restart_required", restart_required);
+    return rest_api_send_json_response(req, 200, response_root, &status, true);
+}
+
 static esp_err_t rest_api_onboard_relays_handler(httpd_req_t *req)
 {
     rest_api_status_view_t status;
@@ -647,6 +1101,18 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
         .handler = rest_api_onboard_relay_toggle_handler,
         .user_ctx = NULL,
     };
+    httpd_uri_t config_uri = {
+        .uri = REST_API_CONFIG_URI,
+        .method = HTTP_GET,
+        .handler = rest_api_config_handler,
+        .user_ctx = NULL,
+    };
+    httpd_uri_t config_update_uri = {
+        .uri = REST_API_CONFIG_URI,
+        .method = HTTP_PUT,
+        .handler = rest_api_config_update_handler,
+        .user_ctx = NULL,
+    };
     esp_err_t err;
 
     ESP_RETURN_ON_FALSE(config != NULL, ESP_ERR_INVALID_ARG, TAG, "REST API config is required");
@@ -699,6 +1165,22 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
     }
 
     err = httpd_register_uri_handler(s_server, &onboard_relay_toggle_uri);
+    if (err != ESP_OK) {
+        httpd_stop(s_server);
+        s_server = NULL;
+        memset(&s_config, 0, sizeof(s_config));
+        return err;
+    }
+
+    err = httpd_register_uri_handler(s_server, &config_uri);
+    if (err != ESP_OK) {
+        httpd_stop(s_server);
+        s_server = NULL;
+        memset(&s_config, 0, sizeof(s_config));
+        return err;
+    }
+
+    err = httpd_register_uri_handler(s_server, &config_update_uri);
     if (err != ESP_OK) {
         httpd_stop(s_server);
         s_server = NULL;
