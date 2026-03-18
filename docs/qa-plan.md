@@ -406,17 +406,25 @@ does **not** impose a hard 120-column line-length cap by itself.
 | Recipe              | What                                        | Tier        |
 |---------------------|---------------------------------------------|-------------|
 | `just build`        | `idf.py build` (ESP32 target)               | Build gate  |
-| `just test`         | cmake + ctest host tests                    | Tier 1      |
-| `just test-device`  | `idf.py build` + pytest-embedded flash/run test_app | Tier 2      |
-| `just test-integration` | `idf.py build` + pytest-embedded flash firmware + HTTP checks | Tier 3      |
+| `just test`         | cmake + ctest host tests + serial bootloader config pytest | Tier 1      |
+| `just cli-fmt-check` | `gofmt -l cli` gate                        | CLI gate    |
+| `just cli-lint`     | `golangci-lint` v2 over `cli/`              | CLI gate    |
+| `just cli-vet`      | `go vet ./...` in `cli/`                    | CLI gate    |
+| `just cli-test`     | `go test -race ./...` in `cli/`             | CLI gate    |
+| `just test-device`  | download-mode preflight + build `test_app` + pytest-embedded flash/run | Tier 2      |
+| `just test-integration` | download-mode preflight + firmware build + pytest-embedded HTTP checks with monitor port/baud | Tier 3      |
 | `just format`       | astyle_py auto-fix                          | Format      |
 | `just format-check` | astyle_py dry-run                           | Format gate |
-| `just ci`           | format-check + build + test                 | Full gate   |
+| `just ci`           | format-check + build + test + CLI gates     | Full gate   |
 | `just ci-full`      | ci + test-device + test-integration         | Full + HW (self-hosted) |
 | `just setup`        | install QA Python deps in IDF env + hook    | One-time    |
 | `just clean`        | rm build artifacts                          | Cleanup     |
 
 ### Recipe Details
+
+The repo-root [`Justfile`](../Justfile) is the canonical recipe source.
+This plan intentionally summarizes the current behaviors that matter for
+QA instead of duplicating the whole file verbatim.
 
 Hardware recipes should keep the build and pytest invocation in the same
 recipe. `pytest-embedded` will flash and monitor the built app, but the app
@@ -436,89 +444,34 @@ console path. If `EVB_FLASH_PORT` is unset, the recipes and helper
 scripts fall back to `EVB_SERIAL_PORT` so single-port local setups keep
 working unchanged.
 
-```just
-# Default serial port for hardware tests
-serial_port := env("EVB_SERIAL_PORT", "/dev/esp32-evb")
-flash_port := env("EVB_FLASH_PORT", serial_port)
-test_app_sdkconfig_defaults := env("EVB_TEST_APP_SDKCONFIG_DEFAULTS", "sdkconfig.defaults")
+Current recipe assumptions and helpers:
 
-build:
-    cd firmware && idf.py build
+- `serial_port` defaults to `/dev/esp32-evb`
+- `serial_baud` defaults to `115200`
+- `flash_port` falls back to `serial_port` when `EVB_FLASH_PORT` is unset
+- `test_app_sdkconfig_defaults` defaults to `sdkconfig.defaults`
+- `venv_dir`, `venv_python`, and `venv_astyle_py` point at the repo-local
+  `.venv`
+- `_ensure-python-tools` validates the local virtualenv before recipes
+  that depend on Python tooling
+- `idf_activate` sources `export.sh` only when `idf.py` is not already on
+  `PATH`
 
-test:
-    cmake -S firmware/test -B firmware/test/build \
-        -DCMAKE_BUILD_TYPE=Debug \
-        -DENABLE_SANITIZERS=ON
-    cmake --build firmware/test/build
-    cd firmware/test/build && ctest --output-on-failure
+Current QA-critical behaviors:
 
-test-device:
-    cd firmware/test_app && \
-        idf.py -DSDKCONFIG_DEFAULTS="{{test_app_sdkconfig_defaults}}" build
-    cd firmware/test_app && \
-        pytest --target esp32 -p no:cacheprovider \
-        pytest_evb_relay.py \
-        --esptool-baud 115200 \
-        --flash-port {{flash_port}} \
-        --port {{serial_port}}
+- `just test` runs both the host CMake/ctest harness and
+  `firmware/test_integration/test_serial_bootloader_config.py`
+- `just test-device` and `just test-integration` both run
+  `./scripts/check-download-mode.sh --port {{flash_port}} --baud 115200`
+  before flashing
+- `just test-integration` passes both `--monitor-port {{serial_port}}`
+  and `--monitor-baud {{serial_baud}}` to pytest so split-port runners
+  and captured UART logs stay aligned
+- `just ci` currently expands to
+  `format-check + build + test + cli-fmt-check + cli-lint + cli-vet + cli-test`
 
-test-integration:
-    cd firmware && \
-        idf.py build
-    cd firmware && \
-        pytest --target esp32 -p no:cacheprovider \
-        test_integration \
-        --port {{flash_port}}
-
-format:
-    astyle_py --astyle-version=3.4.7 --style=otbs \
-        --attach-namespaces --attach-classes --indent=spaces=4 \
-        --convert-tabs --align-reference=name \
-        --keep-one-line-statements --pad-header --pad-oper \
-        --unpad-paren --max-continuation-indent=120 \
-        $(rg --files firmware -g '*.c' -g '*.h' \
-            -g '!firmware/build/**' \
-            -g '!firmware/managed_components/**' \
-            -g '!firmware/test/build/**' \
-            -g '!firmware/test_app/build/**' \
-            -g '!firmware/test_app/managed_components/**')
-
-format-check:
-    astyle_py --dry-run --astyle-version=3.4.7 --style=otbs \
-        --attach-namespaces --attach-classes --indent=spaces=4 \
-        --convert-tabs --align-reference=name \
-        --keep-one-line-statements --pad-header --pad-oper \
-        --unpad-paren --max-continuation-indent=120 \
-        $(rg --files firmware -g '*.c' -g '*.h' \
-            -g '!firmware/build/**' \
-            -g '!firmware/managed_components/**' \
-            -g '!firmware/test/build/**' \
-            -g '!firmware/test_app/build/**' \
-            -g '!firmware/test_app/managed_components/**')
-
-ci: format-check build test
-
-ci-full: ci test-device test-integration
-
-setup:
-    python3 -m venv .venv
-    .venv/bin/python -m pip install --upgrade pip
-    .venv/bin/python -m pip install \
-        astyle_py==1.0.5 \
-        pytest-embedded \
-        pytest-embedded-serial-esp \
-        pytest-embedded-idf \
-        requests
-    cp tools/pre-commit-hook.sh .git/hooks/pre-commit
-    chmod +x .git/hooks/pre-commit
-
-clean:
-    rm -rf firmware/build firmware/test/build \
-        firmware/test_app/build firmware/test_app/sdkconfig \
-        firmware/test_app/sdkconfig.old \
-        firmware/test_app/managed_components \
-        firmware/.pytest_cache firmware/test_app/.pytest_cache
-```
+For the exact up-to-date command bodies, read the repo-root
+[`Justfile`](../Justfile).
 
 ---
 
