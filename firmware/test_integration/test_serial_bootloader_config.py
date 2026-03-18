@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -38,6 +39,18 @@ def _load_integration_conftest():
 
 def _watchdog_script_path() -> Path:
     return _repo_root() / "scripts/run_with_watchdog.py"
+
+
+def _load_watchdog_script():
+    watchdog_path = _watchdog_script_path()
+    spec = importlib.util.spec_from_file_location("run_with_watchdog", watchdog_path)
+    if spec is None or spec.loader is None:
+        raise AssertionError(f"failed to load watchdog script from {watchdog_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _load_partition_table():
@@ -175,6 +188,25 @@ def test_watchdog_wrapper_times_out_and_reports_the_command() -> None:
     assert "command timed out after" in result.stderr
     assert "limit 0.2s" in result.stderr
     assert "time.sleep(10)" in result.stderr
+
+
+def test_watchdog_signals_process_group_even_if_parent_already_exited(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_watchdog_script()
+    killpg_calls: list[tuple[int, signal.Signals]] = []
+
+    class FakeProcess:
+        pid = 4242
+
+        @staticmethod
+        def poll() -> int:
+            return 0
+
+    monkeypatch.setattr(module.os, "name", "posix", raising=False)
+    monkeypatch.setattr(module.os, "killpg", lambda pid, sig: killpg_calls.append((pid, sig)))
+
+    module._signal_process_tree(FakeProcess(), signal.SIGTERM)
+
+    assert killpg_calls == [(4242, signal.SIGTERM)]
 
 
 def test_rest_api_reserves_uri_slots_for_all_registered_routes() -> None:

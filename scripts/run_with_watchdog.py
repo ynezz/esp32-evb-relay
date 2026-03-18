@@ -74,9 +74,6 @@ def _spawn_command(command: Sequence[str]) -> subprocess.Popen[bytes]:
 
 
 def _signal_process_tree(process: subprocess.Popen[bytes], sig: signal.Signals) -> None:
-    if process.poll() is not None:
-        return
-
     if os.name == "nt":
         if sig == signal.SIGKILL:
             process.kill()
