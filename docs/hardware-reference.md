@@ -51,6 +51,21 @@ python3 -m esptool --no-stub --chip esp32 --port /dev/ttyS4 \
   write_flash 0x10000 <binary.bin>
 ```
 
+### Current Runner Caveat (2026-03-18)
+
+- The self-hosted QEMU runner currently exposes two PCI 16550 ports:
+  `/dev/ttyS4` affects reset/control lines, while `/dev/ttyS5` carries
+  the live ESP32 UART console output.
+- Brute-force probing of all 64 3-step DTR/RTS sequences on `/dev/ttyS4`
+  while monitoring `/dev/ttyS5` never entered ROM download mode. Every
+  reboot stayed in `boot:0x1b (SPI_FAST_FLASH_BOOT)`.
+- The bundled Olimex board docs state that ESP32-EVB boards do not expose
+  BOOT-button functionality by default. Manual forced boot mode requires
+  a hardware rework around resistors `R46` and `R14`.
+- Treat `Wrong boot mode detected` and `No serial data received` failures
+  on this runner as hardware or infrastructure blockers until GPIO0/EN
+  download-mode control is fixed outside the repo.
+
 ---
 
 ## Olimex MOD-IO (4-Relay Board)
