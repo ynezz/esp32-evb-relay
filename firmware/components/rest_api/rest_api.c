@@ -13,6 +13,7 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "mod_io.h"
 #include "relay.h"
 #include "rest_api_events.h"
 
@@ -27,9 +28,12 @@ static rest_api_auth_result_t rest_api_authorize_request(httpd_req_t *req);
 
 #define REST_API_MAX_REQUEST_BODY_LEN 512U
 
+static const char *REST_API_RELAYS_URI = "/api/v1/relays";
 static const char *REST_API_ONBOARD_RELAYS_URI = "/api/v1/relays/onboard";
 static const char *REST_API_ONBOARD_RELAY_ID_PREFIX = "/api/v1/relays/onboard/";
 static const char *REST_API_ONBOARD_RELAY_TOGGLE_SUFFIX = "/toggle";
+static const char *REST_API_MODIO_RELAYS_URI = "/api/v1/relays/modio";
+static const char *REST_API_MODIO_RELAY_ID_PREFIX = "/api/v1/relays/modio/";
 static const char *REST_API_CONFIG_URI = "/api/v1/config";
 
 typedef struct {
@@ -77,6 +81,18 @@ const char *rest_api_modio_sync_to_string(rest_api_modio_sync_t sync_state)
         return "synchronized";
     default:
         return "absent";
+    }
+}
+
+static rest_api_modio_sync_t rest_api_modio_sync_from_driver(mod_io_relay_sync_t relay_sync)
+{
+    switch (relay_sync) {
+    case MOD_IO_RELAY_SYNC_ABSENT:
+        return REST_API_MODIO_SYNC_ABSENT;
+    case MOD_IO_RELAY_SYNC_SYNCHRONIZED:
+        return REST_API_MODIO_SYNC_SYNCHRONIZED;
+    default:
+        return REST_API_MODIO_SYNC_ABSENT;
     }
 }
 
@@ -247,6 +263,27 @@ static esp_err_t rest_api_parse_onboard_relay_id(httpd_req_t *req,
     return ESP_OK;
 }
 
+static esp_err_t rest_api_parse_modio_relay_id(httpd_req_t *req, uint8_t *out_relay_id)
+{
+    uint32_t parsed_id = 0;
+    esp_err_t err;
+
+    ESP_RETURN_ON_FALSE(req != NULL, ESP_ERR_INVALID_ARG, TAG, "HTTP request is required");
+    ESP_RETURN_ON_FALSE(out_relay_id != NULL, ESP_ERR_INVALID_ARG, TAG, "Relay id output is required");
+
+    if (!rest_api_parse_id_from_uri(req->uri, REST_API_MODIO_RELAY_ID_PREFIX, &parsed_id) ||
+            (parsed_id == 0U) || (parsed_id > MOD_IO_RELAY_COUNT)) {
+        err = rest_api_send_error(req, 404, "RELAY_NOT_FOUND", "Relay not found", true);
+        if (err != ESP_OK) {
+            return err;
+        }
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    *out_relay_id = (uint8_t)parsed_id;
+    return ESP_OK;
+}
+
 static cJSON *rest_api_create_onboard_relay_object(uint8_t relay_id, bool state)
 {
     cJSON *relay = cJSON_CreateObject();
@@ -258,6 +295,29 @@ static cJSON *rest_api_create_onboard_relay_object(uint8_t relay_id, bool state)
     cJSON_AddStringToObject(relay, "group", "onboard");
     cJSON_AddNumberToObject(relay, "id", relay_id);
     cJSON_AddBoolToObject(relay, "state", state);
+    return relay;
+}
+
+static cJSON *rest_api_create_relay_with_sync_object(const char *group,
+                                                     uint8_t relay_id,
+                                                     bool state,
+                                                     const char *sync)
+{
+    cJSON *relay = cJSON_CreateObject();
+
+    if ((relay == NULL) || (group == NULL)) {
+        cJSON_Delete(relay);
+        return NULL;
+    }
+
+    cJSON_AddStringToObject(relay, "group", group);
+    cJSON_AddNumberToObject(relay, "id", relay_id);
+    cJSON_AddBoolToObject(relay, "state", state);
+    if (sync != NULL) {
+        cJSON_AddStringToObject(relay, "sync", sync);
+    } else {
+        cJSON_AddNullToObject(relay, "sync");
+    }
     return relay;
 }
 
@@ -283,6 +343,81 @@ static esp_err_t rest_api_send_onboard_relay_response(httpd_req_t *req,
 
     cJSON_AddItemToObject(root, "relay", relay);
     return rest_api_send_json_response(req, 200, root, status, true);
+}
+
+static esp_err_t rest_api_send_modio_relay_response(httpd_req_t *req,
+                                                    const rest_api_status_view_t *status,
+                                                    uint8_t relay_id,
+                                                    bool relay_state)
+{
+    cJSON *root = NULL;
+    cJSON *relay = NULL;
+
+    root = cJSON_CreateObject();
+    relay = rest_api_create_relay_with_sync_object("modio",
+                                                   relay_id,
+                                                   relay_state,
+                                                   rest_api_modio_sync_to_string(status->modio_sync));
+    if ((root == NULL) || (relay == NULL)) {
+        cJSON_Delete(root);
+        cJSON_Delete(relay);
+        return rest_api_send_error(req,
+                                   500,
+                                   "INTERNAL_ERROR",
+                                   "Failed to allocate JSON response",
+                                   true);
+    }
+
+    cJSON_AddItemToObject(root, "relay", relay);
+    return rest_api_send_json_response(req, 200, root, status, true);
+}
+
+static esp_err_t rest_api_append_modio_relay_objects(cJSON *relays,
+                                                     uint8_t relay_mask,
+                                                     const char *sync)
+{
+    ESP_RETURN_ON_FALSE(relays != NULL, ESP_ERR_INVALID_ARG, TAG, "Relay array is required");
+
+    for (uint8_t relay_id = 1U; relay_id <= MOD_IO_RELAY_COUNT; ++relay_id) {
+        cJSON *relay = NULL;
+        bool state = (relay_mask & (uint8_t)(1U << (relay_id - 1U))) != 0U;
+
+        relay = rest_api_create_relay_with_sync_object("modio", relay_id, state, sync);
+        if (relay == NULL) {
+            return ESP_ERR_NO_MEM;
+        }
+
+        cJSON_AddItemToArray(relays, relay);
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t rest_api_append_combined_relay_objects(cJSON *relays,
+                                                        uint8_t onboard_mask,
+                                                        bool include_modio,
+                                                        uint8_t modio_mask,
+                                                        const char *modio_sync)
+{
+    ESP_RETURN_ON_FALSE(relays != NULL, ESP_ERR_INVALID_ARG, TAG, "Relay array is required");
+
+    for (uint8_t relay_id = 1U; relay_id <= RELAY_COUNT; ++relay_id) {
+        cJSON *relay = NULL;
+        bool state = (onboard_mask & (uint8_t)(1U << (relay_id - 1U))) != 0U;
+
+        relay = rest_api_create_relay_with_sync_object("onboard", relay_id, state, NULL);
+        if (relay == NULL) {
+            return ESP_ERR_NO_MEM;
+        }
+
+        cJSON_AddItemToArray(relays, relay);
+    }
+
+    if (include_modio) {
+        return rest_api_append_modio_relay_objects(relays, modio_mask, modio_sync);
+    }
+
+    return ESP_OK;
 }
 
 static esp_err_t rest_api_read_request_body(httpd_req_t *req,
@@ -374,6 +509,131 @@ static esp_err_t rest_api_parse_boolean_state_request(httpd_req_t *req, bool *ou
 
     *out_state = cJSON_IsTrue(state);
     cJSON_Delete(root);
+    return ESP_OK;
+}
+
+static esp_err_t rest_api_parse_modio_relay_states_request(httpd_req_t *req, uint8_t *out_relay_mask)
+{
+    char request_body[REST_API_MAX_REQUEST_BODY_LEN];
+    size_t request_len = 0;
+    cJSON *root = NULL;
+    cJSON *states = NULL;
+    esp_err_t err;
+    uint8_t relay_mask = 0;
+
+    ESP_RETURN_ON_FALSE(req != NULL, ESP_ERR_INVALID_ARG, TAG, "HTTP request is required");
+    ESP_RETURN_ON_FALSE(out_relay_mask != NULL, ESP_ERR_INVALID_ARG, TAG, "Relay mask output is required");
+
+    err = rest_api_read_request_body(req, request_body, sizeof(request_body), &request_len);
+    if (err == ESP_ERR_INVALID_SIZE) {
+        return rest_api_send_error(req,
+                                   400,
+                                   "INVALID_BODY",
+                                   "Request body is missing or too large",
+                                   true);
+    }
+    if (err != ESP_OK) {
+        return rest_api_send_error(req,
+                                   400,
+                                   "INVALID_BODY",
+                                   "Failed to read request body",
+                                   true);
+    }
+
+    root = cJSON_ParseWithLength(request_body, request_len);
+    if (root == NULL) {
+        return rest_api_send_error(req, 400, "INVALID_JSON", "Request body must be valid JSON", true);
+    }
+
+    states = cJSON_GetObjectItemCaseSensitive(root, "states");
+    if (!cJSON_IsArray(states) || (cJSON_GetArraySize(states) != MOD_IO_RELAY_COUNT)) {
+        cJSON_Delete(root);
+        return rest_api_send_error(req,
+                                   400,
+                                   "INVALID_RELAY_STATE",
+                                   "Request body must contain exactly 4 relay states",
+                                   true);
+    }
+
+    for (uint8_t relay_id = 1U; relay_id <= MOD_IO_RELAY_COUNT; ++relay_id) {
+        cJSON *state = cJSON_GetArrayItem(states, relay_id - 1U);
+
+        if (!cJSON_IsBool(state)) {
+            cJSON_Delete(root);
+            return rest_api_send_error(req,
+                                       400,
+                                       "INVALID_RELAY_STATE",
+                                       "Relay states must be booleans",
+                                       true);
+        }
+
+        if (cJSON_IsTrue(state)) {
+            relay_mask |= (uint8_t)(1U << (relay_id - 1U));
+        }
+    }
+
+    *out_relay_mask = relay_mask;
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+static esp_err_t rest_api_get_onboard_relay_mask(uint8_t *out_mask)
+{
+    uint8_t relay_mask = 0;
+
+    ESP_RETURN_ON_FALSE(out_mask != NULL, ESP_ERR_INVALID_ARG, TAG, "Relay mask output is required");
+
+    for (uint8_t relay_id = 1U; relay_id <= RELAY_COUNT; ++relay_id) {
+        bool relay_state = false;
+        esp_err_t err = relay_get(relay_id, &relay_state);
+
+        if (err != ESP_OK) {
+            return err;
+        }
+
+        if (relay_state) {
+            relay_mask |= (uint8_t)(1U << (relay_id - 1U));
+        }
+    }
+
+    *out_mask = relay_mask;
+    return ESP_OK;
+}
+
+static esp_err_t rest_api_sync_status_with_modio_driver(rest_api_status_view_t *status,
+                                                        uint8_t *out_relay_mask)
+{
+    mod_io_status_t modio_status;
+    esp_err_t err;
+
+    ESP_RETURN_ON_FALSE(status != NULL, ESP_ERR_INVALID_ARG, TAG, "Status view is required");
+
+    if (!status->modio_present) {
+        status->modio_sync = REST_API_MODIO_SYNC_ABSENT;
+        if (out_relay_mask != NULL) {
+            *out_relay_mask = 0U;
+        }
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    err = mod_io_get_status(&modio_status);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    status->modio_present = modio_status.present;
+    status->modio_sync = rest_api_modio_sync_from_driver(modio_status.relay_sync);
+    if (!modio_status.present) {
+        if (out_relay_mask != NULL) {
+            *out_relay_mask = 0U;
+        }
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    if (out_relay_mask != NULL) {
+        *out_relay_mask = modio_status.relay_mask;
+    }
+
     return ESP_OK;
 }
 
@@ -943,6 +1203,283 @@ static esp_err_t rest_api_onboard_relay_toggle_handler(httpd_req_t *req)
     return rest_api_send_onboard_relay_response(req, &status, relay_id, actual_state);
 }
 
+static esp_err_t rest_api_relays_handler(httpd_req_t *req)
+{
+    rest_api_status_view_t status;
+    cJSON *root = NULL;
+    cJSON *relays = NULL;
+    uint8_t onboard_mask = 0;
+    uint8_t modio_mask = 0;
+    esp_err_t err;
+
+    err = rest_api_require_authenticated_status(req, &status);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = rest_api_get_onboard_relay_mask(&onboard_mask);
+    if (err != ESP_OK) {
+        return rest_api_send_error(req,
+                                   500,
+                                   "RELAY_UNAVAILABLE",
+                                   "Failed to read relay state",
+                                   true);
+    }
+
+    if (status.modio_present) {
+        err = rest_api_sync_status_with_modio_driver(&status, &modio_mask);
+        if ((err != ESP_OK) && (err != ESP_ERR_NOT_FOUND)) {
+            return rest_api_send_error(req,
+                                       500,
+                                       "MODIO_UNAVAILABLE",
+                                       "Failed to read MOD-IO relay state",
+                                       true);
+        }
+    } else {
+        status.modio_sync = REST_API_MODIO_SYNC_ABSENT;
+    }
+
+    root = cJSON_CreateObject();
+    relays = cJSON_CreateArray();
+    if ((root == NULL) || (relays == NULL)) {
+        cJSON_Delete(root);
+        cJSON_Delete(relays);
+        return rest_api_send_error(req,
+                                   500,
+                                   "INTERNAL_ERROR",
+                                   "Failed to allocate JSON response",
+                                   true);
+    }
+
+    cJSON_AddBoolToObject(root, "modio_present", status.modio_present);
+    cJSON_AddStringToObject(root, "modio_sync", rest_api_modio_sync_to_string(status.modio_sync));
+
+    err = rest_api_append_combined_relay_objects(relays,
+                                                 onboard_mask,
+                                                 status.modio_present,
+                                                 modio_mask,
+                                                 rest_api_modio_sync_to_string(status.modio_sync));
+    if (err != ESP_OK) {
+        cJSON_Delete(root);
+        cJSON_Delete(relays);
+        return rest_api_send_error(req,
+                                   500,
+                                   "INTERNAL_ERROR",
+                                   "Failed to allocate JSON response",
+                                   true);
+    }
+
+    cJSON_AddItemToObject(root, "relays", relays);
+    return rest_api_send_json_response(req, 200, root, &status, true);
+}
+
+static esp_err_t rest_api_modio_relays_handler(httpd_req_t *req)
+{
+    rest_api_status_view_t status;
+    cJSON *root = NULL;
+    cJSON *relays = NULL;
+    uint8_t relay_mask = 0;
+    esp_err_t err;
+
+    err = rest_api_require_authenticated_status(req, &status);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = rest_api_sync_status_with_modio_driver(&status, &relay_mask);
+    if (err == ESP_ERR_NOT_FOUND) {
+        return rest_api_send_error(req, 503, "MODIO_NOT_PRESENT", "MOD-IO is not present", true);
+    }
+    if (err != ESP_OK) {
+        return rest_api_send_error(req,
+                                   500,
+                                   "MODIO_UNAVAILABLE",
+                                   "Failed to read MOD-IO relay state",
+                                   true);
+    }
+
+    root = cJSON_CreateObject();
+    relays = cJSON_CreateArray();
+    if ((root == NULL) || (relays == NULL)) {
+        cJSON_Delete(root);
+        cJSON_Delete(relays);
+        return rest_api_send_error(req,
+                                   500,
+                                   "INTERNAL_ERROR",
+                                   "Failed to allocate JSON response",
+                                   true);
+    }
+
+    err = rest_api_append_modio_relay_objects(relays,
+                                              relay_mask,
+                                              rest_api_modio_sync_to_string(status.modio_sync));
+    if (err != ESP_OK) {
+        cJSON_Delete(root);
+        cJSON_Delete(relays);
+        return rest_api_send_error(req,
+                                   500,
+                                   "INTERNAL_ERROR",
+                                   "Failed to allocate JSON response",
+                                   true);
+    }
+
+    cJSON_AddItemToObject(root, "relays", relays);
+    return rest_api_send_json_response(req, 200, root, &status, true);
+}
+
+static esp_err_t rest_api_modio_relay_set_handler(httpd_req_t *req)
+{
+    rest_api_status_view_t status;
+    uint8_t relay_id = 0;
+    uint8_t relay_mask = 0;
+    bool requested_state = false;
+    bool actual_state = false;
+    esp_err_t err;
+
+    err = rest_api_require_authenticated_status(req, &status);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = rest_api_parse_modio_relay_id(req, &relay_id);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = rest_api_parse_boolean_state_request(req, &requested_state);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = rest_api_sync_status_with_modio_driver(&status, &relay_mask);
+    if (err == ESP_ERR_NOT_FOUND) {
+        return rest_api_send_error(req, 503, "MODIO_NOT_PRESENT", "MOD-IO is not present", true);
+    }
+    if (err != ESP_OK) {
+        return rest_api_send_error(req,
+                                   500,
+                                   "MODIO_UNAVAILABLE",
+                                   "Failed to read MOD-IO relay state",
+                                   true);
+    }
+
+    if (requested_state) {
+        relay_mask |= (uint8_t)(1U << (relay_id - 1U));
+    } else {
+        relay_mask &= (uint8_t)~(1U << (relay_id - 1U));
+    }
+
+    err = mod_io_set_relays(relay_mask);
+    if (err == ESP_ERR_NOT_FOUND) {
+        return rest_api_send_error(req, 503, "MODIO_NOT_PRESENT", "MOD-IO is not present", true);
+    }
+    if (err != ESP_OK) {
+        return rest_api_send_error(req,
+                                   500,
+                                   "MODIO_SET_FAILED",
+                                   "Failed to set MOD-IO relay state",
+                                   true);
+    }
+
+    err = rest_api_sync_status_with_modio_driver(&status, &relay_mask);
+    if (err == ESP_ERR_NOT_FOUND) {
+        return rest_api_send_error(req, 503, "MODIO_NOT_PRESENT", "MOD-IO is not present", true);
+    }
+    if (err != ESP_OK) {
+        return rest_api_send_error(req,
+                                   500,
+                                   "MODIO_UNAVAILABLE",
+                                   "Failed to read MOD-IO relay state",
+                                   true);
+    }
+
+    actual_state = (relay_mask & (uint8_t)(1U << (relay_id - 1U))) != 0U;
+    return rest_api_send_modio_relay_response(req, &status, relay_id, actual_state);
+}
+
+static esp_err_t rest_api_modio_relays_set_handler(httpd_req_t *req)
+{
+    rest_api_status_view_t status;
+    cJSON *root = NULL;
+    cJSON *relays = NULL;
+    uint8_t relay_mask = 0;
+    esp_err_t err;
+
+    err = rest_api_require_authenticated_status(req, &status);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = rest_api_parse_modio_relay_states_request(req, &relay_mask);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = rest_api_sync_status_with_modio_driver(&status, NULL);
+    if (err == ESP_ERR_NOT_FOUND) {
+        return rest_api_send_error(req, 503, "MODIO_NOT_PRESENT", "MOD-IO is not present", true);
+    }
+    if (err != ESP_OK) {
+        return rest_api_send_error(req,
+                                   500,
+                                   "MODIO_UNAVAILABLE",
+                                   "Failed to read MOD-IO relay state",
+                                   true);
+    }
+
+    err = mod_io_set_relays(relay_mask);
+    if (err == ESP_ERR_NOT_FOUND) {
+        return rest_api_send_error(req, 503, "MODIO_NOT_PRESENT", "MOD-IO is not present", true);
+    }
+    if (err != ESP_OK) {
+        return rest_api_send_error(req,
+                                   500,
+                                   "MODIO_SET_FAILED",
+                                   "Failed to set MOD-IO relay state",
+                                   true);
+    }
+
+    err = rest_api_sync_status_with_modio_driver(&status, &relay_mask);
+    if (err == ESP_ERR_NOT_FOUND) {
+        return rest_api_send_error(req, 503, "MODIO_NOT_PRESENT", "MOD-IO is not present", true);
+    }
+    if (err != ESP_OK) {
+        return rest_api_send_error(req,
+                                   500,
+                                   "MODIO_UNAVAILABLE",
+                                   "Failed to read MOD-IO relay state",
+                                   true);
+    }
+
+    root = cJSON_CreateObject();
+    relays = cJSON_CreateArray();
+    if ((root == NULL) || (relays == NULL)) {
+        cJSON_Delete(root);
+        cJSON_Delete(relays);
+        return rest_api_send_error(req,
+                                   500,
+                                   "INTERNAL_ERROR",
+                                   "Failed to allocate JSON response",
+                                   true);
+    }
+
+    err = rest_api_append_modio_relay_objects(relays,
+                                              relay_mask,
+                                              rest_api_modio_sync_to_string(status.modio_sync));
+    if (err != ESP_OK) {
+        cJSON_Delete(root);
+        cJSON_Delete(relays);
+        return rest_api_send_error(req,
+                                   500,
+                                   "INTERNAL_ERROR",
+                                   "Failed to allocate JSON response",
+                                   true);
+    }
+
+    cJSON_AddItemToObject(root, "relays", relays);
+    return rest_api_send_json_response(req, 200, root, &status, true);
+}
+
 static esp_err_t rest_api_status_handler(httpd_req_t *req)
 {
     rest_api_status_view_t status;
@@ -1083,6 +1620,12 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
         .handler = rest_api_status_handler,
         .user_ctx = NULL,
     };
+    httpd_uri_t relays_uri = {
+        .uri = REST_API_RELAYS_URI,
+        .method = HTTP_GET,
+        .handler = rest_api_relays_handler,
+        .user_ctx = NULL,
+    };
     httpd_uri_t onboard_relays_uri = {
         .uri = REST_API_ONBOARD_RELAYS_URI,
         .method = HTTP_GET,
@@ -1099,6 +1642,24 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
         .uri = "/api/v1/relays/onboard/*/toggle",
         .method = HTTP_POST,
         .handler = rest_api_onboard_relay_toggle_handler,
+        .user_ctx = NULL,
+    };
+    httpd_uri_t modio_relays_uri = {
+        .uri = REST_API_MODIO_RELAYS_URI,
+        .method = HTTP_GET,
+        .handler = rest_api_modio_relays_handler,
+        .user_ctx = NULL,
+    };
+    httpd_uri_t modio_relay_set_uri = {
+        .uri = "/api/v1/relays/modio/*",
+        .method = HTTP_PUT,
+        .handler = rest_api_modio_relay_set_handler,
+        .user_ctx = NULL,
+    };
+    httpd_uri_t modio_relays_set_uri = {
+        .uri = REST_API_MODIO_RELAYS_URI,
+        .method = HTTP_PUT,
+        .handler = rest_api_modio_relays_set_handler,
         .user_ctx = NULL,
     };
     httpd_uri_t config_uri = {
@@ -1148,6 +1709,14 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
         return err;
     }
 
+    err = httpd_register_uri_handler(s_server, &relays_uri);
+    if (err != ESP_OK) {
+        httpd_stop(s_server);
+        s_server = NULL;
+        memset(&s_config, 0, sizeof(s_config));
+        return err;
+    }
+
     err = httpd_register_uri_handler(s_server, &onboard_relays_uri);
     if (err != ESP_OK) {
         httpd_stop(s_server);
@@ -1165,6 +1734,30 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
     }
 
     err = httpd_register_uri_handler(s_server, &onboard_relay_toggle_uri);
+    if (err != ESP_OK) {
+        httpd_stop(s_server);
+        s_server = NULL;
+        memset(&s_config, 0, sizeof(s_config));
+        return err;
+    }
+
+    err = httpd_register_uri_handler(s_server, &modio_relays_uri);
+    if (err != ESP_OK) {
+        httpd_stop(s_server);
+        s_server = NULL;
+        memset(&s_config, 0, sizeof(s_config));
+        return err;
+    }
+
+    err = httpd_register_uri_handler(s_server, &modio_relay_set_uri);
+    if (err != ESP_OK) {
+        httpd_stop(s_server);
+        s_server = NULL;
+        memset(&s_config, 0, sizeof(s_config));
+        return err;
+    }
+
+    err = httpd_register_uri_handler(s_server, &modio_relays_set_uri);
     if (err != ESP_OK) {
         httpd_stop(s_server);
         s_server = NULL;

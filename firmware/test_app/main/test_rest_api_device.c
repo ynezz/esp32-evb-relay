@@ -11,6 +11,7 @@
 #include "freertos/task.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
+#include "mod_io.h"
 #include "relay.h"
 #include "rest_api.h"
 #include "unity.h"
@@ -73,6 +74,21 @@ static esp_err_t status_provider(rest_api_status_view_t *status, void *ctx)
     strncpy(status->network.gateway, "127.0.0.1", sizeof(status->network.gateway) - 1U);
     status->modio_present = true;
     status->modio_sync = REST_API_MODIO_SYNC_SYNCHRONIZED;
+    return ESP_OK;
+}
+
+static esp_err_t modio_absent_status_provider(rest_api_status_view_t *status, void *ctx)
+{
+    (void)ctx;
+
+    TEST_ASSERT_NOT_NULL(status);
+    status->network.connected = true;
+    strncpy(status->network.hostname, "loopback-relay", sizeof(status->network.hostname) - 1U);
+    strncpy(status->network.ip, "127.0.0.1", sizeof(status->network.ip) - 1U);
+    strncpy(status->network.netmask, "255.0.0.0", sizeof(status->network.netmask) - 1U);
+    strncpy(status->network.gateway, "127.0.0.1", sizeof(status->network.gateway) - 1U);
+    status->modio_present = false;
+    status->modio_sync = REST_API_MODIO_SYNC_ABSENT;
     return ESP_OK;
 }
 
@@ -342,6 +358,113 @@ TEST_CASE("rest_api device returns relay errors with device headers after auth",
     TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"RELAY_NOT_FOUND\""));
     TEST_ASSERT_NULL(strstr(response, "HTTP/1.1 500 Internal Server Error"));
     TEST_ASSERT_NULL(strstr(response, "\"code\":\"RELAY_SET_FAILED\""));
+}
+
+TEST_CASE("rest_api device exposes combined and MOD-IO relay endpoints",
+          "[qa][rest_api][device]")
+{
+    static const uint16_t test_port = 18090U;
+    static const rest_api_config_t config = {
+        .port = test_port,
+        .auth_handler = allow_auth_handler,
+        .status_provider = status_provider,
+    };
+    char response[2048];
+    uint8_t relay_mask = 0;
+    mod_io_relay_sync_t relay_sync = MOD_IO_RELAY_SYNC_ABSENT;
+
+    ensure_tcpip_ready();
+    TEST_ASSERT_EQUAL(ESP_OK, board_init());
+    TEST_ASSERT_EQUAL(ESP_OK, relay_init());
+    TEST_ASSERT_EQUAL(ESP_OK, mod_io_init(board_i2c_bus_handle()));
+    TEST_ASSERT_EQUAL(ESP_OK, mod_io_probe());
+    TEST_ASSERT_EQUAL(ESP_OK, mod_io_set_relays(0x00U));
+    TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
+
+    perform_http_request(test_port, "GET", "/api/v1/relays", NULL, NULL, response, sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"modio_present\":true"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"modio_sync\":\"synchronized\""));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"group\":\"onboard\",\"id\":1,\"state\":false,\"sync\":null"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"group\":\"onboard\",\"id\":2,\"state\":false,\"sync\":null"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"group\":\"modio\",\"id\":1,\"state\":false,\"sync\":\"synchronized\""));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"group\":\"modio\",\"id\":4,\"state\":false,\"sync\":\"synchronized\""));
+
+    perform_http_request(test_port,
+                         "PUT",
+                         "/api/v1/relays/modio/1",
+                         NULL,
+                         "{\"state\":true}",
+                         response,
+                         sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+    TEST_ASSERT_NOT_NULL(strstr(response,
+                                "\"relay\":{\"group\":\"modio\",\"id\":1,\"state\":true,\"sync\":\"synchronized\"}"));
+    TEST_ASSERT_EQUAL(ESP_OK, mod_io_get_relays(&relay_mask, &relay_sync));
+    TEST_ASSERT_EQUAL_HEX8(0x01U, relay_mask);
+    TEST_ASSERT_EQUAL_INT(MOD_IO_RELAY_SYNC_SYNCHRONIZED, relay_sync);
+
+    perform_http_request(test_port,
+                         "PUT",
+                         "/api/v1/relays/modio",
+                         NULL,
+                         "{\"states\":[true,false,true,false]}",
+                         response,
+                         sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"group\":\"modio\",\"id\":1,\"state\":true,\"sync\":\"synchronized\""));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"group\":\"modio\",\"id\":2,\"state\":false,\"sync\":\"synchronized\""));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"group\":\"modio\",\"id\":3,\"state\":true,\"sync\":\"synchronized\""));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"group\":\"modio\",\"id\":4,\"state\":false,\"sync\":\"synchronized\""));
+    TEST_ASSERT_EQUAL(ESP_OK, mod_io_get_relays(&relay_mask, &relay_sync));
+    TEST_ASSERT_EQUAL_HEX8(0x05U, relay_mask);
+    TEST_ASSERT_EQUAL_INT(MOD_IO_RELAY_SYNC_SYNCHRONIZED, relay_sync);
+
+    perform_http_request(test_port, "GET", "/api/v1/relays/modio", NULL, NULL, response, sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"group\":\"modio\",\"id\":1,\"state\":true,\"sync\":\"synchronized\""));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"group\":\"modio\",\"id\":2,\"state\":false,\"sync\":\"synchronized\""));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"group\":\"modio\",\"id\":3,\"state\":true,\"sync\":\"synchronized\""));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"group\":\"modio\",\"id\":4,\"state\":false,\"sync\":\"synchronized\""));
+}
+
+TEST_CASE("rest_api device reports absent MOD-IO on relay routes", "[qa][rest_api][device]")
+{
+    static const uint16_t test_port = 18091U;
+    static const rest_api_config_t config = {
+        .port = test_port,
+        .auth_handler = allow_auth_handler,
+        .status_provider = modio_absent_status_provider,
+    };
+    char response[1536];
+
+    ensure_tcpip_ready();
+    TEST_ASSERT_EQUAL(ESP_OK, board_init());
+    TEST_ASSERT_EQUAL(ESP_OK, relay_init());
+    TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
+
+    perform_http_request(test_port, "GET", "/api/v1/relays", NULL, NULL, response, sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"modio_present\":false"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"modio_sync\":\"absent\""));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"group\":\"onboard\",\"id\":1,\"state\":false,\"sync\":null"));
+    TEST_ASSERT_NULL(strstr(response, "\"group\":\"modio\""));
+
+    perform_http_request(test_port, "GET", "/api/v1/relays/modio", NULL, NULL, response, sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 503 Service Unavailable"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"MODIO_NOT_PRESENT\""));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Present: false"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Sync: absent"));
+
+    perform_http_request(test_port,
+                         "PUT",
+                         "/api/v1/relays/modio/1",
+                         NULL,
+                         "{\"state\":true}",
+                         response,
+                         sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 503 Service Unavailable"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"MODIO_NOT_PRESENT\""));
 }
 
 TEST_CASE("rest_api device exposes redacted config snapshots", "[qa][rest_api][device]")
