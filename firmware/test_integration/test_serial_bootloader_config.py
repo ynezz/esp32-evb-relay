@@ -121,6 +121,30 @@ def test_flash_port_defaults_prefer_explicit_override(monkeypatch: pytest.Monkey
     assert module._default_flash_port() == "/dev/ttyS4"
 
 
+def test_dut_endpoint_resolution_uses_resolved_host_ip(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_integration_conftest()
+    monkeypatch.setattr(module, "_wait_for_host", lambda host, timeout_seconds: "192.0.2.10")
+
+    endpoint = module._resolve_dut_endpoint("esp32-evb-relay.local", 8080, 15.0)
+
+    assert endpoint.host == "esp32-evb-relay.local"
+    assert endpoint.ip == "192.0.2.10"
+    assert endpoint.port == 8080
+    assert endpoint.base_url == "http://192.0.2.10:8080"
+
+
+def test_dut_endpoint_resolution_failures_are_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_integration_conftest()
+
+    def _raise_runtime_error(host: str, timeout_seconds: float) -> str:
+        raise RuntimeError("failed to resolve 'esp32-evb-relay.local': [Errno -2] Name or service not known")
+
+    monkeypatch.setattr(module, "_wait_for_host", _raise_runtime_error)
+
+    with pytest.raises(pytest.fail.Exception, match="could not resolve DUT host"):
+        module._resolve_dut_endpoint("esp32-evb-relay.local", 80, 15.0)
+
+
 def test_justfile_supports_split_flash_and_monitor_ports() -> None:
     justfile_text = (_repo_root() / "Justfile").read_text(encoding="utf-8")
 

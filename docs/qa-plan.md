@@ -75,14 +75,18 @@ Flash test firmware to the device, run Unity tests via serial.
 
 ### Tier 3 — Integration / System Tests
 
-Full firmware + pytest automation via serial and network.
+Full firmware + pytest automation that flashes and provisions over the
+serial bootloader path, then validates the live system over HTTP.
 
 - End-to-end scenarios: REST API calls → relay state → MOD-IO sync
-- `dut.expect()` / `dut.write()` for serial interaction
+- Serial access is used for flash/provision setup; runtime assertions are
+  HTTP-based against the resolved DUT host
 - Establishes authentication deterministically for test runs; do not make
   CI depend on scraping a one-time random token from boot logs or on a
   test-only auth bypass in production firmware
 - HTTP client drives REST endpoints from the host
+- If the DUT host never resolves after flash/provision, fail the lane
+  instead of skipping it
 - Runs via `just test-integration`
 
 ---

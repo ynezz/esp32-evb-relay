@@ -148,6 +148,15 @@ def _wait_for_host(host: str, timeout_seconds: float) -> str:
     raise RuntimeError(f"failed to resolve {host!r}: {last_error}")
 
 
+def _resolve_dut_endpoint(host: str, port: int, timeout_seconds: float) -> DutEndpoint:
+    try:
+        ip = _wait_for_host(host, timeout_seconds)
+    except RuntimeError as exc:
+        pytest.fail(f"could not resolve DUT host {host!r}: {exc}")
+
+    return DutEndpoint(host=host, ip=ip, port=port, base_url=f"http://{ip}:{port}")
+
+
 def _restore_safe_relays(http_client: IntegrationHttpClient) -> None:
     for path in SAFE_OFF_PATHS:
         try:
@@ -234,13 +243,7 @@ def dut_endpoint(auth_token: str) -> DutEndpoint:
     host = os.environ.get("EVB_DUT_HOST") or os.environ.get("EVB_DUT_HOSTNAME", DEFAULT_DUT_HOST)
     port = int(os.environ.get("EVB_DUT_HTTP_PORT", DEFAULT_HTTP_PORT))
     timeout = float(os.environ.get("EVB_DISCOVERY_TIMEOUT_SECONDS", DEFAULT_DISCOVERY_TIMEOUT))
-
-    try:
-        ip = _wait_for_host(host, timeout)
-    except RuntimeError as exc:
-        pytest.skip(f"could not resolve DUT host {host!r}: {exc}")
-
-    return DutEndpoint(host=host, ip=ip, port=port, base_url=f"http://{ip}:{port}")
+    return _resolve_dut_endpoint(host, port, timeout)
 
 
 @pytest.fixture(scope="session")
