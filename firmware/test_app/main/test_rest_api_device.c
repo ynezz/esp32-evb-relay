@@ -1,14 +1,17 @@
+#include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
 #include <sys/time.h>
 
 #include "auth.h"
+#include "board.h"
 #include "device_config.h"
 #include "esp_netif.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
+#include "relay.h"
 #include "rest_api.h"
 #include "unity.h"
 
@@ -97,12 +100,15 @@ static void restore_auth_token_fixture(const auth_token_fixture_t *fixture)
     }
 }
 
-static void perform_status_request(uint16_t port,
-                                   const char *authorization_header,
-                                   char *response,
-                                   size_t response_size)
+static void perform_http_request(uint16_t port,
+                                 const char *method,
+                                 const char *path,
+                                 const char *authorization_header,
+                                 const char *body,
+                                 char *response,
+                                 size_t response_size)
 {
-    char request[512];
+    char request[768];
     struct sockaddr_in dest_addr = {
         .sin_family = AF_INET,
         .sin_port = htons(port),
@@ -115,28 +121,59 @@ static void perform_status_request(uint16_t port,
     int sock;
     ssize_t sent;
     ssize_t received;
+    int written;
+    size_t request_len = 0;
 
+    TEST_ASSERT_NOT_NULL(method);
+    TEST_ASSERT_NOT_NULL(path);
     TEST_ASSERT_NOT_NULL(response);
     TEST_ASSERT_GREATER_THAN_UINT32(0U, response_size);
     memset(response, 0, response_size);
-    if (authorization_header == NULL) {
-        TEST_ASSERT_GREATER_THAN_INT32(0,
-                                       snprintf(request,
-                                                sizeof(request),
-                                                "GET /api/v1/status HTTP/1.1\r\n"
-                                                "Host: localhost\r\n"
-                                                "Connection: close\r\n"
-                                                "\r\n"));
-    } else {
-        TEST_ASSERT_GREATER_THAN_INT32(0,
-                                       snprintf(request,
-                                                sizeof(request),
-                                                "GET /api/v1/status HTTP/1.1\r\n"
-                                                "Host: localhost\r\n"
-                                                "%s\r\n"
-                                                "Connection: close\r\n"
-                                                "\r\n",
-                                                authorization_header));
+
+    written = snprintf(request + request_len,
+                       sizeof(request) - request_len,
+                       "%s %s HTTP/1.1\r\n"
+                       "Host: localhost\r\n",
+                       method,
+                       path);
+    TEST_ASSERT_GREATER_THAN_INT32(0, written);
+    request_len += (size_t)written;
+    TEST_ASSERT_LESS_THAN_UINT32(sizeof(request), request_len);
+
+    if (authorization_header != NULL) {
+        written = snprintf(request + request_len,
+                           sizeof(request) - request_len,
+                           "%s\r\n",
+                           authorization_header);
+        TEST_ASSERT_GREATER_THAN_INT32(0, written);
+        request_len += (size_t)written;
+        TEST_ASSERT_LESS_THAN_UINT32(sizeof(request), request_len);
+    }
+
+    if (body != NULL) {
+        written = snprintf(request + request_len,
+                           sizeof(request) - request_len,
+                           "Content-Type: application/json\r\n"
+                           "Content-Length: %u\r\n",
+                           (unsigned)strlen(body));
+        TEST_ASSERT_GREATER_THAN_INT32(0, written);
+        request_len += (size_t)written;
+        TEST_ASSERT_LESS_THAN_UINT32(sizeof(request), request_len);
+    }
+
+    written = snprintf(request + request_len,
+                       sizeof(request) - request_len,
+                       "Connection: close\r\n"
+                       "\r\n");
+    TEST_ASSERT_GREATER_THAN_INT32(0, written);
+    request_len += (size_t)written;
+    TEST_ASSERT_LESS_THAN_UINT32(sizeof(request), request_len);
+
+    if (body != NULL) {
+        written = snprintf(request + request_len, sizeof(request) - request_len, "%s", body);
+        TEST_ASSERT_GREATER_THAN_INT32(0, written);
+        request_len += (size_t)written;
+        TEST_ASSERT_LESS_THAN_UINT32(sizeof(request), request_len + 1U);
     }
 
     sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
@@ -148,13 +185,27 @@ static void perform_status_request(uint16_t port,
     TEST_ASSERT_GREATER_OR_EQUAL_INT32(0,
                                        connect(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr)));
 
-    sent = send(sock, request, strlen(request), 0);
-    TEST_ASSERT_EQUAL_INT(strlen(request), sent);
+    sent = send(sock, request, request_len, 0);
+    TEST_ASSERT_EQUAL_INT((int)request_len, sent);
 
     received = recv(sock, response, response_size - 1U, 0);
     TEST_ASSERT_GREATER_THAN_INT32(0, received);
     response[received] = '\0';
     close(sock);
+}
+
+static void perform_status_request(uint16_t port,
+                                   const char *authorization_header,
+                                   char *response,
+                                   size_t response_size)
+{
+    perform_http_request(port,
+                         "GET",
+                         "/api/v1/status",
+                         authorization_header,
+                         NULL,
+                         response,
+                         response_size);
 }
 
 TEST_CASE("rest_api device starts the HTTP server on the configured port",
@@ -179,6 +230,85 @@ TEST_CASE("rest_api device starts the HTTP server on the configured port",
     TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Sync: synchronized"));
     TEST_ASSERT_NOT_NULL(strstr(response, "\"hostname\":\"loopback-relay\""));
     TEST_ASSERT_NOT_NULL(strstr(response, "\"sync\":\"synchronized\""));
+}
+
+TEST_CASE("rest_api device exposes onboard relay endpoints", "[qa][rest_api][device]")
+{
+    static const uint16_t test_port = 18086U;
+    static const rest_api_config_t config = {
+        .port = test_port,
+        .auth_handler = allow_auth_handler,
+        .status_provider = status_provider,
+    };
+    char response[768];
+    bool relay_state = false;
+
+    ensure_tcpip_ready();
+    TEST_ASSERT_EQUAL(ESP_OK, board_init());
+    TEST_ASSERT_EQUAL(ESP_OK, relay_init());
+    TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
+
+    perform_http_request(test_port, "GET", "/api/v1/relays/onboard", NULL, NULL, response, sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-FW-Version: "));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Present: true"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Sync: synchronized"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"group\":\"onboard\",\"id\":1,\"state\":false"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"group\":\"onboard\",\"id\":2,\"state\":false"));
+
+    perform_http_request(test_port,
+                         "PUT",
+                         "/api/v1/relays/onboard/1",
+                         NULL,
+                         "{\"state\":true}",
+                         response,
+                         sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"relay\":{\"group\":\"onboard\",\"id\":1,\"state\":true}"));
+    TEST_ASSERT_EQUAL(ESP_OK, relay_get(1U, &relay_state));
+    TEST_ASSERT_TRUE(relay_state);
+
+    perform_http_request(test_port,
+                         "POST",
+                         "/api/v1/relays/onboard/1/toggle",
+                         NULL,
+                         NULL,
+                         response,
+                         sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"relay\":{\"group\":\"onboard\",\"id\":1,\"state\":false}"));
+    TEST_ASSERT_EQUAL(ESP_OK, relay_get(1U, &relay_state));
+    TEST_ASSERT_FALSE(relay_state);
+}
+
+TEST_CASE("rest_api device returns relay errors with device headers after auth",
+          "[qa][rest_api][device]")
+{
+    static const uint16_t test_port = 18087U;
+    static const rest_api_config_t config = {
+        .port = test_port,
+        .auth_handler = allow_auth_handler,
+        .status_provider = status_provider,
+    };
+    char response[768];
+
+    ensure_tcpip_ready();
+    TEST_ASSERT_EQUAL(ESP_OK, board_init());
+    TEST_ASSERT_EQUAL(ESP_OK, relay_init());
+    TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
+
+    perform_http_request(test_port,
+                         "PUT",
+                         "/api/v1/relays/onboard/9",
+                         NULL,
+                         "{\"state\":true}",
+                         response,
+                         sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 404 Not Found"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-FW-Version: "));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Present: true"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Sync: synchronized"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"RELAY_NOT_FOUND\""));
 }
 
 TEST_CASE("rest_api device parses relay IDs from wildcard URIs",

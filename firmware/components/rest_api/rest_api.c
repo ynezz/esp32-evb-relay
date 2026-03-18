@@ -13,6 +13,7 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "relay.h"
 #include "rest_api_events.h"
 
 ESP_EVENT_DEFINE_BASE(EVB_RELAY_EVENT);
@@ -21,6 +22,14 @@ static const char *TAG = "rest_api";
 
 static httpd_handle_t s_server;
 static rest_api_config_t s_config;
+
+static rest_api_auth_result_t rest_api_authorize_request(httpd_req_t *req);
+
+#define REST_API_MAX_REQUEST_BODY_LEN 64U
+
+static const char *REST_API_ONBOARD_RELAYS_URI = "/api/v1/relays/onboard";
+static const char *REST_API_ONBOARD_RELAY_ID_PREFIX = "/api/v1/relays/onboard/";
+static const char *REST_API_ONBOARD_RELAY_TOGGLE_SUFFIX = "/toggle";
 
 static const char *rest_api_http_status_text(int http_status)
 {
@@ -83,6 +92,32 @@ static esp_err_t rest_api_build_status_view(rest_api_status_view_t *status)
     return ESP_OK;
 }
 
+static esp_err_t rest_api_require_authenticated_status(httpd_req_t *req,
+                                                       rest_api_status_view_t *out_status)
+{
+    rest_api_auth_result_t auth_result;
+    esp_err_t err;
+
+    ESP_RETURN_ON_FALSE(req != NULL, ESP_ERR_INVALID_ARG, TAG, "HTTP request is required");
+    ESP_RETURN_ON_FALSE(out_status != NULL, ESP_ERR_INVALID_ARG, TAG, "Status output buffer is required");
+
+    auth_result = rest_api_authorize_request(req);
+    if (auth_result == REST_API_AUTH_RESULT_UNAUTHORIZED) {
+        return rest_api_send_error(req, 401, "AUTH_REQUIRED", "Authentication required", false);
+    }
+
+    if (auth_result == REST_API_AUTH_RESULT_FORBIDDEN) {
+        return rest_api_send_error(req, 403, "AUTH_FORBIDDEN", "Access denied", false);
+    }
+
+    err = rest_api_build_status_view(out_status);
+    if (err != ESP_OK) {
+        return rest_api_send_error(req, 500, "STATUS_UNAVAILABLE", "Failed to gather status", true);
+    }
+
+    return ESP_OK;
+}
+
 static void rest_api_try_attach_device_context_headers(httpd_req_t *req,
                                                        const rest_api_status_view_t *status,
                                                        bool authenticated)
@@ -102,6 +137,39 @@ static void rest_api_try_attach_device_context_headers(httpd_req_t *req,
     httpd_resp_set_hdr(req, "X-ModIO-Sync", rest_api_modio_sync_to_string(status->modio_sync));
 }
 
+static esp_err_t rest_api_send_json_response(httpd_req_t *req,
+                                             int http_status,
+                                             cJSON *root,
+                                             const rest_api_status_view_t *status,
+                                             bool authenticated)
+{
+    char *response = NULL;
+    esp_err_t err;
+
+    ESP_RETURN_ON_FALSE(req != NULL, ESP_ERR_INVALID_ARG, TAG, "HTTP request is required");
+    ESP_RETURN_ON_FALSE(root != NULL, ESP_ERR_INVALID_ARG, TAG, "JSON root is required");
+
+    response = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (response == NULL) {
+        return rest_api_send_error(req,
+                                   500,
+                                   "INTERNAL_ERROR",
+                                   "Failed to serialize JSON response",
+                                   authenticated);
+    }
+
+    httpd_resp_set_status(req, rest_api_http_status_text(http_status));
+    httpd_resp_set_type(req, "application/json");
+    if (authenticated && (status != NULL)) {
+        rest_api_try_attach_device_context_headers(req, status, true);
+    }
+
+    err = httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
+    cJSON_free(response);
+    return err;
+}
+
 static rest_api_auth_result_t rest_api_authorize_request(httpd_req_t *req)
 {
     (void)req;
@@ -113,28 +181,334 @@ static rest_api_auth_result_t rest_api_authorize_request(httpd_req_t *req)
     return s_config.auth_handler(req, s_config.auth_ctx);
 }
 
+static bool rest_api_parse_id_from_uri_with_suffix(const char *uri,
+                                                   const char *prefix,
+                                                   const char *suffix,
+                                                   uint32_t *out_id)
+{
+    char id_buffer[16];
+    const char *id_start;
+    size_t prefix_len;
+    size_t suffix_len;
+    size_t uri_len;
+    size_t id_len;
+
+    if ((uri == NULL) || (prefix == NULL) || (suffix == NULL) || (out_id == NULL)) {
+        return false;
+    }
+
+    prefix_len = strlen(prefix);
+    suffix_len = strlen(suffix);
+    uri_len = strlen(uri);
+
+    if ((uri_len <= (prefix_len + suffix_len)) || (strncmp(uri, prefix, prefix_len) != 0)) {
+        return false;
+    }
+
+    if (strcmp(uri + uri_len - suffix_len, suffix) != 0) {
+        return false;
+    }
+
+    id_start = uri + prefix_len;
+    id_len = uri_len - prefix_len - suffix_len;
+    if ((id_len == 0U) || (id_len >= sizeof(id_buffer))) {
+        return false;
+    }
+
+    memcpy(id_buffer, id_start, id_len);
+    id_buffer[id_len] = '\0';
+    return rest_api_parse_id_from_uri(id_buffer, "", out_id);
+}
+
+static esp_err_t rest_api_parse_onboard_relay_id(httpd_req_t *req,
+                                                 const char *prefix,
+                                                 const char *suffix,
+                                                 uint8_t *out_relay_id)
+{
+    uint32_t parsed_id = 0;
+    bool parsed;
+
+    ESP_RETURN_ON_FALSE(req != NULL, ESP_ERR_INVALID_ARG, TAG, "HTTP request is required");
+    ESP_RETURN_ON_FALSE(prefix != NULL, ESP_ERR_INVALID_ARG, TAG, "Relay URI prefix is required");
+    ESP_RETURN_ON_FALSE(out_relay_id != NULL, ESP_ERR_INVALID_ARG, TAG, "Relay id output is required");
+
+    parsed = (suffix == NULL) ? rest_api_parse_id_from_uri(req->uri, prefix, &parsed_id)
+             : rest_api_parse_id_from_uri_with_suffix(req->uri, prefix, suffix, &parsed_id);
+    if (!parsed || (parsed_id == 0U) || (parsed_id > RELAY_COUNT)) {
+        return rest_api_send_error(req, 404, "RELAY_NOT_FOUND", "Relay not found", true);
+    }
+
+    *out_relay_id = (uint8_t)parsed_id;
+    return ESP_OK;
+}
+
+static cJSON *rest_api_create_onboard_relay_object(uint8_t relay_id, bool state)
+{
+    cJSON *relay = cJSON_CreateObject();
+
+    if (relay == NULL) {
+        return NULL;
+    }
+
+    cJSON_AddStringToObject(relay, "group", "onboard");
+    cJSON_AddNumberToObject(relay, "id", relay_id);
+    cJSON_AddBoolToObject(relay, "state", state);
+    return relay;
+}
+
+static esp_err_t rest_api_send_onboard_relay_response(httpd_req_t *req,
+                                                      const rest_api_status_view_t *status,
+                                                      uint8_t relay_id,
+                                                      bool relay_state)
+{
+    cJSON *root = NULL;
+    cJSON *relay = NULL;
+
+    root = cJSON_CreateObject();
+    relay = rest_api_create_onboard_relay_object(relay_id, relay_state);
+    if ((root == NULL) || (relay == NULL)) {
+        cJSON_Delete(root);
+        cJSON_Delete(relay);
+        return rest_api_send_error(req,
+                                   500,
+                                   "INTERNAL_ERROR",
+                                   "Failed to allocate JSON response",
+                                   true);
+    }
+
+    cJSON_AddItemToObject(root, "relay", relay);
+    return rest_api_send_json_response(req, 200, root, status, true);
+}
+
+static esp_err_t rest_api_read_request_body(httpd_req_t *req,
+                                            char *buffer,
+                                            size_t buffer_size,
+                                            size_t *out_len)
+{
+    size_t remaining;
+    size_t offset = 0;
+
+    ESP_RETURN_ON_FALSE(req != NULL, ESP_ERR_INVALID_ARG, TAG, "HTTP request is required");
+    ESP_RETURN_ON_FALSE(buffer != NULL, ESP_ERR_INVALID_ARG, TAG, "Request body buffer is required");
+    ESP_RETURN_ON_FALSE(buffer_size > 1U, ESP_ERR_INVALID_ARG, TAG, "Request body buffer is too small");
+
+    if ((req->content_len <= 0) || ((size_t)req->content_len >= buffer_size)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    remaining = (size_t)req->content_len;
+    while (remaining > 0U) {
+        int received;
+        size_t chunk_len = remaining;
+
+        if (chunk_len > (buffer_size - offset - 1U)) {
+            chunk_len = buffer_size - offset - 1U;
+        }
+
+        received = httpd_req_recv(req, buffer + offset, chunk_len);
+        if (received == HTTPD_SOCK_ERR_TIMEOUT) {
+            continue;
+        }
+        if (received <= 0) {
+            return ESP_FAIL;
+        }
+
+        remaining -= (size_t)received;
+        offset += (size_t)received;
+    }
+
+    buffer[offset] = '\0';
+    if (out_len != NULL) {
+        *out_len = offset;
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t rest_api_parse_boolean_state_request(httpd_req_t *req, bool *out_state)
+{
+    char request_body[REST_API_MAX_REQUEST_BODY_LEN];
+    size_t request_len = 0;
+    cJSON *root = NULL;
+    cJSON *state = NULL;
+    esp_err_t err;
+
+    ESP_RETURN_ON_FALSE(req != NULL, ESP_ERR_INVALID_ARG, TAG, "HTTP request is required");
+    ESP_RETURN_ON_FALSE(out_state != NULL, ESP_ERR_INVALID_ARG, TAG, "State output is required");
+
+    err = rest_api_read_request_body(req, request_body, sizeof(request_body), &request_len);
+    if (err == ESP_ERR_INVALID_SIZE) {
+        return rest_api_send_error(req,
+                                   400,
+                                   "INVALID_BODY",
+                                   "Request body is missing or too large",
+                                   true);
+    }
+    if (err != ESP_OK) {
+        return rest_api_send_error(req,
+                                   400,
+                                   "INVALID_BODY",
+                                   "Failed to read request body",
+                                   true);
+    }
+
+    root = cJSON_ParseWithLength(request_body, request_len);
+    if (root == NULL) {
+        return rest_api_send_error(req, 400, "INVALID_JSON", "Request body must be valid JSON", true);
+    }
+
+    state = cJSON_GetObjectItemCaseSensitive(root, "state");
+    if (!cJSON_IsBool(state)) {
+        cJSON_Delete(root);
+        return rest_api_send_error(req,
+                                   400,
+                                   "INVALID_RELAY_STATE",
+                                   "Request body must contain boolean state",
+                                   true);
+    }
+
+    *out_state = cJSON_IsTrue(state);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+static esp_err_t rest_api_onboard_relays_handler(httpd_req_t *req)
+{
+    rest_api_status_view_t status;
+    cJSON *root = NULL;
+    cJSON *relays = NULL;
+    esp_err_t err;
+
+    err = rest_api_require_authenticated_status(req, &status);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    root = cJSON_CreateObject();
+    relays = cJSON_CreateArray();
+    if ((root == NULL) || (relays == NULL)) {
+        cJSON_Delete(root);
+        cJSON_Delete(relays);
+        return rest_api_send_error(req,
+                                   500,
+                                   "INTERNAL_ERROR",
+                                   "Failed to allocate JSON response",
+                                   true);
+    }
+
+    for (uint8_t relay_id = 1U; relay_id <= RELAY_COUNT; ++relay_id) {
+        cJSON *relay = NULL;
+        bool relay_state = false;
+
+        err = relay_get(relay_id, &relay_state);
+        if (err != ESP_OK) {
+            cJSON_Delete(root);
+            cJSON_Delete(relays);
+            return rest_api_send_error(req,
+                                       500,
+                                       "RELAY_UNAVAILABLE",
+                                       "Failed to read relay state",
+                                       true);
+        }
+
+        relay = rest_api_create_onboard_relay_object(relay_id, relay_state);
+        if (relay == NULL) {
+            cJSON_Delete(root);
+            cJSON_Delete(relays);
+            return rest_api_send_error(req,
+                                       500,
+                                       "INTERNAL_ERROR",
+                                       "Failed to allocate JSON response",
+                                       true);
+        }
+
+        cJSON_AddItemToArray(relays, relay);
+    }
+
+    cJSON_AddItemToObject(root, "relays", relays);
+    return rest_api_send_json_response(req, 200, root, &status, true);
+}
+
+static esp_err_t rest_api_onboard_relay_set_handler(httpd_req_t *req)
+{
+    rest_api_status_view_t status;
+    uint8_t relay_id = 0;
+    bool requested_state = false;
+    bool actual_state = false;
+    esp_err_t err;
+
+    err = rest_api_require_authenticated_status(req, &status);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = rest_api_parse_onboard_relay_id(req, REST_API_ONBOARD_RELAY_ID_PREFIX, NULL, &relay_id);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = rest_api_parse_boolean_state_request(req, &requested_state);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = relay_set(relay_id, requested_state);
+    if (err != ESP_OK) {
+        return rest_api_send_error(req, 500, "RELAY_SET_FAILED", "Failed to set relay state", true);
+    }
+
+    err = relay_get(relay_id, &actual_state);
+    if (err != ESP_OK) {
+        return rest_api_send_error(req, 500, "RELAY_UNAVAILABLE", "Failed to read relay state", true);
+    }
+
+    return rest_api_send_onboard_relay_response(req, &status, relay_id, actual_state);
+}
+
+static esp_err_t rest_api_onboard_relay_toggle_handler(httpd_req_t *req)
+{
+    rest_api_status_view_t status;
+    uint8_t relay_id = 0;
+    bool actual_state = false;
+    esp_err_t err;
+
+    err = rest_api_require_authenticated_status(req, &status);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = rest_api_parse_onboard_relay_id(req,
+                                          REST_API_ONBOARD_RELAY_ID_PREFIX,
+                                          REST_API_ONBOARD_RELAY_TOGGLE_SUFFIX,
+                                          &relay_id);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = relay_toggle(relay_id);
+    if (err != ESP_OK) {
+        return rest_api_send_error(req, 500, "RELAY_TOGGLE_FAILED", "Failed to toggle relay", true);
+    }
+
+    err = relay_get(relay_id, &actual_state);
+    if (err != ESP_OK) {
+        return rest_api_send_error(req, 500, "RELAY_UNAVAILABLE", "Failed to read relay state", true);
+    }
+
+    return rest_api_send_onboard_relay_response(req, &status, relay_id, actual_state);
+}
+
 static esp_err_t rest_api_status_handler(httpd_req_t *req)
 {
-    rest_api_auth_result_t auth_result;
     rest_api_status_view_t status;
     cJSON *root = NULL;
     cJSON *network = NULL;
     cJSON *modio = NULL;
-    char *response = NULL;
     esp_err_t err;
 
-    auth_result = rest_api_authorize_request(req);
-    if (auth_result == REST_API_AUTH_RESULT_UNAUTHORIZED) {
-        return rest_api_send_error(req, 401, "AUTH_REQUIRED", "Authentication required", false);
-    }
-
-    if (auth_result == REST_API_AUTH_RESULT_FORBIDDEN) {
-        return rest_api_send_error(req, 403, "AUTH_FORBIDDEN", "Access denied", false);
-    }
-
-    err = rest_api_build_status_view(&status);
+    err = rest_api_require_authenticated_status(req, &status);
     if (err != ESP_OK) {
-        return rest_api_send_error(req, 500, "STATUS_UNAVAILABLE", "Failed to gather status", true);
+        return err;
     }
 
     root = cJSON_CreateObject();
@@ -161,20 +535,7 @@ static esp_err_t rest_api_status_handler(httpd_req_t *req)
     cJSON_AddBoolToObject(modio, "present", status.modio_present);
     cJSON_AddStringToObject(modio, "sync", rest_api_modio_sync_to_string(status.modio_sync));
     cJSON_AddItemToObject(root, "modio", modio);
-
-    response = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (response == NULL) {
-        return rest_api_send_error(req, 500, "INTERNAL_ERROR", "Failed to serialize JSON response", true);
-    }
-
-    httpd_resp_set_status(req, rest_api_http_status_text(200));
-    httpd_resp_set_type(req, "application/json");
-    rest_api_try_attach_device_context_headers(req, &status, true);
-    err = httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
-    cJSON_free(response);
-
-    return err;
+    return rest_api_send_json_response(req, 200, root, &status, true);
 }
 
 esp_err_t rest_api_send_error(httpd_req_t *req,
@@ -277,6 +638,24 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
         .handler = rest_api_status_handler,
         .user_ctx = NULL,
     };
+    httpd_uri_t onboard_relays_uri = {
+        .uri = REST_API_ONBOARD_RELAYS_URI,
+        .method = HTTP_GET,
+        .handler = rest_api_onboard_relays_handler,
+        .user_ctx = NULL,
+    };
+    httpd_uri_t onboard_relay_set_uri = {
+        .uri = "/api/v1/relays/onboard/*",
+        .method = HTTP_PUT,
+        .handler = rest_api_onboard_relay_set_handler,
+        .user_ctx = NULL,
+    };
+    httpd_uri_t onboard_relay_toggle_uri = {
+        .uri = "/api/v1/relays/onboard/*/toggle",
+        .method = HTTP_POST,
+        .handler = rest_api_onboard_relay_toggle_handler,
+        .user_ctx = NULL,
+    };
     esp_err_t err;
 
     ESP_RETURN_ON_FALSE(config != NULL, ESP_ERR_INVALID_ARG, TAG, "REST API config is required");
@@ -301,6 +680,30 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
 
     s_config = *config;
     err = httpd_register_uri_handler(s_server, &status_uri);
+    if (err != ESP_OK) {
+        httpd_stop(s_server);
+        s_server = NULL;
+        memset(&s_config, 0, sizeof(s_config));
+        return err;
+    }
+
+    err = httpd_register_uri_handler(s_server, &onboard_relays_uri);
+    if (err != ESP_OK) {
+        httpd_stop(s_server);
+        s_server = NULL;
+        memset(&s_config, 0, sizeof(s_config));
+        return err;
+    }
+
+    err = httpd_register_uri_handler(s_server, &onboard_relay_set_uri);
+    if (err != ESP_OK) {
+        httpd_stop(s_server);
+        s_server = NULL;
+        memset(&s_config, 0, sizeof(s_config));
+        return err;
+    }
+
+    err = httpd_register_uri_handler(s_server, &onboard_relay_toggle_uri);
     if (err != ESP_OK) {
         httpd_stop(s_server);
         s_server = NULL;
