@@ -69,6 +69,15 @@ python3 -m esptool --no-stub --chip esp32 --port /dev/ttyS4 \
 - Brute-force probing of all 64 3-step DTR/RTS sequences on `/dev/ttyS4`
   while monitoring `/dev/ttyS5` never entered ROM download mode. Every
   reboot stayed in `boot:0x1b (SPI_FAST_FLASH_BOOT)`.
+- Re-running exact emulations of esptool's `ClassicReset` and
+  `UnixTightReset` sequences on `/dev/ttyS4` still only produces a
+  software reset on `/dev/ttyS5`; the board continues to boot the app
+  with `boot:0x1b` instead of entering the ROM downloader.
+- A manual split-port probe that used `/dev/ttyS4` only for control
+  pulses and `/dev/ttyS5` for esptool data also failed. `esptool
+  --before no_reset` on `/dev/ttyS5` returned `Invalid head of packet`,
+  which confirms the runner can reset the board but still cannot hold
+  GPIO0 in the ROM-loader state.
 - The bundled Olimex board docs state that ESP32-EVB boards do not expose
   BOOT-button functionality by default. Manual forced boot mode requires
   a hardware rework around resistors `R46` and `R14`.
