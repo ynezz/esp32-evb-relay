@@ -703,6 +703,7 @@ stacks.
        - '.github/workflows/**'
        - 'cli/.goreleaser.yaml'
        - 'cliff.toml'
+       - 'Justfile'
      ```
 
 2. **`firmware-build`** — build the ESP-IDF project and report size
@@ -732,9 +733,20 @@ stacks.
    - Starts with `actions/checkout@v6`
    - Uses `actions/setup-go@v6` with
      `go-version-file: cli/go.mod`, `cache-dependency-path: cli/go.sum`
-   - Runs in `cli/`: `go test -race -coverprofile=coverage.out ./...`
+   - Runs in `cli/`: `go test -race -coverprofile=coverage.out` over
+     all CLI packages except `cli/test_e2e`
 
-5. **`cli-build`** — verify Go compilation
+5. **`cli-e2e`** — run stub-backed CLI subprocess tests
+   - Needs `changes`
+   - Runs on `ubuntu-latest`
+   - Condition: `needs.changes.outputs.cli == 'true' || needs.changes.outputs.firmware == 'true' || needs.changes.outputs.shared == 'true'`
+   - Starts with `actions/checkout@v6`
+   - Uses `actions/setup-go@v6` with
+     `go-version-file: cli/go.mod`, `cache-dependency-path: cli/go.sum`
+   - Installs `just`
+   - Runs from the repo root: `just test-e2e`
+
+6. **`cli-build`** — verify Go compilation
    - Needs `changes`
    - Runs on `ubuntu-latest`
    - Condition: `needs.changes.outputs.cli == 'true' || needs.changes.outputs.shared == 'true'`

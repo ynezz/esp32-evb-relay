@@ -35,7 +35,11 @@ test: _ensure-python-tools
         firmware/test_integration/test_serial_bootloader_config.py
 
 cli-test:
-    cd cli && go test -race ./...
+    cd cli && mapfile -t packages < <(go list ./... | grep -v '/test_e2e$') && \
+        go test -race "${packages[@]}"
+
+test-e2e:
+    cd cli && go test -v ./test_e2e/...
 
 cli-lint:
     cd cli && go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.10.0 run --timeout=5m
@@ -101,7 +105,7 @@ format-check: _ensure-python-tools
             -g '!firmware/test_app/build/**' \
             -g '!firmware/test_app/managed_components/**')
 
-ci: format-check build test cli-fmt-check cli-lint cli-vet cli-test
+ci: format-check build test cli-fmt-check cli-lint cli-vet cli-test test-e2e
 
 ci-full: ci test-device test-integration
 

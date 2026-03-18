@@ -37,6 +37,7 @@ jobs:
               - '.github/workflows/**'
               - 'cli/.goreleaser.yaml'
               - 'cliff.toml'
+              - 'Justfile'
 
   firmware-build:
     name: firmware build
@@ -131,7 +132,32 @@ jobs:
 
       - name: Run CLI tests
         working-directory: cli
-        run: go test -race -coverprofile=coverage.out ./...
+        run: |-
+          mapfile -t packages < <(go list ./... | grep -v '/test_e2e$')
+          go test -race -coverprofile=coverage.out "${packages[@]}"
+
+  cli-e2e:
+    name: cli e2e
+    needs: changes
+    if: ${{ needs.changes.outputs.cli == 'true' || needs.changes.outputs.firmware == 'true' || needs.changes.outputs.shared == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Set up just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Run CLI e2e tests
+        run: just test-e2e
 
   cli-build:
     name: cli build

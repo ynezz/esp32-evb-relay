@@ -410,12 +410,13 @@ does **not** impose a hard 120-column line-length cap by itself.
 | `just cli-fmt-check` | `gofmt -l cli` gate                        | CLI gate    |
 | `just cli-lint`     | `golangci-lint` v2 over `cli/`              | CLI gate    |
 | `just cli-vet`      | `go vet ./...` in `cli/`                    | CLI gate    |
-| `just cli-test`     | `go test -race ./...` in `cli/`             | CLI gate    |
+| `just cli-test`     | `go test -race` over CLI packages except `cli/test_e2e` | CLI gate    |
+| `just test-e2e`     | `go test -v ./test_e2e/...` in `cli/`       | CLI e2e gate |
 | `just test-device`  | download-mode preflight + build `test_app` + pytest-embedded flash/run | Tier 2      |
 | `just test-integration` | download-mode preflight + firmware build + pytest-embedded HTTP checks with monitor port/baud | Tier 3      |
 | `just format`       | astyle_py auto-fix                          | Format      |
 | `just format-check` | astyle_py dry-run                           | Format gate |
-| `just ci`           | format-check + build + test + CLI gates     | Full gate   |
+| `just ci`           | format-check + build + test + CLI gates + CLI e2e | Full gate   |
 | `just ci-full`      | ci + test-device + test-integration         | Full + HW (self-hosted) |
 | `just setup`        | install QA Python deps in IDF env + hook    | One-time    |
 | `just clean`        | rm build artifacts                          | Cleanup     |
@@ -461,6 +462,10 @@ Current QA-critical behaviors:
 
 - `just test` runs both the host CMake/ctest harness and
   `firmware/test_integration/test_serial_bootloader_config.py`
+- `just cli-test` covers CLI unit and package tests without
+  double-running `cli/test_e2e`
+- `just test-e2e` runs the stub-backed CLI subprocess suite in
+  `cli/test_e2e`
 - `just test-device` and `just test-integration` both run
   `./scripts/check-download-mode.sh --port {{flash_port}} --baud 115200`
   before flashing
@@ -471,7 +476,7 @@ Current QA-critical behaviors:
   and `--monitor-baud {{serial_baud}}` to pytest so split-port runners
   and captured UART logs stay aligned
 - `just ci` currently expands to
-  `format-check + build + test + cli-fmt-check + cli-lint + cli-vet + cli-test`
+  `format-check + build + test + cli-fmt-check + cli-lint + cli-vet + cli-test + test-e2e`
 
 For the exact up-to-date command bodies, read the repo-root
 [`Justfile`](../Justfile).
