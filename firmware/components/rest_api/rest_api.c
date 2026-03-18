@@ -227,6 +227,7 @@ static esp_err_t rest_api_parse_onboard_relay_id(httpd_req_t *req,
 {
     uint32_t parsed_id = 0;
     bool parsed;
+    esp_err_t err;
 
     ESP_RETURN_ON_FALSE(req != NULL, ESP_ERR_INVALID_ARG, TAG, "HTTP request is required");
     ESP_RETURN_ON_FALSE(prefix != NULL, ESP_ERR_INVALID_ARG, TAG, "Relay URI prefix is required");
@@ -235,7 +236,11 @@ static esp_err_t rest_api_parse_onboard_relay_id(httpd_req_t *req,
     parsed = (suffix == NULL) ? rest_api_parse_id_from_uri(req->uri, prefix, &parsed_id)
              : rest_api_parse_id_from_uri_with_suffix(req->uri, prefix, suffix, &parsed_id);
     if (!parsed || (parsed_id == 0U) || (parsed_id > RELAY_COUNT)) {
-        return rest_api_send_error(req, 404, "RELAY_NOT_FOUND", "Relay not found", true);
+        err = rest_api_send_error(req, 404, "RELAY_NOT_FOUND", "Relay not found", true);
+        if (err != ESP_OK) {
+            return err;
+        }
+        return ESP_ERR_NOT_FOUND;
     }
 
     *out_relay_id = (uint8_t)parsed_id;

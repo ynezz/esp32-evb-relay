@@ -309,6 +309,8 @@ TEST_CASE("rest_api device returns relay errors with device headers after auth",
     TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Present: true"));
     TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Sync: synchronized"));
     TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"RELAY_NOT_FOUND\""));
+    TEST_ASSERT_NULL(strstr(response, "HTTP/1.1 500 Internal Server Error"));
+    TEST_ASSERT_NULL(strstr(response, "\"code\":\"RELAY_SET_FAILED\""));
 }
 
 TEST_CASE("rest_api device parses relay IDs from wildcard URIs",
