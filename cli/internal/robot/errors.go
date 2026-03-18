@@ -96,6 +96,10 @@ func knownErrorPolicies() map[string]errorPolicy {
 			Retryable:   false,
 			Remediation: stringPtr(authRemediation),
 		},
+		"AUTH_FORBIDDEN": {
+			Retryable:   false,
+			Remediation: stringPtr(authRemediation),
+		},
 		"AUTH_INVALID": {
 			Retryable:   false,
 			Remediation: stringPtr(authRemediation),

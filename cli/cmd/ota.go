@@ -69,6 +69,7 @@ func newOTAFlashCommand() *cobra.Command {
 		Errors: []string{
 			"NETWORK_ERROR",
 			"AUTH_REQUIRED",
+			"AUTH_FORBIDDEN",
 			"AUTH_INVALID",
 		},
 		Example: "evb-relay ota flash firmware/build/esp32-evb-relay.bin",

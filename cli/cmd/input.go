@@ -43,7 +43,7 @@ func newInputWatchCommand() *cobra.Command {
 			"reason",
 			"received_at",
 		},
-		Errors:  []string{"NETWORK_ERROR", "AUTH_REQUIRED", "AUTH_INVALID"},
+		Errors:  []string{"NETWORK_ERROR", "AUTH_REQUIRED", "AUTH_FORBIDDEN", "AUTH_INVALID"},
 		Example: "evb-relay --robot input watch",
 	})
 

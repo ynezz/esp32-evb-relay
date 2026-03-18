@@ -243,6 +243,14 @@ func TestRobotCapabilitiesExposeCommandAndContractMetadata(t *testing.T) {
 		t.Fatalf("MODIO_NOT_PRESENT exit_code = %#v, want 7", got)
 	}
 
+	authForbidden, ok := payload.ErrorCodes["AUTH_FORBIDDEN"].(map[string]any)
+	if !ok {
+		t.Fatalf("error_codes.AUTH_FORBIDDEN = %#v; want object", payload.ErrorCodes["AUTH_FORBIDDEN"])
+	}
+	if got := authForbidden["exit_code"]; got != float64(3) {
+		t.Fatalf("AUTH_FORBIDDEN exit_code = %#v, want 3", got)
+	}
+
 	envNames := make([]string, 0, len(payload.EnvironmentVariables))
 	for _, item := range payload.EnvironmentVariables {
 		if name, _ := item["name"].(string); name != "" {

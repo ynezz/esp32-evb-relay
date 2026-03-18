@@ -154,6 +154,24 @@ func TestWrapTOONErrorEnvelopeReturnsSilentExitError(t *testing.T) {
 func TestBuildErrorDetailsMapsAuthAndNetworkRemediation(t *testing.T) {
 	t.Parallel()
 
+	authForbiddenDetails, authForbiddenCode, authForbiddenNext := buildErrorDetails(&client.APIError{
+		Code:    "AUTH_FORBIDDEN",
+		Message: "access denied",
+		Status:  403,
+	})
+	if authForbiddenCode != exitcodes.AuthError {
+		t.Fatalf("auth forbidden exit code = %d, want %d", authForbiddenCode, exitcodes.AuthError)
+	}
+	if authForbiddenDetails.Code != "AUTH_FORBIDDEN" {
+		t.Fatalf("auth forbidden code = %q, want %q", authForbiddenDetails.Code, "AUTH_FORBIDDEN")
+	}
+	if authForbiddenDetails.Remediation == nil || *authForbiddenDetails.Remediation != authRemediation {
+		t.Fatalf("auth forbidden remediation = %#v, want %q", authForbiddenDetails.Remediation, authRemediation)
+	}
+	if len(authForbiddenNext) != 0 {
+		t.Fatalf("auth forbidden next = %#v, want none", authForbiddenNext)
+	}
+
 	authDetails, authCode, authNext := buildErrorDetails(&client.APIError{
 		Code:    "AUTH_INVALID",
 		Message: "provided token is invalid",

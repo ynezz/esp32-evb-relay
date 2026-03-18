@@ -73,7 +73,7 @@ func newConfigShowCommand() *cobra.Command {
 			"config.modio_boot_policy",
 			"config.api_token_set",
 		},
-		Errors:  []string{"NETWORK_ERROR", "AUTH_REQUIRED", "AUTH_INVALID"},
+		Errors:  []string{"NETWORK_ERROR", "AUTH_REQUIRED", "AUTH_FORBIDDEN", "AUTH_INVALID"},
 		Example: "evb-relay config show",
 	})
 
@@ -101,6 +101,7 @@ func newConfigSetCommand() *cobra.Command {
 			"BAD_ARGUMENT",
 			"NETWORK_ERROR",
 			"AUTH_REQUIRED",
+			"AUTH_FORBIDDEN",
 			"AUTH_INVALID",
 		},
 		Example: "evb-relay config set poll_interval_ms=200 hostname=lab-relay",

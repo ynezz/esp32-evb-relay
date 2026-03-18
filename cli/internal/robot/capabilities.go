@@ -88,6 +88,11 @@ func BuildCapabilities(root *cobra.Command, version string) (Capabilities, error
 			"7": "hardware unavailable",
 		},
 		ErrorCodes: map[string]CapabilityError{
+			"AUTH_FORBIDDEN": {
+				ExitCode:    3,
+				Retryable:   false,
+				Remediation: stringPtr(authRemediation),
+			},
 			"AUTH_INVALID": {
 				ExitCode:    3,
 				Retryable:   false,
