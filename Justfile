@@ -1,3 +1,5 @@
+set shell := ["bash", "-euo", "pipefail", "-c"]
+
 serial_port := env("EVB_SERIAL_PORT", "/dev/esp32-evb")
 serial_baud := env("EVB_SERIAL_BAUD", "115200")
 flash_port := env("EVB_FLASH_PORT", serial_port)
@@ -5,23 +7,28 @@ test_app_sdkconfig_defaults := env(
     "EVB_TEST_APP_SDKCONFIG_DEFAULTS",
     "sdkconfig.defaults",
 )
+idf_path := env("IDF_PATH", home_directory() / "esp/esp-idf")
 venv_dir := ".venv"
 venv_python := ".venv/bin/python"
 venv_astyle_py := ".venv/bin/astyle_py"
 
+# Source ESP-IDF export.sh if idf.py is not already on PATH.
+# Recipes that call idf.py should prefix commands with {{idf_activate}}.
+idf_activate := "command -v idf.py >/dev/null 2>&1 || . " + idf_path / "export.sh" + " >/dev/null 2>&1;"
+
 build:
-    cd firmware && idf.py build
+    {{idf_activate}} cd firmware && idf.py build
 
 _ensure-python-tools:
     test -x {{venv_python}} || (echo "ERROR: Python tools not installed. Run: just setup" >&2 && exit 1)
     test -x {{venv_astyle_py}} || (echo "ERROR: astyle_py missing from {{venv_dir}}. Run: just setup" >&2 && exit 1)
 
 test: _ensure-python-tools
-    cmake -S firmware/test -B firmware/test/build \
+    {{idf_activate}} cmake -S firmware/test -B firmware/test/build \
         -DCMAKE_BUILD_TYPE=Debug \
         -DENABLE_SANITIZERS=ON
-    cmake --build firmware/test/build
-    cd firmware/test/build && ctest --output-on-failure
+    {{idf_activate}} cmake --build firmware/test/build
+    {{idf_activate}} cd firmware/test/build && ctest --output-on-failure
     {{venv_python}} -m pytest -p no:cacheprovider \
         firmware/test_integration/test_serial_bootloader_config.py
 
@@ -36,10 +43,10 @@ cli-fmt-check:
     test -z "$files" || (gofmt -d $files && exit 1)
 
 test-device: _ensure-python-tools
-    ./scripts/check-download-mode.sh --port {{flash_port}} --baud 115200
-    cd firmware/test_app && \
+    {{idf_activate}} ./scripts/check-download-mode.sh --port {{flash_port}} --baud 115200
+    {{idf_activate}} cd firmware/test_app && \
         idf.py -DSDKCONFIG_DEFAULTS="{{test_app_sdkconfig_defaults}}" build
-    cd firmware/test_app && \
+    {{idf_activate}} cd firmware/test_app && \
         ../../{{venv_python}} -m pytest --target esp32 -p no:cacheprovider \
         pytest_evb_relay.py \
         --esptool-baud 115200 \
@@ -47,10 +54,10 @@ test-device: _ensure-python-tools
         --port {{serial_port}}
 
 test-integration: _ensure-python-tools
-    ./scripts/check-download-mode.sh --port {{flash_port}} --baud 115200
-    cd firmware && \
+    {{idf_activate}} ./scripts/check-download-mode.sh --port {{flash_port}} --baud 115200
+    {{idf_activate}} cd firmware && \
         idf.py build
-    cd firmware && \
+    {{idf_activate}} cd firmware && \
         ../{{venv_python}} -m pytest --target esp32 -p no:cacheprovider \
         test_integration \
         --port {{flash_port}} \
