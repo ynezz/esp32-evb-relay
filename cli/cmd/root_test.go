@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -162,4 +163,42 @@ func TestRobotCapabilitiesIgnoreInvalidConfigFile(t *testing.T) {
 			t.Fatalf("name = %#v, want %q", got, "evb-relay")
 		}
 	})
+}
+
+func TestCompletionCommandGeneratesBashScript(t *testing.T) {
+	cmd := newRootCommand()
+	stdout := &bytes.Buffer{}
+
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"completion", "bash"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() returned error: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "__start_evb-relay") {
+		t.Fatalf("completion output missing cobra entrypoint: %q", output)
+	}
+}
+
+func TestCompletionCommandIgnoresInvalidTimeoutEnv(t *testing.T) {
+	t.Setenv(appconfig.EnvTimeout, "garbage")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	cmd := newRootCommand()
+	stdout := &bytes.Buffer{}
+
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"completion", "bash"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() returned error: %v", err)
+	}
+
+	if stdout.Len() == 0 {
+		t.Fatal("completion output is empty")
+	}
 }

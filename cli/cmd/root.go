@@ -64,7 +64,7 @@ func newRootCommand() *cobra.Command {
 		Args:          cobra.NoArgs,
 		Version:       formattedVersion(),
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
-			if versionRequested(cmd) || capabilitiesRequested(cmd) {
+			if versionRequested(cmd) || capabilitiesRequested(cmd) || completionRequested(cmd) {
 				return nil
 			}
 
@@ -112,6 +112,7 @@ func newRootCommand() *cobra.Command {
 	}
 
 	cmd.SetVersionTemplate("{{printf \"%s\\n\" .Version}}")
+	cmd.AddCommand(newCompletionCommand())
 
 	cmd.PersistentFlags().StringVarP(&flags.host, "host", "H", "", "Device IP or hostname")
 	cmd.PersistentFlags().StringVarP(&flags.apiToken, "api-token", "k", "", "API authentication token")
@@ -240,4 +241,14 @@ func capabilitiesRequested(cmd *cobra.Command) bool {
 	}
 
 	return flag.Changed
+}
+
+func completionRequested(cmd *cobra.Command) bool {
+	for current := cmd; current != nil; current = current.Parent() {
+		if current.Name() == "completion" {
+			return true
+		}
+	}
+
+	return false
 }
