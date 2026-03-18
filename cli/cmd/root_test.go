@@ -224,9 +224,6 @@ func TestRobotCapabilitiesExposeCommandAndContractMetadata(t *testing.T) {
 	if !containsString(commandNames, "ota flash") {
 		t.Fatalf("commands missing ota flash: %#v", commandNames)
 	}
-	if !containsString(commandNames, "ota flash") {
-		t.Fatalf("commands missing ota flash: %#v", commandNames)
-	}
 
 	if got := payload.ExitCodes["7"]; got != "hardware unavailable" {
 		t.Fatalf("exit_codes[7] = %#v, want %q", got, "hardware unavailable")
