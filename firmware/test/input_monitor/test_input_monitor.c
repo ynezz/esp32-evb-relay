@@ -49,7 +49,6 @@ static void queue_snapshot(uint8_t digital_mask,
 
 static void init_present_mod_io(uint8_t relay_mask)
 {
-    i2c_stub_set_probe_result(ESP_OK);
     queue_read_u8(relay_mask);
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_init(test_bus_handle()));
 }

@@ -46,7 +46,6 @@ static void set_read_data_u16(uint8_t low, uint8_t high)
 
 static void init_present_mod_io(uint8_t relay_mask)
 {
-    i2c_stub_set_probe_result(ESP_OK);
     set_read_data_u8(relay_mask);
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_init(test_bus_handle()));
 }
@@ -177,7 +176,7 @@ static void test_mod_io_set_relay_skips_reprobe_when_board_is_already_present(vo
     const uint8_t expected_write[] = {0x10U, 0x07U};
 
     init_present_mod_io(0x05U);
-    i2c_stub_set_probe_result(ESP_ERR_NOT_FOUND);
+    i2c_stub_set_transmit_receive_result(ESP_ERR_NOT_FOUND);
 
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_set_relay(2U, true));
     assert_last_transaction_equals(expected_write, sizeof(expected_write));
