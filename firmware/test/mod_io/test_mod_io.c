@@ -116,6 +116,16 @@ static void test_mod_io_probe_keeps_absent_state_when_board_is_missing(void)
     assert_status(false, MOD_IO_RELAY_SYNC_ABSENT, 0x00U);
 }
 
+static void test_mod_io_init_treats_probe_timeouts_as_absent(void)
+{
+    i2c_stub_set_probe_result(ESP_ERR_TIMEOUT);
+
+    TEST_ASSERT_EQUAL(ESP_OK, mod_io_init(test_bus_handle()));
+    assert_status(false, MOD_IO_RELAY_SYNC_ABSENT, 0x00U);
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, mod_io_probe());
+    assert_status(false, MOD_IO_RELAY_SYNC_ABSENT, 0x00U);
+}
+
 static void test_mod_io_set_relays_validates_mask_and_round_trips_via_readback(void)
 {
     const uint8_t expected_write[] = {0x10U, 0x0FU};
@@ -280,6 +290,7 @@ void test_mod_io_suite(void)
     RUN_TEST(test_mod_io_init_reads_authoritative_relay_state);
     RUN_TEST(test_mod_io_probe_transitions_absent_to_present_with_readback);
     RUN_TEST(test_mod_io_probe_keeps_absent_state_when_board_is_missing);
+    RUN_TEST(test_mod_io_init_treats_probe_timeouts_as_absent);
     RUN_TEST(test_mod_io_set_relays_validates_mask_and_round_trips_via_readback);
     RUN_TEST(test_mod_io_set_relays_publishes_event_for_changed_bit);
     RUN_TEST(test_mod_io_set_relay_validates_ids_and_uses_read_modify_write);

@@ -318,17 +318,13 @@ esp_err_t mod_io_init(i2c_master_bus_handle_t bus_handle)
     mod_io_mark_absent_locked();
 
     probe_err = mod_io_probe_locked();
-    if ((probe_err != ESP_OK) && (probe_err != ESP_ERR_NOT_FOUND)) {
-        i2c_master_bus_rm_device(s_state.device_handle);
-        memset(&s_state, 0, sizeof(s_state));
-        s_state.relay_sync = MOD_IO_RELAY_SYNC_ABSENT;
-        mod_io_unlock();
-        return probe_err;
-    }
-
     if (probe_err == ESP_ERR_NOT_FOUND) {
         ESP_LOGI(TAG, "MOD-IO not detected at 0x%02X; continuing without expansion board",
                  MOD_IO_I2C_ADDRESS);
+    } else if (probe_err != ESP_OK) {
+        ESP_LOGW(TAG,
+                 "Initial MOD-IO probe failed at 0x%02X; continuing without expansion board: %s",
+                 MOD_IO_I2C_ADDRESS, esp_err_to_name(probe_err));
     }
 
     mod_io_unlock();

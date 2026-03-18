@@ -48,10 +48,10 @@
     flash/control and live-UART setups
 - An example guest-side rule file lives at
   [`tools/udev/99-esp32-evb-qemu-serial.rules.example`](../tools/udev/99-esp32-evb-qemu-serial.rules.example).
-- For the current virsh/QEMU runner, `udevadm info` shows the pinned PCI
-  addresses `0000:00:07.0` and `0000:00:09.0` for the two guest serial
-  adapters. The example udev rules bind aliases to those PCI addresses,
-  not to transient tty node names.
+- For the current virsh/QEMU runner, `udevadm info` shows the ESP32-EVB
+  UART under guest PCI slot `0000:00:09.0`. The tty node itself is
+  dynamic, so bind aliases to that PCI address instead of a transient
+  `/dev/ttyS*` path.
 
 ### Flashing
 
@@ -90,61 +90,31 @@ python3 -m esptool --no-stub --chip esp32 --port /dev/esp32-evb \
 
 ### Current Runner Caveat (2026-03-18)
 
-- The self-hosted QEMU runner currently exposes two PCI 16550 guest
-  ports. The live UART console most recently enumerated as
-  `/dev/ttyS6`, but the guest `/dev/ttyS*` numbering itself is not
-  stable and should only be treated as a diagnostic detail.
-- `udevadm info` and `lspci` show both ports are guest-visible QEMU PCI
-  16550A adapters (`Red Hat, Inc. QEMU PCI 16550A Adapter`), not a
-  directly enumerated USB UART on the Linux guest.
-- The guest currently exposes no `/dev/serial/by-id` aliases and no
-  `/dev/gpiochip*` devices for a separate GPIO0/EN control path, which
-  strongly suggests the missing download-mode assertion lives in the VM
-  bridge or host-side wiring rather than in repo scripts.
-- The guest PCI device at `0000:00:07.0` appears to be the control path
-  and `0000:00:09.0` carries the live UART console. The example udev
-  aliases map those to `/dev/esp32-evb-flash` and
-  `/dev/esp32-evb-console` respectively.
-- Brute-force probing of all 64 3-step DTR/RTS sequences on the control
-  path while monitoring the live UART never entered ROM download mode.
-  Every reboot stayed in `boot:0x1b (SPI_FAST_FLASH_BOOT)`.
-- Re-running exact emulations of esptool's `ClassicReset` and
-  `UnixTightReset` sequences on the control path still only produces a
-  software reset on the live UART; the board continues to boot the app
-  with `boot:0x1b` instead of entering the ROM downloader.
-- A manual split-port probe that used the control path only for control
-  pulses and the live UART for esptool data also failed. `esptool
-  --before no_reset` on the live UART returned `Invalid head of packet`,
-  which confirms the runner can reset the board but still cannot hold
-  GPIO0 in the ROM-loader state.
-- Re-running raw `esptool` probes from the guest still shows the same
-  split behavior: the control path returns `No serial data received`,
-  while the live UART reads boot/app console bytes such as `Invalid head
-  of packet (0x20)` because the board keeps rebooting into the flashed app
-  instead of entering ROM download mode.
-- `scripts/check-download-mode.sh` now accepts `--console-port` (and
-  defaults it from `EVB_SERIAL_PORT` when distinct) so failed download
-  probes print a short live UART preview from the console path. That
-  makes the split control-vs-console mapping explicit without re-running
-  manual ad-hoc probes.
-- The image currently flashed on the board reports app version
-  `2ae9772-dirty` with build time `2026-03-18 07:46:58 UTC`, which
-  predates commit `7815069` that added `network_init()` before
-  `rest_api_start()`. That stale image still boot-loops with
-  `tcpip_send_msg_wait_sem ... (Invalid mbox)` because it reaches the
-  HTTP server before `esp_netif_init()` and Ethernet bring-up.
+- The self-hosted QEMU runner currently exposes the board as a single
+  guest-visible QEMU PCI 16550A adapter (`Red Hat, Inc. QEMU PCI 16550A
+  Adapter`) under PCI slot `0000:00:09.0`.
+- On 2026-03-18 the guest tty node for that adapter enumerated as
+  `/dev/ttyS4`. That number is not stable and should only be treated as
+  a diagnostic detail.
+- The guest currently exposes no `/dev/serial/by-id` aliases, so the
+  repo-standard `/dev/esp32-evb` alias should be created with a guest
+  udev rule that matches the stable PCI parent slot.
+- `udevadm info -a -n /dev/ttyS4` confirms the correct parent match for
+  the alias rule is `KERNELS=="0000:00:09.0"`.
+- `./scripts/check-download-mode.sh --port /dev/ttyS4` passes on the
+  current runner, so the single UART path now supports ROM download mode
+  and firmware flashing from the guest.
+- `EVB_SERIAL_PORT=/dev/ttyS4 just test-device` passes on the current
+  runner. Tier 2 is no longer blocked by guest serial wiring.
+- The image flashed after restoring download-mode access reports
+  app version `0.0.0-dev` and reaches Ethernet DHCP successfully before
+  starting the REST API.
 - The bundled Olimex board docs state that ESP32-EVB boards do not expose
   BOOT-button functionality by default. Manual forced boot mode requires
   a hardware rework around resistors `R46` and `R14`.
-- Treat `Wrong boot mode detected` and `No serial data received` failures
-  on this runner as hardware or infrastructure blockers until GPIO0/EN
-  download-mode control is fixed outside the repo.
-- Treat the current boot loop on the live UART path as stale-firmware evidence
-  until download-mode control is restored and a post-`7815069` firmware
-  build can be flashed onto the board.
-- `scripts/check-download-mode.sh` now surfaces those signatures before
-  `scripts/flash.sh`, `scripts/provision.sh`, `just test-device`, and
-  `just test-integration` attempt more expensive flashing steps.
+- `scripts/check-download-mode.sh` still runs before `scripts/flash.sh`,
+  `scripts/provision.sh`, `just test-device`, and `just test-integration`
+  so serial regressions fail fast with a clearer signature.
 
 ---
 

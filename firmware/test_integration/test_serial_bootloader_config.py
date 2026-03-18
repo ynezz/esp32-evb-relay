@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -109,6 +110,34 @@ def test_download_mode_helper_documents_runner_failure_signatures() -> None:
     assert "Failed to enter ESP32 ROM download mode" in script_text
 
 
+def test_rest_api_reserves_uri_slots_for_all_registered_routes() -> None:
+    source = (_repo_root() / "firmware/components/rest_api/rest_api.c").read_text(encoding="utf-8")
+    match = re.search(r"#define REST_API_URI_HANDLER_COUNT\s+(\d+)U", source)
+
+    assert match is not None
+    assert "server_config.max_uri_handlers = REST_API_URI_HANDLER_COUNT;" in source
+
+    registered_routes = len(re.findall(r"httpd_register_uri_handler\(", source))
+    assert int(match.group(1)) == registered_routes
+
+
+def test_rest_api_closes_unauthorized_connections() -> None:
+    source = (_repo_root() / "firmware/components/rest_api/rest_api.c").read_text(encoding="utf-8")
+
+    assert 'httpd_resp_set_hdr(req, "Connection", "close");' in source
+
+
+def test_rest_api_uses_supported_onboard_toggle_uri_template() -> None:
+    source = (_repo_root() / "firmware/components/rest_api/rest_api.c").read_text(encoding="utf-8")
+
+    assert re.search(
+        r'httpd_uri_t onboard_relay_toggle_uri = \{\s+'
+        r'\.uri = "/api/v1/relays/onboard/\*",\s+'
+        r'\.method = HTTP_POST,',
+        source,
+    )
+
+
 def test_flash_port_defaults_prefer_explicit_override(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load_integration_conftest()
 
@@ -129,8 +158,7 @@ def test_qemu_udev_example_defines_stable_serial_aliases() -> None:
         encoding="utf-8"
     )
 
-    assert 'SYMLINK+="esp32-evb-flash"' in rule_text
-    assert 'SYMLINK+="esp32-evb-console"' in rule_text
+    assert 'KERNELS=="0000:00:09.0"' in rule_text
     assert 'SYMLINK+="esp32-evb"' in rule_text
 
 
@@ -158,6 +186,23 @@ def test_dut_endpoint_resolution_failures_are_fatal(monkeypatch: pytest.MonkeyPa
         module._resolve_dut_endpoint("esp32-evb-relay.local", 80, 15.0)
 
 
+def test_dut_endpoint_resolution_falls_back_to_serial_ip(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_integration_conftest()
+
+    def _raise_runtime_error(host: str, timeout_seconds: float) -> str:
+        raise RuntimeError("failed to resolve 'esp32-evb-relay.local': [Errno -3] Temporary failure in name resolution")
+
+    monkeypatch.setattr(module, "_wait_for_host", _raise_runtime_error)
+    monkeypatch.setattr(module, "_wait_for_ip_on_serial", lambda port, baud, timeout_seconds: "192.0.2.55")
+
+    endpoint = module._resolve_dut_endpoint("esp32-evb-relay.local", 80, 15.0, "/dev/esp32-evb", "115200")
+
+    assert endpoint.host == "esp32-evb-relay.local"
+    assert endpoint.ip == "192.0.2.55"
+    assert endpoint.port == 80
+    assert endpoint.base_url == "http://192.0.2.55:80"
+
+
 def test_justfile_supports_split_flash_and_monitor_ports() -> None:
     justfile_text = (_repo_root() / "Justfile").read_text(encoding="utf-8")
 
@@ -165,6 +210,12 @@ def test_justfile_supports_split_flash_and_monitor_ports() -> None:
     assert "./scripts/check-download-mode.sh --port {{flash_port}} --baud 115200" in justfile_text
     assert "--flash-port {{flash_port}}" in justfile_text
     assert "test_integration \\\n        --port {{flash_port}}" in justfile_text
+
+
+def test_cleanup_ignores_modio_not_present_service_unavailable() -> None:
+    module = _load_integration_conftest()
+
+    assert 503 in module.IGNORED_CLEANUP_STATUS_CODES
 
 
 def test_partition_table_restores_nvs_size_and_flash_headroom() -> None:

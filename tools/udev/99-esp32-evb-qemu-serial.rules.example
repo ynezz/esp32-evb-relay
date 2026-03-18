@@ -1,16 +1,11 @@
-# Stable guest-side aliases for ESP32-EVB QEMU serial passthrough.
-#
-# Copy to /etc/udev/rules.d/99-esp32-evb-qemu-serial.rules, then reload
-# udev and retrigger tty devices:
+# Stable guest-side alias for the ESP32-EVB UART passed through via
+# QEMU/virsh. Copy to /etc/udev/rules.d/99-esp32-evb-qemu-serial.rules,
+# then reload udev and retrigger tty devices:
 #   sudo udevadm control --reload
 #   sudo udevadm trigger --subsystem-match=tty
 #
-# Pin the guest PCI addresses in the virsh domain XML first. Update the
-# KERNELS values below if your VM uses different addresses.
-
-# Split-port runner: flash/control path and live UART console path.
-SUBSYSTEM=="tty", KERNEL=="ttyS*", KERNELS=="0000:00:07.0", SYMLINK+="esp32-evb-flash"
-SUBSYSTEM=="tty", KERNEL=="ttyS*", KERNELS=="0000:00:09.0", SYMLINK+="esp32-evb-console"
-
-# Single-port fallback: point the live UART at the default repo alias.
+# The current guest exposes the board as a QEMU PCI 16550A adapter under
+# PCI slot 0000:00:09.0. The tty node itself may drift (for example,
+# ttyS4 today and ttyS6 after a guest PCI reorder), so match the stable
+# parent PCI slot instead of the transient tty name.
 SUBSYSTEM=="tty", KERNEL=="ttyS*", KERNELS=="0000:00:09.0", SYMLINK+="esp32-evb"

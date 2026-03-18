@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import socket
 import subprocess
@@ -13,6 +14,7 @@ from typing import Callable, Iterator
 
 import pytest
 import requests
+import serial
 
 os.environ.setdefault("ESPBAUD", "115200")
 
@@ -22,8 +24,10 @@ DEFAULT_FLASH_PORT = "/dev/esp32-evb"
 DEFAULT_SERIAL_BAUD = "115200"
 DEFAULT_REQUEST_TIMEOUT = 5.0
 DEFAULT_DISCOVERY_TIMEOUT = 15.0
+DEFAULT_SERIAL_ENDPOINT_TIMEOUT = 30.0
 DEFAULT_BOOT_SETTLE_SECONDS = 3.0
 PARTTOOL_ESPTOOL_ARGS = ("--esptool-args", "no-stub")
+ETHERNET_IP_LOG_PATTERN = re.compile(r"Ethernet got IP: ip=(\d+\.\d+\.\d+\.\d+)")
 SAFE_OFF_PATHS = (
     "/api/v1/relays/onboard/1",
     "/api/v1/relays/onboard/2",
@@ -32,7 +36,7 @@ SAFE_OFF_PATHS = (
     "/api/v1/relays/modio/3",
     "/api/v1/relays/modio/4",
 )
-IGNORED_CLEANUP_STATUS_CODES = {404, 405, 501}
+IGNORED_CLEANUP_STATUS_CODES = {404, 405, 501, 503}
 
 
 @dataclass(frozen=True)
@@ -148,11 +152,66 @@ def _wait_for_host(host: str, timeout_seconds: float) -> str:
     raise RuntimeError(f"failed to resolve {host!r}: {last_error}")
 
 
-def _resolve_dut_endpoint(host: str, port: int, timeout_seconds: float) -> DutEndpoint:
+def _wait_for_ip_on_serial(serial_port: str, serial_baud: str, timeout_seconds: float) -> str:
+    deadline = time.monotonic() + timeout_seconds
+    buffer = ""
+
+    try:
+        baudrate = int(serial_baud)
+    except ValueError as exc:
+        raise RuntimeError(f"invalid serial baud {serial_baud!r}") from exc
+
+    try:
+        with serial.Serial(serial_port, baudrate, timeout=0.25, dsrdtr=False, rtscts=False) as console:
+            console.setDTR(False)
+            console.setRTS(False)
+            console.reset_input_buffer()
+
+            # Reset back into the running app so the Ethernet DHCP log appears.
+            console.setRTS(True)
+            time.sleep(0.1)
+            console.setRTS(False)
+
+            while time.monotonic() < deadline:
+                chunk = console.read(256)
+                if not chunk:
+                    continue
+
+                buffer += chunk.decode("utf-8", errors="ignore")
+                if len(buffer) > 8192:
+                    buffer = buffer[-8192:]
+
+                match = ETHERNET_IP_LOG_PATTERN.search(buffer)
+                if match is not None:
+                    return match.group(1)
+    except serial.SerialException as exc:
+        raise RuntimeError(f"failed to read serial boot log from {serial_port!r}: {exc}") from exc
+
+    raise RuntimeError(f"failed to observe Ethernet DHCP lease on {serial_port!r}")
+
+
+def _resolve_dut_endpoint(
+    host: str,
+    port: int,
+    timeout_seconds: float,
+    serial_port: str | None = None,
+    serial_baud: str = DEFAULT_SERIAL_BAUD,
+) -> DutEndpoint:
     try:
         ip = _wait_for_host(host, timeout_seconds)
     except RuntimeError as exc:
-        pytest.fail(f"could not resolve DUT host {host!r}: {exc}")
+        if serial_port is None:
+            pytest.fail(f"could not resolve DUT host {host!r}: {exc}")
+
+        try:
+            ip = _wait_for_ip_on_serial(serial_port,
+                                        serial_baud,
+                                        max(timeout_seconds, DEFAULT_SERIAL_ENDPOINT_TIMEOUT))
+        except RuntimeError as serial_exc:
+            pytest.fail(
+                f"could not resolve DUT host {host!r}: {exc}; "
+                f"serial fallback on {serial_port!r} also failed: {serial_exc}"
+            )
 
     return DutEndpoint(host=host, ip=ip, port=port, base_url=f"http://{ip}:{port}")
 
@@ -239,11 +298,11 @@ def auth_token(serial_port: str, serial_baud: str, firmware_flashed: None) -> It
 
 
 @pytest.fixture(scope="session")
-def dut_endpoint(auth_token: str) -> DutEndpoint:
+def dut_endpoint(auth_token: str, serial_port: str, serial_baud: str) -> DutEndpoint:
     host = os.environ.get("EVB_DUT_HOST") or os.environ.get("EVB_DUT_HOSTNAME", DEFAULT_DUT_HOST)
     port = int(os.environ.get("EVB_DUT_HTTP_PORT", DEFAULT_HTTP_PORT))
     timeout = float(os.environ.get("EVB_DISCOVERY_TIMEOUT_SECONDS", DEFAULT_DISCOVERY_TIMEOUT))
-    return _resolve_dut_endpoint(host, port, timeout)
+    return _resolve_dut_endpoint(host, port, timeout, serial_port, serial_baud)
 
 
 @pytest.fixture(scope="session")

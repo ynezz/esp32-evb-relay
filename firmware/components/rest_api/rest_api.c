@@ -35,6 +35,7 @@ static rest_api_config_t s_config;
 static rest_api_auth_result_t rest_api_authorize_request(httpd_req_t *req);
 
 #define REST_API_MAX_REQUEST_BODY_LEN 512U
+#define REST_API_URI_HANDLER_COUNT 16U
 #define REST_API_SSE_MAX_CLIENTS 4U
 #define REST_API_SSE_DISPATCH_QUEUE_LENGTH 16U
 #define REST_API_SSE_CLIENT_QUEUE_LENGTH 8U
@@ -2732,6 +2733,9 @@ static esp_err_t rest_api_send_error_internal(httpd_req_t *req,
 
     httpd_resp_set_status(req, rest_api_http_status_text(http_status));
     httpd_resp_set_type(req, "application/json");
+    if ((http_status == 401) || (http_status == 403)) {
+        httpd_resp_set_hdr(req, "Connection", "close");
+    }
 
     if (authenticated && (http_status != 401) && (http_status != 403)) {
         err = rest_api_build_status_view(&status);
@@ -2839,7 +2843,7 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
         .user_ctx = NULL,
     };
     httpd_uri_t onboard_relay_toggle_uri = {
-        .uri = "/api/v1/relays/onboard/*/toggle",
+        .uri = "/api/v1/relays/onboard/*",
         .method = HTTP_POST,
         .handler = rest_api_onboard_relay_toggle_handler,
         .user_ctx = NULL,
@@ -2929,6 +2933,7 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
     }
 
     server_config.server_port = (config->port != 0U) ? config->port : REST_API_DEFAULT_PORT;
+    server_config.max_uri_handlers = REST_API_URI_HANDLER_COUNT;
     server_config.uri_match_fn = httpd_uri_match_wildcard;
 
     err = httpd_start(&s_server, &server_config);
@@ -2961,7 +2966,7 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
         return err;
     }
 
-    err = httpd_register_uri_handler(s_server, &onboard_relay_set_uri);
+    err = httpd_register_uri_handler(s_server, &onboard_relay_toggle_uri);
     if (err != ESP_OK) {
         httpd_stop(s_server);
         s_server = NULL;
@@ -2969,7 +2974,7 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
         return err;
     }
 
-    err = httpd_register_uri_handler(s_server, &onboard_relay_toggle_uri);
+    err = httpd_register_uri_handler(s_server, &onboard_relay_set_uri);
     if (err != ESP_OK) {
         httpd_stop(s_server);
         s_server = NULL;
