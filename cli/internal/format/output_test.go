@@ -19,8 +19,9 @@ func TestResolve(t *testing.T) {
 		{name: "human default", requested: "", robot: false, want: Table},
 		{name: "human json", requested: " JSON ", robot: false, want: JSON},
 		{name: "robot default", requested: "", robot: true, want: TOON},
+		{name: "robot explicit toon", requested: " ToOn ", robot: true, want: TOON},
 		{name: "robot json override", requested: "json", robot: true, want: JSON},
-		{name: "robot rejects table", requested: "table", robot: true, wantErr: "invalid robot format"},
+		{name: "robot rejects table", requested: "table", robot: true, wantErr: "expected toon or json"},
 		{name: "human rejects toon", requested: "toon", robot: false, wantErr: "unsupported format"},
 	}
 

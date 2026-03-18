@@ -16,13 +16,13 @@ func Resolve(requested string, robot bool) (string, error) {
 	normalized := strings.ToLower(strings.TrimSpace(requested))
 
 	if robot {
-		if normalized == "" {
+		if normalized == "" || normalized == TOON {
 			return TOON, nil
 		}
 		if normalized == JSON {
 			return JSON, nil
 		}
-		return "", fmt.Errorf("invalid robot format %q: only json is allowed as an explicit override", requested)
+		return "", fmt.Errorf("invalid robot format %q: expected toon or json", requested)
 	}
 
 	if normalized == "" {
