@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -40,6 +41,11 @@ type DeviceContext struct {
 	FirmwareVersion string `json:"firmware_version,omitempty"`
 	ModIOPresent    *bool  `json:"modio_present,omitempty"`
 	ModIOSync       string `json:"modio_sync,omitempty"`
+}
+
+type StreamEvent struct {
+	Event string
+	Data  any
 }
 
 func New(config Config) (*Client, error) {
@@ -99,6 +105,57 @@ func (c *Client) DoJSON(ctx context.Context, method, endpoint string, requestBod
 	}
 
 	return result, nil
+}
+
+func (c *Client) Host() string {
+	return c.baseURL.Host
+}
+
+func (c *Client) WatchEventsOnce(
+	ctx context.Context,
+	onStart func(Result) error,
+	onEvent func(StreamEvent) error,
+) error {
+	if onStart == nil {
+		return exitcodes.Wrap(exitcodes.BadArgument, errors.New("stream start callback is required"))
+	}
+	if onEvent == nil {
+		return exitcodes.Wrap(exitcodes.BadArgument, errors.New("stream event callback is required"))
+	}
+
+	request, err := c.newRequest(ctx, http.MethodGet, "/events", nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Accept", "text/event-stream")
+
+	streamHTTPClient := *c.httpClient
+	streamHTTPClient.Timeout = 0
+
+	response, err := streamHTTPClient.Do(request)
+	if err != nil {
+		return wrapError(err)
+	}
+	defer response.Body.Close()
+
+	result := Result{
+		StatusCode:    response.StatusCode,
+		DeviceContext: deviceContextFromHeaders(response.Header),
+	}
+
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		payload, readErr := io.ReadAll(response.Body)
+		if readErr != nil {
+			return exitcodes.Wrap(exitcodes.GeneralError, fmt.Errorf("read response body: %w", readErr))
+		}
+		return wrapError(decodeAPIError(response.StatusCode, payload))
+	}
+
+	if err := onStart(result); err != nil {
+		return err
+	}
+
+	return decodeEventStream(ctx, response.Body, onEvent)
 }
 
 func (c *Client) newRequest(ctx context.Context, method, endpoint string, requestBody any) (*http.Request, error) {
@@ -218,4 +275,78 @@ func deviceContextFromHeaders(headers http.Header) *DeviceContext {
 	}
 
 	return deviceContext
+}
+
+func decodeEventStream(ctx context.Context, body io.Reader, onEvent func(StreamEvent) error) error {
+	scanner := bufio.NewScanner(body)
+	eventName := ""
+	dataLines := make([]string, 0, 1)
+
+	emit := func() error {
+		if len(dataLines) == 0 {
+			eventName = ""
+			return nil
+		}
+
+		payload := strings.Join(dataLines, "\n")
+		data := any(payload)
+		if json.Valid([]byte(payload)) {
+			data = json.RawMessage(payload)
+		}
+
+		name := eventName
+		if name == "" {
+			name = "message"
+		}
+
+		eventName = ""
+		dataLines = dataLines[:0]
+		return onEvent(StreamEvent{
+			Event: name,
+			Data:  data,
+		})
+	}
+
+	for scanner.Scan() {
+		line := strings.TrimRight(scanner.Text(), "\r")
+		if line == "" {
+			if err := emit(); err != nil {
+				return err
+			}
+			continue
+		}
+		if strings.HasPrefix(line, ":") {
+			continue
+		}
+
+		field, value, found := strings.Cut(line, ":")
+		if !found {
+			value = ""
+		}
+		value = strings.TrimPrefix(value, " ")
+
+		switch field {
+		case "event":
+			eventName = value
+		case "data":
+			dataLines = append(dataLines, value)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return wrapError(err)
+	}
+
+	if err := emit(); err != nil {
+		return err
+	}
+
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	return io.EOF
 }

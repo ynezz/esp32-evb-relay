@@ -112,7 +112,7 @@ func newRootCommand() *cobra.Command {
 	}
 
 	cmd.SetVersionTemplate("{{printf \"%s\\n\" .Version}}")
-	cmd.AddCommand(newCompletionCommand())
+	cmd.AddCommand(newCompletionCommand(), newInputCommand())
 
 	cmd.PersistentFlags().StringVarP(&flags.host, "host", "H", "", "Device IP or hostname")
 	cmd.PersistentFlags().StringVarP(&flags.apiToken, "api-token", "k", "", "API authentication token")
