@@ -81,9 +81,10 @@ typedef enum {
     MAIN_STARTUP_CALL_EVENT_LOOP_CREATE_DEFAULT = 0,
     MAIN_STARTUP_CALL_DEVICE_CONFIG_INIT,
     MAIN_STARTUP_CALL_BOARD_INIT,
-    MAIN_STARTUP_CALL_AUTH_INIT,
     MAIN_STARTUP_CALL_RELAY_INIT,
     MAIN_STARTUP_CALL_MOD_IO_INIT,
+    MAIN_STARTUP_CALL_INPUT_MONITOR_START,
+    MAIN_STARTUP_CALL_AUTH_INIT,
     MAIN_STARTUP_CALL_NETWORK_INIT,
     MAIN_STARTUP_CALL_NETWORK_WAIT_FOR_IP,
     MAIN_STARTUP_CALL_NETWORK_REGISTER_MDNS_SERVICE,
@@ -98,6 +99,7 @@ void main_startup_stub_set_board_init_result(esp_err_t result);
 void main_startup_stub_set_auth_init_result(esp_err_t result);
 void main_startup_stub_set_relay_init_result(esp_err_t result);
 void main_startup_stub_set_mod_io_init_result(esp_err_t result);
+void main_startup_stub_set_input_monitor_start_result(esp_err_t result);
 void main_startup_stub_set_mod_io_probe_result(esp_err_t result);
 void main_startup_stub_set_mod_io_get_status_result(esp_err_t result);
 void main_startup_stub_set_network_init_result(esp_err_t result);
@@ -129,6 +131,7 @@ esp_err_t relay_init(void);
 esp_err_t mod_io_init(i2c_master_bus_handle_t bus_handle);
 esp_err_t mod_io_probe(void);
 esp_err_t mod_io_get_status(mod_io_status_t *out);
+esp_err_t input_monitor_start(void);
 
 esp_err_t network_init(void);
 esp_err_t network_wait_for_ip(uint32_t timeout_ms);

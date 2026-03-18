@@ -29,9 +29,10 @@ static void test_app_main_initializes_network_before_starting_http(void)
         MAIN_STARTUP_CALL_EVENT_LOOP_CREATE_DEFAULT,
         MAIN_STARTUP_CALL_DEVICE_CONFIG_INIT,
         MAIN_STARTUP_CALL_BOARD_INIT,
-        MAIN_STARTUP_CALL_AUTH_INIT,
         MAIN_STARTUP_CALL_RELAY_INIT,
         MAIN_STARTUP_CALL_MOD_IO_INIT,
+        MAIN_STARTUP_CALL_INPUT_MONITOR_START,
+        MAIN_STARTUP_CALL_AUTH_INIT,
         MAIN_STARTUP_CALL_NETWORK_INIT,
         MAIN_STARTUP_CALL_NETWORK_WAIT_FOR_IP,
         MAIN_STARTUP_CALL_NETWORK_REGISTER_MDNS_SERVICE,
@@ -84,13 +85,33 @@ static void test_app_main_stops_before_http_when_network_init_fails(void)
         MAIN_STARTUP_CALL_EVENT_LOOP_CREATE_DEFAULT,
         MAIN_STARTUP_CALL_DEVICE_CONFIG_INIT,
         MAIN_STARTUP_CALL_BOARD_INIT,
-        MAIN_STARTUP_CALL_AUTH_INIT,
         MAIN_STARTUP_CALL_RELAY_INIT,
         MAIN_STARTUP_CALL_MOD_IO_INIT,
+        MAIN_STARTUP_CALL_INPUT_MONITOR_START,
+        MAIN_STARTUP_CALL_AUTH_INIT,
         MAIN_STARTUP_CALL_NETWORK_INIT,
     };
 
     main_startup_stub_set_network_init_result(ESP_FAIL);
+
+    app_main();
+
+    test_assert_call_sequence(expected_calls, sizeof(expected_calls) / sizeof(expected_calls[0]));
+    TEST_ASSERT_NULL(main_startup_stub_get_last_rest_api_config());
+}
+
+static void test_app_main_stops_before_network_when_input_monitor_fails(void)
+{
+    static const main_startup_call_t expected_calls[] = {
+        MAIN_STARTUP_CALL_EVENT_LOOP_CREATE_DEFAULT,
+        MAIN_STARTUP_CALL_DEVICE_CONFIG_INIT,
+        MAIN_STARTUP_CALL_BOARD_INIT,
+        MAIN_STARTUP_CALL_RELAY_INIT,
+        MAIN_STARTUP_CALL_MOD_IO_INIT,
+        MAIN_STARTUP_CALL_INPUT_MONITOR_START,
+    };
+
+    main_startup_stub_set_input_monitor_start_result(ESP_FAIL);
 
     app_main();
 
@@ -103,5 +124,6 @@ int main(void)
     UNITY_BEGIN();
     RUN_TEST(test_app_main_initializes_network_before_starting_http);
     RUN_TEST(test_app_main_stops_before_http_when_network_init_fails);
+    RUN_TEST(test_app_main_stops_before_network_when_input_monitor_fails);
     return UNITY_END();
 }

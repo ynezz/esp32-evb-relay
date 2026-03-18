@@ -6,6 +6,7 @@
 #include "esp_err.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "input_monitor.h"
 #include "mod_io.h"
 #include "network.h"
 #include "relay.h"
@@ -84,12 +85,6 @@ void app_main(void)
         return;
     }
 
-    err = auth_init();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize auth: %s", esp_err_to_name(err));
-        return;
-    }
-
     err = relay_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize onboard relays: %s", esp_err_to_name(err));
@@ -99,6 +94,18 @@ void app_main(void)
     err = mod_io_init(board_i2c_bus_handle());
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize MOD-IO component: %s", esp_err_to_name(err));
+        return;
+    }
+
+    err = input_monitor_start();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start input monitor: %s", esp_err_to_name(err));
+        return;
+    }
+
+    err = auth_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize auth: %s", esp_err_to_name(err));
         return;
     }
 

@@ -6,7 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "relay.h"
-#include "rest_api_events.h"
+#include "relay_events.h"
 #include "unity.h"
 
 typedef struct {

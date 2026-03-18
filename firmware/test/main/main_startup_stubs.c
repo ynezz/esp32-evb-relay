@@ -16,6 +16,7 @@ typedef struct {
     esp_err_t auth_init_result;
     esp_err_t relay_init_result;
     esp_err_t mod_io_init_result;
+    esp_err_t input_monitor_start_result;
     esp_err_t mod_io_probe_result;
     esp_err_t mod_io_get_status_result;
     esp_err_t network_init_result;
@@ -49,6 +50,7 @@ void main_startup_stub_reset(void)
     s_state.auth_init_result = ESP_OK;
     s_state.relay_init_result = ESP_OK;
     s_state.mod_io_init_result = ESP_OK;
+    s_state.input_monitor_start_result = ESP_OK;
     s_state.mod_io_probe_result = ESP_OK;
     s_state.mod_io_get_status_result = ESP_OK;
     s_state.network_init_result = ESP_OK;
@@ -102,6 +104,11 @@ void main_startup_stub_set_relay_init_result(esp_err_t result)
 void main_startup_stub_set_mod_io_init_result(esp_err_t result)
 {
     s_state.mod_io_init_result = result;
+}
+
+void main_startup_stub_set_input_monitor_start_result(esp_err_t result)
+{
+    s_state.input_monitor_start_result = result;
 }
 
 void main_startup_stub_set_mod_io_probe_result(esp_err_t result)
@@ -250,6 +257,12 @@ esp_err_t mod_io_get_status(mod_io_status_t *out)
     }
 
     return s_state.mod_io_get_status_result;
+}
+
+esp_err_t input_monitor_start(void)
+{
+    main_startup_stub_record_call(MAIN_STARTUP_CALL_INPUT_MONITOR_START);
+    return s_state.input_monitor_start_result;
 }
 
 esp_err_t network_init(void)

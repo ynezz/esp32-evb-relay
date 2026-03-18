@@ -16,6 +16,7 @@ typedef enum {
     EVB_RELAY_EVENT_ANALOG_INPUT,
     EVB_RELAY_EVENT_RELAY_CHANGED,
     EVB_RELAY_EVENT_BUTTON,
+    EVB_RELAY_EVENT_MODIO_PRESENCE,
 } evb_relay_event_id_t;
 
 typedef enum {
@@ -46,6 +47,11 @@ typedef struct {
     bool pressed;
     uint64_t ts_ms;
 } evb_relay_button_event_t;
+
+typedef struct {
+    bool present;
+    uint64_t ts_ms;
+} evb_relay_modio_presence_event_t;
 
 #ifdef __cplusplus
 }

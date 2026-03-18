@@ -8,7 +8,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
-#include "rest_api_events.h"
+#include "relay_events.h"
 
 #define MOD_IO_I2C_TIMEOUT_MS 100
 #define MOD_IO_RELAY_WRITE_COMMAND 0x10U

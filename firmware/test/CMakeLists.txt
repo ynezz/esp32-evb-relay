@@ -29,6 +29,7 @@ target_include_directories(unity_host PUBLIC "${UNITY_DIR}/src")
 add_executable(host_tests
     "${TEST_DIR}/test_main.c"
     "${TEST_DIR}/device_config/test_device_config.c"
+    "${TEST_DIR}/input_monitor/test_input_monitor.c"
     "${TEST_DIR}/mod_io/test_mod_io.c"
     "${TEST_DIR}/relay/test_relay.c"
     "${TEST_DIR}/stubs/esp_idf_stubs.c"
@@ -40,6 +41,7 @@ add_executable(host_tests
     "${FIRMWARE_DIR}/components/board/board.c"
     "${FIRMWARE_DIR}/components/relay/relay.c"
     "${FIRMWARE_DIR}/components/mod_io/mod_io.c"
+    "${FIRMWARE_DIR}/components/input_monitor/input_monitor.c"
     "${FIRMWARE_DIR}/components/device_config/device_config.c"
 )
 
@@ -48,8 +50,9 @@ target_include_directories(host_tests PRIVATE
     "${FIRMWARE_DIR}/components/board/include"
     "${FIRMWARE_DIR}/components/relay/include"
     "${FIRMWARE_DIR}/components/mod_io/include"
+    "${FIRMWARE_DIR}/components/input_monitor/include"
     "${FIRMWARE_DIR}/components/device_config/include"
-    "${FIRMWARE_DIR}/components/rest_api/include"
+    "${FIRMWARE_DIR}/components/relay_events/include"
 )
 
 target_compile_definitions(host_tests PRIVATE

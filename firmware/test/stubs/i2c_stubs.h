@@ -46,6 +46,7 @@ void i2c_stub_set_probe_result(esp_err_t result);
 void i2c_stub_set_transmit_result(esp_err_t result);
 void i2c_stub_set_transmit_receive_result(esp_err_t result);
 esp_err_t i2c_stub_set_read_data(const uint8_t *data, size_t data_len);
+esp_err_t i2c_stub_queue_read_data(const uint8_t *data, size_t data_len);
 const uint8_t *i2c_stub_get_last_transaction(size_t *out_size);
 const i2c_master_bus_config_t *i2c_stub_get_last_bus_config(void);
 const i2c_device_config_t *i2c_stub_get_last_device_config(void);

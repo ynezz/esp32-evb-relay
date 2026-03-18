@@ -2,7 +2,7 @@
 
 #include <string.h>
 
-#include "rest_api_events_stub.h"
+#include "relay_events_stub.h"
 
 #define ESP_EVENT_STUB_MAX_DATA_SIZE 128
 

@@ -3,7 +3,7 @@
 #include "esp_event_stubs.h"
 #include "i2c_stubs.h"
 #include "mod_io.h"
-#include "rest_api_events.h"
+#include "relay_events.h"
 #include "unity.h"
 
 static i2c_master_bus_handle_t test_bus_handle(void)

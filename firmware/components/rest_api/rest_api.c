@@ -15,9 +15,7 @@
 #include "esp_timer.h"
 #include "mod_io.h"
 #include "relay.h"
-#include "rest_api_events.h"
-
-ESP_EVENT_DEFINE_BASE(EVB_RELAY_EVENT);
+#include "relay_events.h"
 
 static const char *TAG = "rest_api";
 

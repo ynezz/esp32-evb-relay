@@ -10,7 +10,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
-#include "rest_api_events.h"
+#include "relay_events.h"
 
 #define RELAY_GPIO_LEVEL_OFF 0
 #define RELAY_GPIO_LEVEL_ON 1

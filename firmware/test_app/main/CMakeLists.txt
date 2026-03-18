@@ -1,6 +1,7 @@
 idf_component_register(SRC_DIRS "."
                        INCLUDE_DIRS "."
-                       PRIV_REQUIRES auth board device_config esp_netif lwip mod_io relay rest_api unity)
+                       PRIV_REQUIRES auth board device_config esp_netif input_monitor lwip mod_io relay
+                                     relay_events rest_api unity)
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE DEVICE_CONFIG_ENABLE_TESTING_API=1)
 

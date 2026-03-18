@@ -1,5 +1,6 @@
 #include "esp_idf_stubs.h"
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -21,6 +22,9 @@ static const char *esp_stub_log_level_name(esp_log_level_t level)
         return "?";
     }
 }
+
+static bool s_time_override_enabled;
+static int64_t s_time_override_us;
 
 const char *esp_err_to_name(esp_err_t err)
 {
@@ -71,6 +75,10 @@ void esp_log_write(esp_log_level_t level, const char *tag, const char *format, .
 
 int64_t esp_timer_get_time(void)
 {
+    if (s_time_override_enabled) {
+        return s_time_override_us;
+    }
+
     struct timespec now = {0};
 
     if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
@@ -90,4 +98,22 @@ void esp_check_stub_log_error(const char *tag, esp_err_t err, const char *format
     va_end(args);
 
     fprintf(stderr, "E (%s) %s: %s\n", (tag != NULL) ? tag : "-", message, esp_err_to_name(err));
+}
+
+void esp_stub_reset_time_override(void)
+{
+    s_time_override_enabled = false;
+    s_time_override_us = 0;
+}
+
+void esp_stub_set_time_us(int64_t time_us)
+{
+    s_time_override_enabled = true;
+    s_time_override_us = time_us;
+}
+
+void esp_stub_advance_time_us(int64_t delta_us)
+{
+    s_time_override_enabled = true;
+    s_time_override_us += delta_us;
 }

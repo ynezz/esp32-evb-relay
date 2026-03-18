@@ -18,3 +18,6 @@ const char *esp_err_to_name(esp_err_t err);
 void esp_log_write(esp_log_level_t level, const char *tag, const char *format, ...);
 int64_t esp_timer_get_time(void);
 void esp_check_stub_log_error(const char *tag, esp_err_t err, const char *format, ...);
+void esp_stub_reset_time_override(void);
+void esp_stub_set_time_us(int64_t time_us);
+void esp_stub_advance_time_us(int64_t delta_us);
