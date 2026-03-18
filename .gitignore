@@ -1,6 +1,7 @@
 .ntm
 docs/olimex-esp32-evb-project
 __pycache__/
+.venv/
 
 # bv (beads viewer) local config and caches
 .bv/

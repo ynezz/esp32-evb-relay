@@ -3,17 +3,24 @@ test_app_sdkconfig_defaults := env(
     "EVB_TEST_APP_SDKCONFIG_DEFAULTS",
     "sdkconfig.defaults",
 )
+venv_dir := ".venv"
+venv_python := ".venv/bin/python"
+venv_astyle_py := ".venv/bin/astyle_py"
 
 build:
     cd firmware && idf.py build
 
-test:
+_ensure-python-tools:
+    test -x {{venv_python}} || (echo "ERROR: Python tools not installed. Run: just setup" >&2 && exit 1)
+    test -x {{venv_astyle_py}} || (echo "ERROR: astyle_py missing from {{venv_dir}}. Run: just setup" >&2 && exit 1)
+
+test: _ensure-python-tools
     cmake -S firmware/test -B firmware/test/build \
         -DCMAKE_BUILD_TYPE=Debug \
         -DENABLE_SANITIZERS=ON
     cmake --build firmware/test/build
     cd firmware/test/build && ctest --output-on-failure
-    python3 -m pytest -p no:cacheprovider \
+    {{venv_python}} -m pytest -p no:cacheprovider \
         firmware/test_integration/test_serial_bootloader_config.py
 
 cli-test:
@@ -22,25 +29,25 @@ cli-test:
 cli-vet:
     cd cli && go vet ./...
 
-test-device:
+test-device: _ensure-python-tools
     cd firmware/test_app && \
         idf.py -DSDKCONFIG_DEFAULTS="{{test_app_sdkconfig_defaults}}" build
     cd firmware/test_app && \
-        pytest --target esp32 -p no:cacheprovider \
+        {{venv_python}} -m pytest --target esp32 -p no:cacheprovider \
         pytest_evb_relay.py \
         --esptool-baud 115200 \
         --port {{serial_port}}
 
-test-integration:
+test-integration: _ensure-python-tools
     cd firmware && \
         idf.py build
     cd firmware && \
-        pytest --target esp32 -p no:cacheprovider \
+        {{venv_python}} -m pytest --target esp32 -p no:cacheprovider \
         test_integration \
         --port {{serial_port}}
 
-format:
-    astyle_py --astyle-version=3.4.7 --style=otbs \
+format: _ensure-python-tools
+    {{venv_astyle_py}} --astyle-version=3.4.7 --style=otbs \
         --attach-namespaces --attach-classes --indent=spaces=4 \
         --convert-tabs --align-reference=name \
         --keep-one-line-statements --pad-header --pad-oper \
@@ -52,8 +59,8 @@ format:
             -g '!firmware/test_app/build/**' \
             -g '!firmware/test_app/managed_components/**')
 
-format-check:
-    astyle_py --dry-run --astyle-version=3.4.7 --style=otbs \
+format-check: _ensure-python-tools
+    {{venv_astyle_py}} --dry-run --astyle-version=3.4.7 --style=otbs \
         --attach-namespaces --attach-classes --indent=spaces=4 \
         --convert-tabs --align-reference=name \
         --keep-one-line-statements --pad-header --pad-oper \
@@ -70,8 +77,14 @@ ci: format-check build test cli-vet cli-test
 ci-full: ci test-device test-integration
 
 setup:
-    python3 -m pip install astyle_py==1.0.5 pytest-embedded \
-        pytest-embedded-serial-esp pytest-embedded-idf
+    python3 -m venv {{venv_dir}}
+    {{venv_python}} -m pip install --upgrade pip
+    {{venv_python}} -m pip install \
+        astyle_py==1.0.5 \
+        pytest-embedded \
+        pytest-embedded-serial-esp \
+        pytest-embedded-idf \
+        requests
     cp tools/pre-commit-hook.sh .git/hooks/pre-commit
     chmod +x .git/hooks/pre-commit
 

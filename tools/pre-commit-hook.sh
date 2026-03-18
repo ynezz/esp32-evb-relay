@@ -22,15 +22,18 @@ ASTYLE_FLAGS="--astyle-version=3.4.7 --style=otbs \
     --indent=spaces=4 --convert-tabs --align-reference=name \
     --keep-one-line-statements --pad-header --pad-oper \
     --unpad-paren --max-continuation-indent=120"
+ASTYLE_PY=".venv/bin/astyle_py"
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
 TMP_FILES=()
 if [ "${#STAGED_C_FILES[@]}" -gt 0 ]; then
-    if ! command -v astyle_py &>/dev/null; then
-        echo "ERROR: astyle_py not found. Run: python3 -m pip install astyle_py==1.0.5"
-        exit 1
+    if [ ! -x "$ASTYLE_PY" ]; then
+        if ! ASTYLE_PY=$(command -v astyle_py); then
+            echo "ERROR: astyle_py not found. Run: just setup"
+            exit 1
+        fi
     fi
 
     for path in "${STAGED_C_FILES[@]}"; do
@@ -40,7 +43,7 @@ if [ "${#STAGED_C_FILES[@]}" -gt 0 ]; then
     done
 
     # shellcheck disable=SC2086
-    if ! astyle_py --dry-run $ASTYLE_FLAGS "${TMP_FILES[@]}"; then
+    if ! "$ASTYLE_PY" --dry-run $ASTYLE_FLAGS "${TMP_FILES[@]}"; then
         echo ""
         echo "Formatting errors detected. Run 'just format' to fix."
         exit 1

@@ -481,8 +481,14 @@ ci: format-check build test
 ci-full: ci test-device test-integration
 
 setup:
-    python3 -m pip install astyle_py==1.0.5 pytest-embedded \
-        pytest-embedded-serial-esp pytest-embedded-idf
+    python3 -m venv .venv
+    .venv/bin/python -m pip install --upgrade pip
+    .venv/bin/python -m pip install \
+        astyle_py==1.0.5 \
+        pytest-embedded \
+        pytest-embedded-serial-esp \
+        pytest-embedded-idf \
+        requests
     cp tools/pre-commit-hook.sh .git/hooks/pre-commit
     chmod +x .git/hooks/pre-commit
 
@@ -518,9 +524,13 @@ if [ "${#STAGED_FILES[@]}" -eq 0 ]; then
     exit 0
 fi
 
-if ! command -v astyle_py &>/dev/null; then
-    echo "ERROR: astyle_py not found. Run: python3 -m pip install astyle_py==1.0.5"
-    exit 1
+ASTYLE_PY=".venv/bin/astyle_py"
+
+if [ ! -x "$ASTYLE_PY" ]; then
+    if ! ASTYLE_PY=$(command -v astyle_py); then
+        echo "ERROR: astyle_py not found. Run: just setup"
+        exit 1
+    fi
 fi
 
 ASTYLE_FLAGS="--astyle-version=3.4.7 --style=otbs \
@@ -540,7 +550,7 @@ for path in "${STAGED_FILES[@]}"; do
 done
 
 # shellcheck disable=SC2086
-if ! astyle_py --dry-run $ASTYLE_FLAGS "${TMP_FILES[@]}"; then
+if ! "$ASTYLE_PY" --dry-run $ASTYLE_FLAGS "${TMP_FILES[@]}"; then
     echo ""
     echo "Formatting errors detected. Run 'just format' to fix."
     exit 1
@@ -612,17 +622,18 @@ Add to existing commit prefix list:
 ## 8. Dependencies
 
 ```bash
-python3 -m pip install astyle_py==1.0.5 \
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install astyle_py==1.0.5 \
     pytest-embedded \
     pytest-embedded-serial-esp \
-    pytest-embedded-idf
+    pytest-embedded-idf \
+    requests
 ```
 
-Install these into the active ESP-IDF Python environment rather than an
-arbitrary system Python. If the local ESP-IDF installation manages its own
-Python environment, prefer enabling pytest support there and then running the
-manual `python3 -m pip` command only inside that active environment when extra
-packages are still needed.
+Install these into a project-local virtualenv rather than a managed system
+Python. That avoids PEP 668 failures on distro-managed interpreters and keeps
+the `just` recipes and pre-commit hook pointed at a deterministic toolchain.
 
 These are needed on both developer machines and CI runners.
 
