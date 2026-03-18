@@ -28,7 +28,6 @@ jobs:
         id: filter
         uses: dorny/paths-filter@v3
         with:
-          base: ${{ github.ref }}
           filters: |
             firmware:
               - 'firmware/**'
