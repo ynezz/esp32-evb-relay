@@ -77,3 +77,42 @@ endif()
 target_link_libraries(host_tests PRIVATE unity_host)
 
 add_test(NAME host_smoke COMMAND host_tests)
+
+add_executable(host_main_startup_tests
+    "${TEST_DIR}/main/test_main_startup.c"
+    "${TEST_DIR}/main/main_startup_stubs.c"
+    "${TEST_DIR}/stubs/esp_idf_stubs.c"
+    "${FIRMWARE_DIR}/main/main.c"
+)
+
+target_include_directories(host_main_startup_tests PRIVATE
+    "${STUBS_DIR}"
+    "${TEST_DIR}/main"
+    "${TEST_DIR}/main/stubs"
+)
+
+target_compile_definitions(host_main_startup_tests PRIVATE
+    UNIT_TEST=1
+    _POSIX_C_SOURCE=200809L
+)
+
+target_compile_options(host_main_startup_tests PRIVATE
+    -Wall
+    -Wextra
+)
+
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(host_main_startup_tests PRIVATE
+        -fno-omit-frame-pointer
+        -fsanitize=address
+        -fsanitize=undefined
+    )
+    target_link_options(host_main_startup_tests PRIVATE
+        -fsanitize=address
+        -fsanitize=undefined
+    )
+endif()
+
+target_link_libraries(host_main_startup_tests PRIVATE unity_host)
+
+add_test(NAME host_main_startup COMMAND host_main_startup_tests)
