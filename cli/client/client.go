@@ -177,7 +177,7 @@ func normalizeBaseURL(host string) (*url.URL, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse host: %w", err)
 	}
-	if parsedURL.Host == "" {
+	if parsedURL.Hostname() == "" {
 		return nil, errors.New("host must include a hostname or IP address")
 	}
 	if parsedURL.RawQuery != "" || parsedURL.Fragment != "" {
