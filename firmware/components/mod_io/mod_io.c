@@ -559,9 +559,18 @@ esp_err_t mod_io_read_analog_inputs(uint16_t out_values[MOD_IO_ANALOG_INPUT_COUN
     return ESP_OK;
 }
 
-#ifdef UNIT_TEST
+#if defined(UNIT_TEST) || defined(MOD_IO_ENABLE_TESTING_API)
 void mod_io_reset_for_testing(void)
 {
+    if (s_state.device_handle != NULL) {
+        esp_err_t err = i2c_master_bus_rm_device(s_state.device_handle);
+
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to remove MOD-IO test device during reset: %s",
+                     esp_err_to_name(err));
+        }
+    }
+
     memset(&s_state, 0, sizeof(s_state));
     s_lock = NULL;
     memset(&s_lock_buffer, 0, sizeof(s_lock_buffer));

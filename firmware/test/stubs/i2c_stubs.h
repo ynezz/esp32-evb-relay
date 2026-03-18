@@ -53,6 +53,7 @@ const i2c_device_config_t *i2c_stub_get_last_device_config(void);
 
 esp_err_t i2c_new_master_bus(const i2c_master_bus_config_t *bus_config,
                              i2c_master_bus_handle_t *ret_bus_handle);
+esp_err_t i2c_del_master_bus(i2c_master_bus_handle_t bus_handle);
 esp_err_t i2c_master_bus_add_device(i2c_master_bus_handle_t bus_handle,
                                     const i2c_device_config_t *dev_config,
                                     i2c_master_dev_handle_t *ret_handle);

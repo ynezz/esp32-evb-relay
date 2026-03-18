@@ -47,8 +47,8 @@ static void test_relay_init_is_idempotent_and_sets_relays_off(void)
     TEST_ASSERT_EQUAL(ESP_OK, relay_init());
     TEST_ASSERT_TRUE(gpio_stub_is_configured(BOARD_RELAY1_GPIO));
     TEST_ASSERT_TRUE(gpio_stub_is_configured(BOARD_RELAY2_GPIO));
-    TEST_ASSERT_EQUAL_INT(GPIO_MODE_OUTPUT, gpio_stub_get_mode(BOARD_RELAY1_GPIO));
-    TEST_ASSERT_EQUAL_INT(GPIO_MODE_OUTPUT, gpio_stub_get_mode(BOARD_RELAY2_GPIO));
+    TEST_ASSERT_EQUAL_INT(GPIO_MODE_INPUT_OUTPUT, gpio_stub_get_mode(BOARD_RELAY1_GPIO));
+    TEST_ASSERT_EQUAL_INT(GPIO_MODE_INPUT_OUTPUT, gpio_stub_get_mode(BOARD_RELAY2_GPIO));
     TEST_ASSERT_EQUAL_UINT32(0U, gpio_stub_get_level(BOARD_RELAY1_GPIO));
     TEST_ASSERT_EQUAL_UINT32(0U, gpio_stub_get_level(BOARD_RELAY2_GPIO));
 

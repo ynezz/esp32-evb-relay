@@ -23,6 +23,10 @@ esp_err_t board_init(void);
 i2c_master_bus_handle_t board_i2c_bus_handle(void);
 i2c_device_config_t board_i2c_device_config(uint16_t device_address);
 
+#if defined(UNIT_TEST) || defined(BOARD_ENABLE_TESTING_API)
+void board_reset_for_testing(void);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

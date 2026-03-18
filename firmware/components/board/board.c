@@ -62,3 +62,20 @@ i2c_device_config_t board_i2c_device_config(uint16_t device_address)
         .flags.disable_ack_check = false,
     };
 }
+
+#if defined(UNIT_TEST) || defined(BOARD_ENABLE_TESTING_API)
+void board_reset_for_testing(void)
+{
+    if (s_i2c_bus_handle != NULL) {
+        esp_err_t err = i2c_del_master_bus(s_i2c_bus_handle);
+
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to delete I2C master bus during test reset: %s",
+                     esp_err_to_name(err));
+        }
+    }
+
+    s_i2c_bus_handle = NULL;
+    s_initialized = false;
+}
+#endif

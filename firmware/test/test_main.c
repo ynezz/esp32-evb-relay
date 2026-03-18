@@ -1,4 +1,5 @@
 #include "device_config.h"
+#include "board.h"
 #include "esp_event_stubs.h"
 #include "esp_idf_stubs.h"
 #include "esp_ota_stubs.h"
@@ -14,6 +15,7 @@
 #include "unity.h"
 
 void test_device_config_suite(void);
+void test_board_suite(void);
 void test_input_monitor_suite(void);
 void test_mod_io_suite(void);
 void test_ota_suite(void);
@@ -31,6 +33,7 @@ void setUp(void)
     esp_stub_reset_restart_count();
     freertos_stub_reset();
     esp_stub_reset_time_override();
+    board_reset_for_testing();
     device_config_reset_for_testing();
     input_monitor_reset_for_testing();
     mod_io_reset_for_testing();
@@ -45,6 +48,7 @@ void tearDown(void)
 int main(void)
 {
     UNITY_BEGIN();
+    test_board_suite();
     test_device_config_suite();
     test_input_monitor_suite();
     test_mod_io_suite();

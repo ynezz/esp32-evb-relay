@@ -5,16 +5,24 @@ idf_component_register(SRC_DIRS "."
                        WHOLE_ARCHIVE)
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
+                           BOARD_ENABLE_TESTING_API=1
                            DEVICE_CONFIG_ENABLE_TESTING_API=1
                            INPUT_MONITOR_ENABLE_TESTING_API=1
+                           MOD_IO_ENABLE_TESTING_API=1
                            REST_API_ENABLE_TESTING_API=1
                            OTA_ENABLE_TESTING_API=1)
+
+idf_component_get_property(board_lib board COMPONENT_LIB)
+target_compile_definitions(${board_lib} PRIVATE BOARD_ENABLE_TESTING_API=1)
 
 idf_component_get_property(device_config_lib device_config COMPONENT_LIB)
 target_compile_definitions(${device_config_lib} PRIVATE DEVICE_CONFIG_ENABLE_TESTING_API=1)
 
 idf_component_get_property(input_monitor_lib input_monitor COMPONENT_LIB)
 target_compile_definitions(${input_monitor_lib} PRIVATE INPUT_MONITOR_ENABLE_TESTING_API=1)
+
+idf_component_get_property(mod_io_lib mod_io COMPONENT_LIB)
+target_compile_definitions(${mod_io_lib} PRIVATE MOD_IO_ENABLE_TESTING_API=1)
 
 idf_component_get_property(rest_api_lib rest_api COMPONENT_LIB)
 target_compile_definitions(${rest_api_lib} PRIVATE REST_API_ENABLE_TESTING_API=1)

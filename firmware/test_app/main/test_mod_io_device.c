@@ -41,6 +41,9 @@ static void require_mod_io_or_skip(void)
 {
     esp_err_t err;
 
+    mod_io_reset_for_testing();
+    board_reset_for_testing();
+
     err = board_init();
     TEST_ASSERT_EQUAL(ESP_OK, err);
 

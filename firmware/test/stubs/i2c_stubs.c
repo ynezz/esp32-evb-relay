@@ -147,6 +147,11 @@ esp_err_t i2c_new_master_bus(const i2c_master_bus_config_t *bus_config,
     return ESP_OK;
 }
 
+esp_err_t i2c_del_master_bus(i2c_master_bus_handle_t bus_handle)
+{
+    return (bus_handle != NULL) ? ESP_OK : ESP_ERR_INVALID_ARG;
+}
+
 esp_err_t i2c_master_bus_add_device(i2c_master_bus_handle_t bus_handle,
                                     const i2c_device_config_t *dev_config,
                                     i2c_master_dev_handle_t *ret_handle)

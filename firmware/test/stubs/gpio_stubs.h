@@ -11,6 +11,7 @@ typedef enum {
     GPIO_MODE_DISABLE = 0,
     GPIO_MODE_INPUT = 1,
     GPIO_MODE_OUTPUT = 2,
+    GPIO_MODE_INPUT_OUTPUT = 3,
 } gpio_mode_t;
 
 typedef enum {
