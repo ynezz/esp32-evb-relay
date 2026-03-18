@@ -126,7 +126,7 @@ def test_download_mode_helper_documents_runner_failure_signatures() -> None:
 def test_test_device_recipe_wraps_pytest_in_whole_run_watchdog() -> None:
     justfile_text = (_repo_root() / "Justfile").read_text(encoding="utf-8")
 
-    assert 'test_device_watchdog_seconds := env("EVB_TEST_DEVICE_WATCHDOG_SECONDS", "1200")' in justfile_text
+    assert 'test_device_watchdog_seconds := env("EVB_TEST_DEVICE_WATCHDOG_SECONDS", "180")' in justfile_text
     assert "../../scripts/run_with_watchdog.py \\" in justfile_text
     assert "--timeout-seconds {{test_device_watchdog_seconds}} \\" in justfile_text
 
