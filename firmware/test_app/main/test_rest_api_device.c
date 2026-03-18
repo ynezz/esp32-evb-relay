@@ -1087,6 +1087,42 @@ TEST_CASE("rest_api device streams relay events over SSE", "[qa][rest_api][devic
     close(sock);
 }
 
+TEST_CASE("rest_api device streams MOD-IO presence events over SSE", "[qa][rest_api][device]")
+{
+    static const uint16_t test_port = 18099U;
+    static const rest_api_config_t config = {
+        .port = test_port,
+        .auth_handler = allow_auth_handler,
+        .status_provider = status_provider,
+    };
+    evb_relay_modio_presence_event_t event = {
+        .present = false,
+        .ts_ms = 12345U,
+    };
+    char response[1024];
+    int sock = -1;
+
+    ensure_tcpip_ready();
+    TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
+
+    sock = open_http_stream_request(test_port, "/api/v1/events", NULL);
+    read_stream_until_contains(sock, ":connected", response, sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "Content-Type: text/event-stream"));
+
+    TEST_ASSERT_EQUAL(ESP_OK,
+                      esp_event_post(EVB_RELAY_EVENT,
+                                     EVB_RELAY_EVENT_MODIO_PRESENCE,
+                                     &event,
+                                     sizeof(event),
+                                     portMAX_DELAY));
+    read_stream_until_contains(sock, "event: modio_presence", response, sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "event: modio_presence"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "data: {\"present\":false,\"ts_ms\":12345}"));
+
+    close(sock);
+}
+
 TEST_CASE("rest_api device emits SSE heartbeats", "[qa][rest_api][device]")
 {
     static const uint16_t test_port = 18096U;

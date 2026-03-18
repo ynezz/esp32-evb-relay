@@ -760,6 +760,17 @@ static bool rest_api_sse_format_message(int32_t event_id,
                            event->ts_ms);
         break;
     }
+    case EVB_RELAY_EVENT_MODIO_PRESENCE: {
+        const evb_relay_modio_presence_event_t *event = event_data;
+
+        strncpy(out_message->event, "modio_presence", sizeof(out_message->event) - 1U);
+        written = snprintf(out_message->data,
+                           sizeof(out_message->data),
+                           "{\"present\":%s,\"ts_ms\":%" PRIu64 "}",
+                           event->present ? "true" : "false",
+                           event->ts_ms);
+        break;
+    }
     default:
         return false;
     }
