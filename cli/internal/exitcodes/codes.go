@@ -5,59 +5,59 @@ import "errors"
 type Code int
 
 const (
-    Success Code = iota
-    GeneralError
-    NetworkError
-    AuthError
-    NotFound
-    BadArgument
-    StateError
-    HardwareUnavailable
+	Success Code = iota
+	GeneralError
+	NetworkError
+	AuthError
+	NotFound
+	BadArgument
+	StateError
+	HardwareUnavailable
 )
 
 type coder interface {
-    ExitCode() Code
+	ExitCode() Code
 }
 
 type codedError struct {
-    code Code
-    err  error
+	code Code
+	err  error
 }
 
 func (e codedError) Error() string {
-    return e.err.Error()
+	return e.err.Error()
 }
 
 func (e codedError) Unwrap() error {
-    return e.err
+	return e.err
 }
 
 func (e codedError) ExitCode() Code {
-    return e.code
+	return e.code
 }
 
 func Wrap(code Code, err error) error {
-    if err == nil {
-        return nil
-    }
+	if err == nil {
+		return nil
+	}
 
-    var existing coder
-    if errors.As(err, &existing) {
-        return err
-    }
+	var existing coder
+	if errors.As(err, &existing) {
+		return err
+	}
 
-    return codedError{code: code, err: err}
+	return codedError{code: code, err: err}
 }
 
 func FromError(err error) Code {
-    if err == nil {
-        return Success
-    }
+	if err == nil {
+		return Success
+	}
 
-    var existing coder
-    if errors.As(err, &existing) {
-        return existing.ExitCode()
-    }
+	var existing coder
+	if errors.As(err, &existing) {
+		return existing.ExitCode()
+	}
 
-    return GeneralError
+	return GeneralError
 }

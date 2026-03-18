@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pre-commit hook: verify firmware formatting and vet staged CLI Go packages
+# Pre-commit hook: verify staged firmware/CLI formatting and vet CLI packages
 set -euo pipefail
 
 mapfile -t STAGED_C_FILES < <(
@@ -56,6 +56,19 @@ if [ "${#STAGED_GO_FILES[@]}" -gt 0 ]; then
         exit 1
     fi
 
+    GO_TMP_FILES=()
+    for path in "${STAGED_GO_FILES[@]}"; do
+        mkdir -p "$TMPDIR/$(dirname "$path")"
+        git show ":$path" > "$TMPDIR/$path"
+        GO_TMP_FILES+=("$TMPDIR/$path")
+    done
+
+    if [ -n "$(gofmt -l "${GO_TMP_FILES[@]}")" ]; then
+        echo "ERROR: gofmt differences detected in staged CLI files."
+        gofmt -d "${GO_TMP_FILES[@]}"
+        exit 1
+    fi
+
     declare -A SEEN_GO_PACKAGES=()
     GO_PACKAGES=()
     for path in "${STAGED_GO_FILES[@]}"; do
@@ -63,7 +76,7 @@ if [ "${#STAGED_GO_FILES[@]}" -gt 0 ]; then
         if [ "$package_dir" = "cli" ]; then
             package="."
         else
-            package="${package_dir#cli/}"
+            package="./${package_dir#cli/}"
         fi
 
         if [ -z "${SEEN_GO_PACKAGES[$package]:-}" ]; then

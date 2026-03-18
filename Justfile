@@ -29,6 +29,10 @@ cli-test:
 cli-vet:
     cd cli && go vet ./...
 
+cli-fmt-check:
+    files="$(gofmt -l cli)"; \
+    test -z "$files" || (gofmt -d $files && exit 1)
+
 test-device: _ensure-python-tools
     cd firmware/test_app && \
         idf.py -DSDKCONFIG_DEFAULTS="{{test_app_sdkconfig_defaults}}" build
@@ -72,7 +76,7 @@ format-check: _ensure-python-tools
             -g '!firmware/test_app/build/**' \
             -g '!firmware/test_app/managed_components/**')
 
-ci: format-check build test cli-vet cli-test
+ci: format-check build test cli-fmt-check cli-vet cli-test
 
 ci-full: ci test-device test-integration
 
