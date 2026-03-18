@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
+	"example.com/esp32-evb-relay/cli/internal/robot"
 )
 
 func newCompletionCommand() *cobra.Command {
@@ -29,6 +31,12 @@ func newCompletionCommand() *cobra.Command {
 			}
 		},
 	}
+
+	robot.AnnotateCommand(command, robot.CommandCapability{
+		Args:         []string{"shell"},
+		OutputFields: []string{"script"},
+		Example:      "evb-relay completion bash",
+	})
 
 	return command
 }

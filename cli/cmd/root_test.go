@@ -88,6 +88,15 @@ func TestRobotCapabilitiesExposeCLIVersion(t *testing.T) {
 		if got := payload["cli_version"]; got != "1.2.3" {
 			t.Fatalf("cli_version = %#v, want %q", got, "1.2.3")
 		}
+		if got := payload["v"]; got != float64(1) {
+			t.Fatalf("v = %#v, want 1", got)
+		}
+		if got := payload["envelope_version"]; got != float64(1) {
+			t.Fatalf("envelope_version = %#v, want 1", got)
+		}
+		if got := payload["default_robot_format"]; got != "toon" {
+			t.Fatalf("default_robot_format = %#v, want %q", got, "toon")
+		}
 
 		if _, exists := payload["version"]; exists {
 			t.Fatalf("unexpected legacy version field in capabilities payload")
@@ -130,8 +139,8 @@ func TestRobotCapabilitiesIgnoreInvalidTimeoutEnv(t *testing.T) {
 			t.Fatalf("json.Unmarshal() returned error: %v", err)
 		}
 
-		if got := payload["name"]; got != "evb-relay" {
-			t.Fatalf("name = %#v, want %q", got, "evb-relay")
+		if got := payload["v"]; got != float64(1) {
+			t.Fatalf("v = %#v, want 1", got)
 		}
 	})
 }
@@ -165,10 +174,76 @@ func TestRobotCapabilitiesIgnoreInvalidConfigFile(t *testing.T) {
 			t.Fatalf("json.Unmarshal() returned error: %v", err)
 		}
 
-		if got := payload["name"]; got != "evb-relay" {
-			t.Fatalf("name = %#v, want %q", got, "evb-relay")
+		if got := payload["v"]; got != float64(1) {
+			t.Fatalf("v = %#v, want 1", got)
 		}
 	})
+}
+
+func TestRobotCapabilitiesExposeCommandAndContractMetadata(t *testing.T) {
+	cmd := newRootCommand()
+	stdout := &bytes.Buffer{}
+	var payload struct {
+		Commands             []map[string]any `json:"commands"`
+		ExitCodes            map[string]any   `json:"exit_codes"`
+		ErrorCodes           map[string]any   `json:"error_codes"`
+		EnvironmentVariables []map[string]any `json:"environment_variables"`
+		StateMachine         map[string]any   `json:"state_machine"`
+	}
+
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"--robot-capabilities"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() returned error: %v", err)
+	}
+
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() returned error: %v", err)
+	}
+
+	if len(payload.Commands) == 0 {
+		t.Fatal("commands metadata is empty")
+	}
+
+	commandNames := make([]string, 0, len(payload.Commands))
+	for _, command := range payload.Commands {
+		name, _ := command["name"].(string)
+		commandNames = append(commandNames, name)
+	}
+	if !containsString(commandNames, "completion") {
+		t.Fatalf("commands missing completion: %#v", commandNames)
+	}
+	if !containsString(commandNames, "input watch") {
+		t.Fatalf("commands missing input watch: %#v", commandNames)
+	}
+
+	if got := payload.ExitCodes["7"]; got != "hardware unavailable" {
+		t.Fatalf("exit_codes[7] = %#v, want %q", got, "hardware unavailable")
+	}
+
+	errorDetails, ok := payload.ErrorCodes["MODIO_NOT_PRESENT"].(map[string]any)
+	if !ok {
+		t.Fatalf("error_codes.MODIO_NOT_PRESENT = %#v; want object", payload.ErrorCodes["MODIO_NOT_PRESENT"])
+	}
+	if got := errorDetails["exit_code"]; got != float64(7) {
+		t.Fatalf("MODIO_NOT_PRESENT exit_code = %#v, want 7", got)
+	}
+
+	envNames := make([]string, 0, len(payload.EnvironmentVariables))
+	for _, item := range payload.EnvironmentVariables {
+		if name, _ := item["name"].(string); name != "" {
+			envNames = append(envNames, name)
+		}
+	}
+	if !containsString(envNames, appconfig.EnvAPIToken) {
+		t.Fatalf("environment_variables missing %q: %#v", appconfig.EnvAPIToken, envNames)
+	}
+
+	if _, ok := payload.StateMachine["modio_sync_states"]; !ok {
+		t.Fatalf("state_machine missing modio_sync_states: %#v", payload.StateMachine)
+	}
 }
 
 func TestCompletionCommandGeneratesBashScript(t *testing.T) {
@@ -207,4 +282,14 @@ func TestCompletionCommandIgnoresInvalidTimeoutEnv(t *testing.T) {
 	if stdout.Len() == 0 {
 		t.Fatal("completion output is empty")
 	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, current := range values {
+		if current == want {
+			return true
+		}
+	}
+
+	return false
 }

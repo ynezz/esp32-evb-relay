@@ -10,7 +10,7 @@ import (
 
 	appconfig "example.com/esp32-evb-relay/cli/internal/config"
 	"example.com/esp32-evb-relay/cli/internal/exitcodes"
-	outputformat "example.com/esp32-evb-relay/cli/internal/format"
+	"example.com/esp32-evb-relay/cli/internal/robot"
 )
 
 type configContextKey struct{}
@@ -22,27 +22,6 @@ type persistentFlags struct {
 	timeout           time.Duration
 	robot             bool
 	robotCapabilities bool
-}
-
-type flagDescriptor struct {
-	Name        string `json:"name"`
-	Shorthand   string `json:"shorthand,omitempty"`
-	Type        string `json:"type"`
-	Default     string `json:"default,omitempty"`
-	Environment string `json:"environment,omitempty"`
-	Description string `json:"description"`
-}
-
-type cliCapabilities struct {
-	Name             string           `json:"name"`
-	CLIVersion       string           `json:"cli_version"`
-	ConfigPath       string           `json:"config_path,omitempty"`
-	ConfigPrecedence []string         `json:"config_precedence"`
-	HumanFormats     []string         `json:"human_formats"`
-	RobotDefault     string           `json:"robot_default_format"`
-	RobotOverrides   []string         `json:"robot_allowed_overrides"`
-	PlannedCommands  []string         `json:"planned_commands"`
-	GlobalFlags      []flagDescriptor `json:"global_flags"`
 }
 
 func Execute() error {
@@ -125,83 +104,15 @@ func newRootCommand() *cobra.Command {
 }
 
 func printCapabilities(cmd *cobra.Command) error {
-	capabilities := cliCapabilities{
-		Name:             "evb-relay",
-		CLIVersion:       Version,
-		ConfigPath:       configPath(cmd),
-		ConfigPrecedence: []string{"flags", "environment", "config_file"},
-		HumanFormats:     outputformat.HumanFormats(),
-		RobotDefault:     outputformat.TOON,
-		RobotOverrides:   []string{outputformat.JSON},
-		PlannedCommands:  []string{"relay", "input", "status", "config", "discover", "ota", "completion"},
-		GlobalFlags: []flagDescriptor{
-			{
-				Name:        "host",
-				Shorthand:   "H",
-				Type:        "string",
-				Environment: appconfig.EnvHost,
-				Description: "Device IP or hostname",
-			},
-			{
-				Name:        "api-token",
-				Shorthand:   "k",
-				Type:        "string",
-				Environment: appconfig.EnvAPIToken,
-				Description: "API authentication token",
-			},
-			{
-				Name:        "format",
-				Shorthand:   "f",
-				Type:        "string",
-				Default:     outputformat.Table,
-				Description: "Human output format: table, json, or plain",
-			},
-			{
-				Name:        "timeout",
-				Shorthand:   "t",
-				Type:        "duration",
-				Default:     appconfig.DefaultTimeout.String(),
-				Environment: appconfig.EnvTimeout,
-				Description: "HTTP request timeout",
-			},
-			{
-				Name:        "robot",
-				Type:        "bool",
-				Default:     "false",
-				Environment: appconfig.EnvRobot,
-				Description: "Enable robot output mode",
-			},
-			{
-				Name:        "robot-capabilities",
-				Type:        "bool",
-				Default:     "false",
-				Description: "Print the CLI contract as JSON and exit",
-			},
-			{
-				Name:        "version",
-				Type:        "bool",
-				Default:     "false",
-				Description: "Print version metadata and exit",
-			},
-		},
+	capabilities, err := robot.BuildCapabilities(cmd.Root(), Version)
+	if err != nil {
+		return exitcodes.Wrap(exitcodes.GeneralError, err)
 	}
 
 	encoder := json.NewEncoder(cmd.OutOrStdout())
+	encoder.SetEscapeHTML(false)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(capabilities)
-}
-
-func configPath(cmd *cobra.Command) string {
-	if resolved, ok := ConfigFromContext(cmd); ok {
-		return resolved.ConfigPath
-	}
-
-	path, err := appconfig.DefaultPath()
-	if err != nil {
-		return ""
-	}
-
-	return path
 }
 
 func ConfigFromContext(cmd *cobra.Command) (appconfig.Runtime, bool) {

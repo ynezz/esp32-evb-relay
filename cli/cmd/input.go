@@ -26,11 +26,28 @@ func newInputCommand() *cobra.Command {
 }
 
 func newInputWatchCommand() *cobra.Command {
-	return &cobra.Command{
+	command := &cobra.Command{
 		Use:   "watch",
 		Short: "Watch the device event stream",
 		RunE:  runInputWatch,
 	}
+
+	robot.AnnotateCommand(command, robot.CommandCapability{
+		Flags: []string{"--host", "--api-token", "--timeout", "--robot"},
+		OutputFields: []string{
+			"stream",
+			"started_at",
+			"device_context",
+			"event",
+			"data",
+			"reason",
+			"received_at",
+		},
+		Errors:  []string{"NETWORK_ERROR", "AUTH_REQUIRED", "AUTH_INVALID"},
+		Example: "evb-relay --robot input watch",
+	})
+
+	return command
 }
 
 func runInputWatch(cmd *cobra.Command, _ []string) error {
