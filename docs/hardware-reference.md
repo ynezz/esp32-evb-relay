@@ -78,12 +78,21 @@ python3 -m esptool --no-stub --chip esp32 --port /dev/ttyS4 \
   --before no_reset` on `/dev/ttyS5` returned `Invalid head of packet`,
   which confirms the runner can reset the board but still cannot hold
   GPIO0 in the ROM-loader state.
+- The image currently flashed on the board reports app version
+  `2ae9772-dirty` with build time `2026-03-18 07:46:58 UTC`, which
+  predates commit `7815069` that added `network_init()` before
+  `rest_api_start()`. That stale image still boot-loops with
+  `tcpip_send_msg_wait_sem ... (Invalid mbox)` because it reaches the
+  HTTP server before `esp_netif_init()` and Ethernet bring-up.
 - The bundled Olimex board docs state that ESP32-EVB boards do not expose
   BOOT-button functionality by default. Manual forced boot mode requires
   a hardware rework around resistors `R46` and `R14`.
 - Treat `Wrong boot mode detected` and `No serial data received` failures
   on this runner as hardware or infrastructure blockers until GPIO0/EN
   download-mode control is fixed outside the repo.
+- Treat the current boot loop on `/dev/ttyS5` as stale-firmware evidence
+  until download-mode control is restored and a post-`7815069` firmware
+  build can be flashed onto the board.
 - `scripts/check-download-mode.sh` now surfaces those signatures before
   `scripts/flash.sh`, `scripts/provision.sh`, `just test-device`, and
   `just test-integration` attempt more expensive flashing steps.
