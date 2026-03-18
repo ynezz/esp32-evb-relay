@@ -92,6 +92,9 @@ func knownErrorPolicies() map[string]errorPolicy {
 		"RELAY_NOT_FOUND": {
 			Retryable: false,
 		},
+		"INPUT_NOT_FOUND": {
+			Retryable: false,
+		},
 		"AUTH_REQUIRED": {
 			Retryable:   false,
 			Remediation: stringPtr(authRemediation),

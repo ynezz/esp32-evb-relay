@@ -103,6 +103,10 @@ func BuildCapabilities(root *cobra.Command, version string) (Capabilities, error
 				Retryable:   false,
 				Remediation: stringPtr(authRemediation),
 			},
+			"INPUT_NOT_FOUND": {
+				ExitCode:  4,
+				Retryable: false,
+			},
 			"MODIO_NOT_PRESENT": {
 				ExitCode:  7,
 				Retryable: false,

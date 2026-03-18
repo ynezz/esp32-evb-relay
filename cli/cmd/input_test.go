@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"sync"
 	"testing"
 	"time"
+
+	"example.com/esp32-evb-relay/cli/internal/exitcodes"
 )
 
 func TestInputWatchOutputsNDJSONStream(t *testing.T) {
@@ -207,6 +210,209 @@ func TestInputWatchStaysNDJSONWhenRobotJSONIsRequested(t *testing.T) {
 	}
 	if _, exists := header["command"]; exists {
 		t.Fatalf("header unexpectedly looks like a robot envelope: %#v", header)
+	}
+}
+
+func TestInputDigitalOutputsJSONWithSampleAgeField(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/inputs/digital" {
+			t.Fatalf("request path = %q, want %q", r.URL.Path, "/api/v1/inputs/digital")
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer input-token" {
+			t.Fatalf("Authorization header = %q, want %q", got, "Bearer input-token")
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(
+			w,
+			`{"sample_ts_ms":12345,"staleness_ms":67,"poll_interval_ms":100,"inputs":[{"id":1,"state":true},{"id":2,"state":false},{"id":3,"state":true},{"id":4,"state":false}]}`,
+		)
+	}))
+	defer server.Close()
+
+	command := newRootCommand()
+	stdout := &bytes.Buffer{}
+	command.SetOut(stdout)
+	command.SetErr(&bytes.Buffer{})
+	command.SetArgs([]string{
+		"--host", server.URL,
+		"--api-token", "input-token",
+		"--format", "json",
+		"input", "digital",
+	})
+
+	if err := command.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if got := payload["sample_ts_ms"]; got != float64(12345) {
+		t.Fatalf("sample_ts_ms = %#v, want 12345", got)
+	}
+	if got := payload["sample_age_ms"]; got != float64(67) {
+		t.Fatalf("sample_age_ms = %#v, want 67", got)
+	}
+	if _, exists := payload["staleness_ms"]; exists {
+		t.Fatalf("unexpected raw staleness_ms field in CLI payload: %#v", payload)
+	}
+	inputs, ok := payload["inputs"].([]any)
+	if !ok || len(inputs) != 4 {
+		t.Fatalf("inputs = %#v, want 4 items", payload["inputs"])
+	}
+}
+
+func TestInputAnalogSingleOutputsJSON(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/inputs/analog/2" {
+			t.Fatalf("request path = %q, want %q", r.URL.Path, "/api/v1/inputs/analog/2")
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(
+			w,
+			`{"sample_ts_ms":5000,"staleness_ms":25,"poll_interval_ms":250,"input":{"id":2,"value":512}}`,
+		)
+	}))
+	defer server.Close()
+
+	command := newRootCommand()
+	stdout := &bytes.Buffer{}
+	command.SetOut(stdout)
+	command.SetErr(&bytes.Buffer{})
+	command.SetArgs([]string{
+		"--host", server.URL,
+		"--api-token", "input-token",
+		"--format", "json",
+		"input", "analog", "2",
+	})
+
+	if err := command.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	var payload analogInputResult
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.Input.ID != 2 || payload.Input.Value != 512 {
+		t.Fatalf("input payload = %#v, want id=2 value=512", payload.Input)
+	}
+	if payload.SampleAgeMS != 25 {
+		t.Fatalf("sample_age_ms = %d, want 25", payload.SampleAgeMS)
+	}
+}
+
+func TestInputDigitalRobotEnvelopeSurfacesSampleUnavailable(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, `{"error":{"code":"MODIO_SAMPLE_UNAVAILABLE","message":"MOD-IO sample is not available yet","status":503}}`)
+	}))
+	defer server.Close()
+
+	command := newRootCommand()
+	stdout := &bytes.Buffer{}
+	command.SetOut(stdout)
+	command.SetErr(&bytes.Buffer{})
+	command.SetArgs([]string{
+		"--host", server.URL,
+		"--api-token", "input-token",
+		"--robot",
+		"--format", "json",
+		"input", "digital",
+	})
+
+	err := command.Execute()
+	if err == nil {
+		t.Fatal("Execute() succeeded; want sample-unavailable error")
+	}
+	if got := exitcodes.FromError(err); got != exitcodes.HardwareUnavailable {
+		t.Fatalf("exit code = %d, want %d", got, exitcodes.HardwareUnavailable)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	errorPayload, ok := payload["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error = %#v; want object", payload["error"])
+	}
+	if got := errorPayload["code"]; got != "MODIO_SAMPLE_UNAVAILABLE" {
+		t.Fatalf("error.code = %#v, want %q", got, "MODIO_SAMPLE_UNAVAILABLE")
+	}
+}
+
+func TestInputAnalogRobotEnvelopeSurfacesInputNotFound(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, `{"error":{"code":"INPUT_NOT_FOUND","message":"Input not found","status":404}}`)
+	}))
+	defer server.Close()
+
+	command := newRootCommand()
+	stdout := &bytes.Buffer{}
+	command.SetOut(stdout)
+	command.SetErr(&bytes.Buffer{})
+	command.SetArgs([]string{
+		"--host", server.URL,
+		"--api-token", "input-token",
+		"--robot",
+		"--format", "json",
+		"input", "analog", "9",
+	})
+
+	err := command.Execute()
+	if err == nil {
+		t.Fatal("Execute() succeeded; want input-not-found error")
+	}
+	if got := exitcodes.FromError(err); got != exitcodes.BadArgument {
+		t.Fatalf("exit code = %d, want %d", got, exitcodes.BadArgument)
+	}
+
+	stdout.Reset()
+	command = newRootCommand()
+	command.SetOut(stdout)
+	command.SetErr(&bytes.Buffer{})
+	command.SetArgs([]string{
+		"--host", server.URL,
+		"--api-token", "input-token",
+		"--robot",
+		"--format", "json",
+		"input", "analog", "4",
+	})
+
+	err = command.Execute()
+	if err == nil {
+		t.Fatal("Execute() succeeded; want input-not-found error")
+	}
+	if got := exitcodes.FromError(err); got != exitcodes.NotFound {
+		t.Fatalf("exit code = %d, want %d", got, exitcodes.NotFound)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	errorPayload, ok := payload["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error = %#v; want object", payload["error"])
+	}
+	if got := errorPayload["code"]; got != "INPUT_NOT_FOUND" {
+		t.Fatalf("error.code = %#v, want %q", got, "INPUT_NOT_FOUND")
 	}
 }
 

@@ -227,6 +227,12 @@ func TestRobotCapabilitiesExposeCommandAndContractMetadata(t *testing.T) {
 	if !containsString(commandNames, "input watch") {
 		t.Fatalf("commands missing input watch: %#v", commandNames)
 	}
+	if !containsString(commandNames, "input digital") {
+		t.Fatalf("commands missing input digital: %#v", commandNames)
+	}
+	if !containsString(commandNames, "input analog") {
+		t.Fatalf("commands missing input analog: %#v", commandNames)
+	}
 	if !containsString(commandNames, "ota flash") {
 		t.Fatalf("commands missing ota flash: %#v", commandNames)
 	}
