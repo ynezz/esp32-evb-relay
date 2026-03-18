@@ -4,6 +4,7 @@
 #include "device_config.h"
 #include "esp_event_stubs.h"
 #include "esp_idf_stubs.h"
+#include "esp_task_wdt_stubs.h"
 #include "freertos_stubs.h"
 #include "gpio_stubs.h"
 #include "i2c_stubs.h"
@@ -238,6 +239,28 @@ static void test_input_monitor_recovers_after_modio_absence(void)
     TEST_ASSERT_EQUAL_UINT16_ARRAY(analog_values, snapshot.analog_values, MOD_IO_ANALOG_INPUT_COUNT);
 }
 
+static void test_input_monitor_task_registers_and_feeds_task_watchdog(void)
+{
+    static const uint16_t analog_values[MOD_IO_ANALOG_INPUT_COUNT] = {1U, 2U, 3U, 4U};
+    input_monitor_snapshot_t snapshot = {0};
+
+    init_present_mod_io(0x00U);
+    gpio_stub_set_input_level(BOARD_BUTTON, 1U);
+    TEST_ASSERT_EQUAL(ESP_OK, input_monitor_start());
+
+    queue_snapshot(0x01U, analog_values);
+    esp_stub_set_time_us(1000000LL);
+    TEST_ASSERT_EQUAL(ESP_OK, input_monitor_run_task_once_for_testing());
+
+    TEST_ASSERT_EQUAL_UINT32(1U, (uint32_t)esp_task_wdt_stub_get_status_count());
+    TEST_ASSERT_EQUAL_UINT32(1U, (uint32_t)esp_task_wdt_stub_get_add_count());
+    TEST_ASSERT_EQUAL_UINT32(1U, (uint32_t)esp_task_wdt_stub_get_reset_count());
+    TEST_ASSERT_EQUAL(ESP_OK, input_monitor_get_snapshot(&snapshot));
+    TEST_ASSERT_TRUE(snapshot.sample_valid);
+    TEST_ASSERT_EQUAL_HEX8(0x01U, snapshot.digital_mask);
+    TEST_ASSERT_EQUAL_UINT16_ARRAY(analog_values, snapshot.analog_values, MOD_IO_ANALOG_INPUT_COUNT);
+}
+
 void test_input_monitor_suite(void)
 {
     RUN_TEST(test_input_monitor_start_configures_button_isr_and_task);
@@ -246,4 +269,5 @@ void test_input_monitor_suite(void)
     RUN_TEST(test_input_monitor_aggregates_analog_changes_against_threshold);
     RUN_TEST(test_input_monitor_button_edges_are_debounced);
     RUN_TEST(test_input_monitor_recovers_after_modio_absence);
+    RUN_TEST(test_input_monitor_task_registers_and_feeds_task_watchdog);
 }

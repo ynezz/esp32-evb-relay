@@ -35,6 +35,7 @@ add_executable(host_tests
     "${TEST_DIR}/relay/test_relay.c"
     "${TEST_DIR}/stubs/esp_idf_stubs.c"
     "${TEST_DIR}/stubs/esp_ota_stubs.c"
+    "${TEST_DIR}/stubs/esp_task_wdt_stubs.c"
     "${TEST_DIR}/stubs/freertos_stubs.c"
     "${TEST_DIR}/stubs/gpio_stubs.c"
     "${TEST_DIR}/stubs/i2c_stubs.c"

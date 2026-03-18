@@ -9,6 +9,7 @@
 #include "esp_check.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -94,6 +95,49 @@ static uint32_t input_monitor_poll_interval_ms(void)
     }
 
     return poll_interval_ms;
+}
+
+static bool input_monitor_task_watchdog_register(void)
+{
+    esp_err_t err = esp_task_wdt_status(NULL);
+
+    if (err == ESP_OK) {
+        return true;
+    }
+
+    if (err == ESP_ERR_NOT_FOUND) {
+        err = esp_task_wdt_add(NULL);
+        if (err == ESP_OK) {
+            return true;
+        }
+    }
+
+    if (err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGW(TAG, "Failed to register input monitor with task watchdog: %s",
+                 esp_err_to_name(err));
+    }
+
+    return false;
+}
+
+static bool input_monitor_task_watchdog_reset(bool registered)
+{
+    esp_err_t err;
+
+    if (!registered) {
+        return false;
+    }
+
+    err = esp_task_wdt_reset();
+    if (err == ESP_OK) {
+        return true;
+    }
+
+    if ((err != ESP_ERR_INVALID_STATE) && (err != ESP_ERR_NOT_FOUND)) {
+        ESP_LOGW(TAG, "Failed to feed input monitor task watchdog: %s", esp_err_to_name(err));
+    }
+
+    return false;
 }
 
 static void input_monitor_publish_event(int32_t event_id,
@@ -419,21 +463,32 @@ static void input_monitor_button_isr(void *arg)
     }
 }
 
+static uint32_t input_monitor_task_process_iteration(void)
+{
+    uint64_t now_ms = input_monitor_timestamp_ms();
+
+    input_monitor_process_button(now_ms, true);
+    if (input_monitor_poll_due(now_ms)) {
+        s_state.last_poll_ts_ms = now_ms;
+        (void)input_monitor_sample_modio(now_ms, true);
+    }
+
+    now_ms = input_monitor_timestamp_ms();
+    return input_monitor_wait_ms_until_next_work(now_ms);
+}
+
 static void input_monitor_task(void *arg)
 {
+    bool watchdog_registered;
+
     (void)arg;
+    watchdog_registered = input_monitor_task_watchdog_register();
 
     for (;;) {
-        uint64_t now_ms = input_monitor_timestamp_ms();
+        uint32_t wait_ms = input_monitor_task_process_iteration();
 
-        input_monitor_process_button(now_ms, true);
-        if (input_monitor_poll_due(now_ms)) {
-            s_state.last_poll_ts_ms = now_ms;
-            (void)input_monitor_sample_modio(now_ms, true);
-        }
-
-        now_ms = input_monitor_timestamp_ms();
-        (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(input_monitor_wait_ms_until_next_work(now_ms)));
+        watchdog_registered = input_monitor_task_watchdog_reset(watchdog_registered);
+        (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(wait_ms));
     }
 }
 
@@ -540,6 +595,26 @@ esp_err_t input_monitor_poll_once_for_testing(void)
     }
 
     return err;
+}
+
+esp_err_t input_monitor_run_task_once_for_testing(void)
+{
+    bool watchdog_registered;
+    uint32_t wait_ms;
+
+    ESP_RETURN_ON_ERROR(input_monitor_lock(), TAG, "Failed to lock input monitor state");
+    if (!s_state.started) {
+        input_monitor_unlock();
+        return ESP_ERR_INVALID_STATE;
+    }
+    input_monitor_unlock();
+
+    watchdog_registered = input_monitor_task_watchdog_register();
+    wait_ms = input_monitor_task_process_iteration();
+    (void)input_monitor_task_watchdog_reset(watchdog_registered);
+    (void)wait_ms;
+
+    return ESP_OK;
 }
 
 void input_monitor_reset_for_testing(void)

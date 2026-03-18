@@ -14,6 +14,7 @@
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
+#include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -113,6 +114,59 @@ static esp_err_t rest_api_send_error_with_retryable(httpd_req_t *req,
                                                     bool retryable);
 static esp_err_t rest_api_sse_start(void);
 static void rest_api_sse_stop(void);
+
+static bool rest_api_task_watchdog_register(const char *task_name)
+{
+    esp_err_t err = esp_task_wdt_status(NULL);
+
+    if (err == ESP_OK) {
+        return true;
+    }
+
+    if (err == ESP_ERR_NOT_FOUND) {
+        err = esp_task_wdt_add(NULL);
+        if (err == ESP_OK) {
+            return true;
+        }
+    }
+
+    if (err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGW(TAG, "Failed to register %s with task watchdog: %s", task_name, esp_err_to_name(err));
+    }
+
+    return false;
+}
+
+static bool rest_api_task_watchdog_reset(bool registered, const char *task_name)
+{
+    esp_err_t err;
+
+    if (!registered) {
+        return false;
+    }
+
+    err = esp_task_wdt_reset();
+    if (err == ESP_OK) {
+        return true;
+    }
+
+    if ((err != ESP_ERR_INVALID_STATE) && (err != ESP_ERR_NOT_FOUND)) {
+        ESP_LOGW(TAG, "Failed to feed %s task watchdog: %s", task_name, esp_err_to_name(err));
+    }
+
+    return false;
+}
+
+static void rest_api_task_watchdog_delete(TaskHandle_t task_handle, const char *task_name)
+{
+    esp_err_t err = esp_task_wdt_delete(task_handle);
+
+    if ((err != ESP_OK) && (err != ESP_ERR_INVALID_STATE) && (err != ESP_ERR_NOT_FOUND)) {
+        ESP_LOGW(TAG, "Failed to unregister %s from task watchdog: %s",
+                 task_name,
+                 esp_err_to_name(err));
+    }
+}
 
 static const char *rest_api_http_status_text(int http_status)
 {
@@ -746,14 +800,18 @@ static void rest_api_sse_dispatch_event_handler(void *arg,
 static void rest_api_sse_dispatch_task(void *arg)
 {
     rest_api_sse_message_t message;
+    bool watchdog_registered;
 
     (void)arg;
+    watchdog_registered = rest_api_task_watchdog_register("rest_api_sse_dispatch");
 
     while (s_sse_state.started) {
         if ((s_sse_state.dispatch_queue == NULL) ||
                 (xQueueReceive(s_sse_state.dispatch_queue,
                                &message,
                                pdMS_TO_TICKS(REST_API_SSE_CLIENT_POLL_WAIT_MS)) != pdTRUE)) {
+            watchdog_registered =
+                rest_api_task_watchdog_reset(watchdog_registered, "rest_api_sse_dispatch");
             continue;
         }
 
@@ -777,8 +835,11 @@ static void rest_api_sse_dispatch_task(void *arg)
         }
 
         rest_api_sse_unlock();
+        watchdog_registered =
+            rest_api_task_watchdog_reset(watchdog_registered, "rest_api_sse_dispatch");
     }
 
+    rest_api_task_watchdog_delete(NULL, "rest_api_sse_dispatch");
     s_sse_state.dispatch_task = NULL;
     vTaskDelete(NULL);
 }
@@ -1043,6 +1104,7 @@ static void rest_api_sse_stop(void)
     }
 
     if (s_sse_state.dispatch_task != NULL) {
+        rest_api_task_watchdog_delete(s_sse_state.dispatch_task, "rest_api_sse_dispatch");
         vTaskDelete(s_sse_state.dispatch_task);
         s_sse_state.dispatch_task = NULL;
     }

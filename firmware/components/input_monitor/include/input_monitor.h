@@ -26,6 +26,7 @@ esp_err_t input_monitor_get_snapshot(input_monitor_snapshot_t *out);
 
 #if defined(UNIT_TEST) || defined(INPUT_MONITOR_ENABLE_TESTING_API)
 esp_err_t input_monitor_poll_once_for_testing(void);
+esp_err_t input_monitor_run_task_once_for_testing(void);
 void input_monitor_reset_for_testing(void);
 #endif
 

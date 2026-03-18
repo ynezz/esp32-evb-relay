@@ -2,6 +2,7 @@
 #include "esp_event_stubs.h"
 #include "esp_idf_stubs.h"
 #include "esp_ota_stubs.h"
+#include "esp_task_wdt_stubs.h"
 #include "freertos_stubs.h"
 #include "gpio_stubs.h"
 #include "i2c_stubs.h"
@@ -25,6 +26,7 @@ void setUp(void)
     nvs_stub_reset();
     esp_event_stub_reset();
     esp_ota_stub_reset();
+    esp_task_wdt_stub_reset();
     esp_stub_reset_restart_count();
     freertos_stub_reset();
     esp_stub_reset_time_override();
