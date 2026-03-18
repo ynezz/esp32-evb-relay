@@ -350,3 +350,26 @@ Use the hardware-backed commands when the target board is available.
 
 For the full three-tier strategy and per-component coverage goals, see
 [`docs/qa-plan.md`](docs/qa-plan.md).
+
+### Device Test Environment Variables
+
+The `just test-device` and `just test-integration` recipes are
+controlled by environment variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `EVB_SERIAL_PORT` | `/dev/esp32-evb` | Serial port for monitor and Unity output |
+| `EVB_FLASH_PORT` | `$EVB_SERIAL_PORT` | Port used by esptool for flashing (set separately for split-port setups) |
+| `EVB_SERIAL_BAUD` | `115200` | Monitor baud rate |
+| `EVB_TEST_APP_SDKCONFIG_DEFAULTS` | `sdkconfig.defaults` | sdkconfig defaults file for the test app build |
+| `EVB_PYTEST_ARGS` | _(empty)_ | Extra flags passed verbatim to pytest |
+
+To see the device serial log and Unity test results live during a run:
+
+```bash
+EVB_PYTEST_ARGS="-v -s" just test-device
+```
+
+`-v` enables verbose test case names; `-s` disables pytest output
+capture so the device boot log and Unity results stream directly to
+your terminal.

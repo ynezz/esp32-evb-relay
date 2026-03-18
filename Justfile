@@ -8,6 +8,7 @@ test_app_sdkconfig_defaults := env(
     "sdkconfig.defaults",
 )
 idf_path := env("IDF_PATH", home_directory() / "esp/esp-idf")
+pytest_args := env("EVB_PYTEST_ARGS", "")
 venv_dir := ".venv"
 venv_python := ".venv/bin/python"
 venv_astyle_py := ".venv/bin/astyle_py"
@@ -54,7 +55,8 @@ test-device: _ensure-python-tools
         pytest_evb_relay.py \
         --esptool-baud 115200 \
         --flash-port {{flash_port}} \
-        --port {{serial_port}}
+        --port {{serial_port}} \
+        {{pytest_args}}
 
 test-integration: _ensure-python-tools
     {{idf_activate}} ./scripts/check-download-mode.sh --port {{flash_port}} --baud 115200
