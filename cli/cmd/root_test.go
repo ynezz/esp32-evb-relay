@@ -2,15 +2,18 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/mdns"
 	"github.com/spf13/cobra"
 
 	appconfig "example.com/esp32-evb-relay/cli/internal/config"
+	"example.com/esp32-evb-relay/cli/internal/exitcodes"
 )
 
 func withVersionMetadata(version string, commit string, date string, fn func()) {
@@ -281,6 +284,42 @@ func TestCompletionCommandIgnoresInvalidTimeoutEnv(t *testing.T) {
 
 	if stdout.Len() == 0 {
 		t.Fatal("completion output is empty")
+	}
+}
+
+func TestRobotModeRejectsHumanFormatsBeforeCommandExecution(t *testing.T) {
+	for _, format := range []string{"table", "plain"} {
+		format := format
+		t.Run(format, func(t *testing.T) {
+			previous := queryMDNS
+			queryMDNS = func(_ context.Context, _ *mdns.QueryParam) error {
+				t.Fatal("queryMDNS was called despite invalid robot format")
+				return nil
+			}
+			t.Cleanup(func() {
+				queryMDNS = previous
+			})
+
+			command := newRootCommand()
+			stdout := &bytes.Buffer{}
+			command.SetOut(stdout)
+			command.SetErr(&bytes.Buffer{})
+			command.SetArgs([]string{"--robot", "--format", format, "discover"})
+
+			err := command.Execute()
+			if err == nil {
+				t.Fatal("Execute() succeeded; want error")
+			}
+			if got := exitcodes.FromError(err); got != exitcodes.BadArgument {
+				t.Fatalf("exit code = %d, want %d", got, exitcodes.BadArgument)
+			}
+			if !strings.Contains(err.Error(), "expected toon or json") {
+				t.Fatalf("error = %q, want robot format guidance", err.Error())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+		})
 	}
 }
 

@@ -141,6 +141,75 @@ func TestInputWatchOutputsNDJSONStream(t *testing.T) {
 	}
 }
 
+func TestInputWatchStaysNDJSONWhenRobotJSONIsRequested(t *testing.T) {
+	eventsWritten := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("X-FW-Version", "0.3.1")
+		w.Header().Set("X-ModIO-Present", "true")
+		w.Header().Set("X-ModIO-Sync", "synchronized")
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Error("response writer does not support flushing")
+			return
+		}
+
+		_, _ = w.Write([]byte("event: digital_input\n"))
+		_, _ = w.Write([]byte("data: {\"id\":2,\"state\":true,\"ts_ms\":12345}\n\n"))
+		flusher.Flush()
+		close(eventsWritten)
+
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	command := newRootCommand()
+	stdout := newObservedBuffer()
+	command.SetOut(stdout)
+	command.SetErr(&bytes.Buffer{})
+	command.SetContext(ctx)
+	command.SetArgs([]string{
+		"--host", server.URL,
+		"--api-token", "stream-token",
+		"--robot",
+		"--format", "json",
+		"input", "watch",
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- command.Execute()
+	}()
+
+	<-eventsWritten
+	stdout.WaitForLineCount(t, 2, time.Second)
+	cancel()
+
+	if err := <-done; err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	lines := bytes.Split(bytes.TrimSpace(stdout.Bytes()), []byte{'\n'})
+	if len(lines) != 3 {
+		t.Fatalf("stream line count = %d, want 3; output=%s", len(lines), stdout.String())
+	}
+
+	var header map[string]any
+	if err := json.Unmarshal(lines[0], &header); err != nil {
+		t.Fatalf("header json.Unmarshal() error = %v", err)
+	}
+	if got := header["stream"]; got != "events" {
+		t.Fatalf("header stream = %#v, want %q", got, "events")
+	}
+	if _, exists := header["command"]; exists {
+		t.Fatalf("header unexpectedly looks like a robot envelope: %#v", header)
+	}
+}
+
 type observedBuffer struct {
 	mu     sync.Mutex
 	buffer bytes.Buffer
