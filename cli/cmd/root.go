@@ -97,6 +97,7 @@ func newRootCommand() *cobra.Command {
 		newDiscoverCommand(),
 		newInputCommand(),
 		newOTACommand(),
+		newRelayCommand(),
 		newStatusCommand(),
 	)
 

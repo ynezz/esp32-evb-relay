@@ -230,6 +230,21 @@ func TestRobotCapabilitiesExposeCommandAndContractMetadata(t *testing.T) {
 	if !containsString(commandNames, "ota flash") {
 		t.Fatalf("commands missing ota flash: %#v", commandNames)
 	}
+	if !containsString(commandNames, "relay list") {
+		t.Fatalf("commands missing relay list: %#v", commandNames)
+	}
+	if !containsString(commandNames, "relay on") {
+		t.Fatalf("commands missing relay on: %#v", commandNames)
+	}
+	if !containsString(commandNames, "relay off") {
+		t.Fatalf("commands missing relay off: %#v", commandNames)
+	}
+	if !containsString(commandNames, "relay toggle") {
+		t.Fatalf("commands missing relay toggle: %#v", commandNames)
+	}
+	if !containsString(commandNames, "relay set") {
+		t.Fatalf("commands missing relay set: %#v", commandNames)
+	}
 	if !containsString(commandNames, "status") {
 		t.Fatalf("commands missing status: %#v", commandNames)
 	}
