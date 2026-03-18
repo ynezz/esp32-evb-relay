@@ -28,8 +28,7 @@ supports OTA firmware updates.
 - **Onboard relays:** GPIO32 and GPIO33
 - **UEXT I2C:** SDA on GPIO13, SCL on GPIO16
 - **Expansion board:** Olimex MOD-IO at I2C address `0x58`
-- **Preferred serial aliases:** `/dev/esp32-evb`,
-  `/dev/esp32-evb-flash`, `/dev/esp32-evb-console`
+- **Preferred serial alias:** `/dev/esp32-evb`
 
 For full pin mappings, flashing notes, MOD-IO protocol details, and the
 current runner caveats, see
@@ -74,8 +73,8 @@ Notes:
 - `just setup` creates the local Python environment used by formatting
   and pytest-based checks.
 - `just ci` is the main quality gate. It runs firmware format checks,
-  firmware build, host tests, CLI format checks, `go vet`, and CLI
-  tests.
+  firmware build, host tests, CLI format checks, `golangci-lint`,
+  `go vet`, and CLI tests.
 - For firmware C/H edits, run `just format` before committing.
 
 ## Device Quickstart

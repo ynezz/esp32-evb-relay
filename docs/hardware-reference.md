@@ -5,9 +5,7 @@
 - **Chip:** ESP32-D0WD (revision v1.0)
 - **MAC:** `bc:dd:c2:f2:aa:19`
 - **Flash:** 4 MB
-- **Preferred single-port alias:** `/dev/esp32-evb`
-- **Preferred split flash alias:** `/dev/esp32-evb-flash`
-- **Preferred split console alias:** `/dev/esp32-evb-console`
+- **Preferred serial alias:** `/dev/esp32-evb`
 - **Serial baud:** 115200
 - **Board FQBN:** `esp32:esp32:esp32-evb`
 
@@ -42,12 +40,14 @@
 - Do not hardcode guest `/dev/ttyS*` paths in repo defaults, CI, or
   runner notes. Under QEMU/virsh, the guest numbering is dynamic and may
   change when the domain XML or PCI layout changes.
-- Prefer stable guest-side udev aliases:
-  - `/dev/esp32-evb` for single-port setups
-  - `/dev/esp32-evb-flash` and `/dev/esp32-evb-console` for split
-    flash/control and live-UART setups
+- Prefer the stable guest-side udev alias `/dev/esp32-evb` for the
+  current single-port runner.
+- Reserve `/dev/esp32-evb-flash` and `/dev/esp32-evb-console` for
+  setups that really expose separate flash/control and live-UART paths.
 - An example guest-side rule file lives at
   [`tools/udev/99-esp32-evb-qemu-serial.rules.example`](../tools/udev/99-esp32-evb-qemu-serial.rules.example).
+- That example rule currently creates only the single-port
+  `/dev/esp32-evb` alias.
 - For the current virsh/QEMU runner, `udevadm info` shows the ESP32-EVB
   UART under guest PCI slot `0000:00:09.0`. The tty node itself is
   dynamic, so bind aliases to that PCI address instead of a transient
@@ -59,7 +59,7 @@
 # Single-port setup using the stable default alias:
 EVB_SERIAL_PORT=/dev/esp32-evb just test-device
 
-# Split flash/control and live UART aliases:
+# Hypothetical split-port setup with extra hardware:
 EVB_FLASH_PORT=/dev/esp32-evb-flash \
 EVB_SERIAL_PORT=/dev/esp32-evb-console \
 just test-device
@@ -68,9 +68,9 @@ just test-device
 # and test-integration run this guardrail automatically before flashing.
 ./scripts/check-download-mode.sh --port /dev/esp32-evb
 
-# For split-port runners, pass the live UART alias as well so the helper
-# can show whether the probe only reset the app instead of reaching the
-# ROM downloader.
+# For hypothetical split-port runners, pass the live UART alias as well
+# so the helper can show whether the probe only reset the app instead of
+# reaching the ROM downloader.
 ./scripts/check-download-mode.sh \
   --port /dev/esp32-evb-flash \
   --console-port /dev/esp32-evb-console
@@ -93,19 +93,16 @@ python3 -m esptool --no-stub --chip esp32 --port /dev/esp32-evb \
 - The self-hosted QEMU runner currently exposes the board as a single
   guest-visible QEMU PCI 16550A adapter (`Red Hat, Inc. QEMU PCI 16550A
   Adapter`) under PCI slot `0000:00:09.0`.
-- On 2026-03-18 the guest tty node for that adapter enumerated as
-  `/dev/ttyS4`. That number is not stable and should only be treated as
-  a diagnostic detail.
 - The guest currently exposes no `/dev/serial/by-id` aliases, so the
   repo-standard `/dev/esp32-evb` alias should be created with a guest
   udev rule that matches the stable PCI parent slot.
-- `udevadm info -a -n /dev/ttyS4` confirms the correct parent match for
-  the alias rule is `KERNELS=="0000:00:09.0"`.
-- `./scripts/check-download-mode.sh --port /dev/ttyS4` passes on the
-  current runner, so the single UART path now supports ROM download mode
-  and firmware flashing from the guest.
-- `EVB_SERIAL_PORT=/dev/ttyS4 just test-device` passes on the current
-  runner. Tier 2 is no longer blocked by guest serial wiring.
+- On 2026-03-18 the guest tty node happened to enumerate as
+  `/dev/ttyS4`. Treat that only as historical diagnostics, not an
+  operational default.
+- `udevadm info -a -n /dev/ttyS4` was the command used to confirm the
+  correct parent match for the alias rule is `KERNELS=="0000:00:09.0"`.
+- Runnable commands in this repo should continue to use
+  `/dev/esp32-evb`, not a transient `/dev/ttyS*` node.
 - The image flashed after restoring download-mode access reports
   app version `0.0.0-dev` and reaches Ethernet DHCP successfully before
   starting the REST API.
