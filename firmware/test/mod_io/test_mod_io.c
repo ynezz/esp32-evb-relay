@@ -1,7 +1,9 @@
 #include <string.h>
 
+#include "esp_event_stubs.h"
 #include "i2c_stubs.h"
 #include "mod_io.h"
+#include "rest_api_events.h"
 #include "unity.h"
 
 static i2c_master_bus_handle_t test_bus_handle(void)
@@ -47,6 +49,20 @@ static void init_present_mod_io(uint8_t relay_mask)
     i2c_stub_set_probe_result(ESP_OK);
     set_read_data_u8(relay_mask);
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_init(test_bus_handle()));
+}
+
+static void assert_last_relay_changed_event(uint8_t expected_id, bool expected_state)
+{
+    evb_relay_relay_changed_event_t event = {0};
+
+    TEST_ASSERT_EQUAL(EVB_RELAY_EVENT, esp_event_stub_get_last_base());
+    TEST_ASSERT_EQUAL_INT(EVB_RELAY_EVENT_RELAY_CHANGED, esp_event_stub_get_last_id());
+    TEST_ASSERT_EQUAL_UINT32(sizeof(event),
+                             esp_event_stub_copy_last_data(&event, sizeof(event)));
+    TEST_ASSERT_EQUAL(EVB_RELAY_RELAY_GROUP_MODIO, event.group);
+    TEST_ASSERT_EQUAL_UINT8(expected_id, event.id);
+    TEST_ASSERT_EQUAL(expected_state, event.state);
+    TEST_ASSERT_TRUE(event.ts_ms > 0U);
 }
 
 static void test_mod_io_requires_initialization(void)
@@ -116,6 +132,14 @@ static void test_mod_io_set_relays_validates_mask_and_round_trips_via_readback(v
     assert_status(true, MOD_IO_RELAY_SYNC_SYNCHRONIZED, 0x0FU);
 }
 
+static void test_mod_io_set_relays_publishes_event_for_changed_bit(void)
+{
+    init_present_mod_io(0x00U);
+
+    TEST_ASSERT_EQUAL(ESP_OK, mod_io_set_relays(0x01U));
+    assert_last_relay_changed_event(1U, true);
+}
+
 static void test_mod_io_set_relay_validates_ids_and_uses_read_modify_write(void)
 {
     const uint8_t expected_write_on[] = {0x10U, 0x07U};
@@ -149,6 +173,20 @@ static void test_mod_io_set_relay_skips_reprobe_when_board_is_already_present(vo
     assert_status(true, MOD_IO_RELAY_SYNC_SYNCHRONIZED, 0x07U);
 }
 
+static void test_mod_io_set_relay_publishes_change_event(void)
+{
+    init_present_mod_io(0x05U);
+
+    TEST_ASSERT_EQUAL(ESP_OK, mod_io_set_relay(2U, true));
+    assert_last_relay_changed_event(2U, true);
+}
+
+static void test_mod_io_digital_input_mask_tracks_input_count(void)
+{
+    TEST_ASSERT_EQUAL_HEX8((uint8_t)((1U << MOD_IO_DIGITAL_INPUT_COUNT) - 1U),
+                           MOD_IO_DIGITAL_INPUT_MASK_ALL);
+}
+
 static void test_mod_io_read_digital_inputs_uses_protocol_command(void)
 {
     const uint8_t expected_transaction[] = {0x20U};
@@ -159,7 +197,7 @@ static void test_mod_io_read_digital_inputs_uses_protocol_command(void)
 
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_read_digital_inputs(&input_mask));
     assert_last_transaction_equals(expected_transaction, sizeof(expected_transaction));
-    TEST_ASSERT_EQUAL_HEX8(0x0FU, input_mask);
+    TEST_ASSERT_EQUAL_HEX8(MOD_IO_DIGITAL_INPUT_MASK_ALL, input_mask);
 }
 
 static void test_mod_io_read_analog_input_validates_ids_and_decodes_samples(void)
@@ -243,8 +281,11 @@ void test_mod_io_suite(void)
     RUN_TEST(test_mod_io_probe_transitions_absent_to_present_with_readback);
     RUN_TEST(test_mod_io_probe_keeps_absent_state_when_board_is_missing);
     RUN_TEST(test_mod_io_set_relays_validates_mask_and_round_trips_via_readback);
+    RUN_TEST(test_mod_io_set_relays_publishes_event_for_changed_bit);
     RUN_TEST(test_mod_io_set_relay_validates_ids_and_uses_read_modify_write);
     RUN_TEST(test_mod_io_set_relay_skips_reprobe_when_board_is_already_present);
+    RUN_TEST(test_mod_io_set_relay_publishes_change_event);
+    RUN_TEST(test_mod_io_digital_input_mask_tracks_input_count);
     RUN_TEST(test_mod_io_read_digital_inputs_uses_protocol_command);
     RUN_TEST(test_mod_io_read_analog_input_validates_ids_and_decodes_samples);
     RUN_TEST(test_mod_io_read_analog_inputs_reads_all_channels);

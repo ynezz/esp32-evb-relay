@@ -1,8 +1,41 @@
 #include <stddef.h>
+#include <string.h>
 
 #include "board.h"
+#include "esp_event.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "mod_io.h"
+#include "rest_api_events.h"
 #include "unity.h"
+
+typedef struct {
+    bool received;
+    evb_relay_relay_changed_event_t event;
+} mod_io_event_capture_t;
+
+static void mod_io_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id,
+                                 void *event_data)
+{
+    mod_io_event_capture_t *capture = (mod_io_event_capture_t *)arg;
+
+    if ((capture == NULL) || (event_base != EVB_RELAY_EVENT) ||
+            (event_id != EVB_RELAY_EVENT_RELAY_CHANGED) || (event_data == NULL)) {
+        return;
+    }
+
+    capture->received = true;
+    memcpy(&capture->event, event_data, sizeof(capture->event));
+}
+
+static void ensure_default_event_loop(void)
+{
+    esp_err_t err = esp_event_loop_create_default();
+
+    if ((err != ESP_OK) && (err != ESP_ERR_INVALID_STATE)) {
+        TEST_FAIL_MESSAGE("Failed to create default event loop");
+    }
+}
 
 static void require_mod_io_or_skip(void)
 {
@@ -61,7 +94,7 @@ TEST_CASE("mod_io device digital inputs stay within low nibble", "[qa][mod_io][d
     require_mod_io_or_skip();
 
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_read_digital_inputs(&input_mask));
-    TEST_ASSERT_EQUAL_HEX8(0x00U, input_mask & (uint8_t)~MOD_IO_RELAY_MASK_ALL);
+    TEST_ASSERT_EQUAL_HEX8(0x00U, input_mask & (uint8_t)~MOD_IO_DIGITAL_INPUT_MASK_ALL);
 }
 
 TEST_CASE("mod_io device analog inputs stay within 10-bit range", "[qa][mod_io][device]")
@@ -88,4 +121,48 @@ TEST_CASE("mod_io device all-off readback is authoritative", "[qa][mod_io][devic
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_get_relays(&relay_mask, &relay_sync));
     TEST_ASSERT_EQUAL(MOD_IO_RELAY_SYNC_SYNCHRONIZED, relay_sync);
     TEST_ASSERT_EQUAL_HEX8(0x00U, relay_mask);
+}
+
+TEST_CASE("mod_io device publishes relay_changed event after write", "[qa][mod_io][device]")
+{
+    esp_event_handler_instance_t handler_instance = NULL;
+    mod_io_event_capture_t capture = {0};
+    bool handler_registered = false;
+    bool mod_io_ready = false;
+
+    ensure_default_event_loop();
+    if (TEST_PROTECT()) {
+        require_mod_io_or_skip();
+        mod_io_ready = true;
+
+        TEST_ASSERT_EQUAL(ESP_OK, mod_io_set_relays(0x00U));
+        TEST_ASSERT_EQUAL(ESP_OK,
+                          esp_event_handler_instance_register(EVB_RELAY_EVENT,
+                                                              EVB_RELAY_EVENT_RELAY_CHANGED,
+                                                              mod_io_event_handler, &capture,
+                                                              &handler_instance));
+        handler_registered = true;
+
+        TEST_ASSERT_EQUAL(ESP_OK, mod_io_set_relays(0x01U));
+        for (int i = 0; (i < 20) && !capture.received; ++i) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+
+        TEST_ASSERT_TRUE(capture.received);
+        TEST_ASSERT_EQUAL(EVB_RELAY_RELAY_GROUP_MODIO, capture.event.group);
+        TEST_ASSERT_EQUAL_UINT8(1U, capture.event.id);
+        TEST_ASSERT_TRUE(capture.event.state);
+        TEST_ASSERT_TRUE(capture.event.ts_ms > 0U);
+    }
+
+    if (handler_registered) {
+        TEST_ASSERT_EQUAL(ESP_OK,
+                          esp_event_handler_instance_unregister(EVB_RELAY_EVENT,
+                                                                EVB_RELAY_EVENT_RELAY_CHANGED,
+                                                                handler_instance));
+    }
+
+    if (mod_io_ready) {
+        TEST_ASSERT_EQUAL(ESP_OK, mod_io_set_relays(0x00U));
+    }
 }

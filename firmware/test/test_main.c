@@ -1,4 +1,5 @@
 #include "device_config.h"
+#include "esp_event_stubs.h"
 #include "gpio_stubs.h"
 #include "i2c_stubs.h"
 #include "mod_io.h"
@@ -15,6 +16,7 @@ void setUp(void)
     gpio_stub_reset();
     i2c_stub_reset();
     nvs_stub_reset();
+    esp_event_stub_reset();
     device_config_reset_for_testing();
     mod_io_reset_for_testing();
     relay_reset_for_testing();

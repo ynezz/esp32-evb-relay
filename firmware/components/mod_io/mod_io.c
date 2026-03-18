@@ -7,6 +7,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "rest_api_events.h"
 
 #define MOD_IO_I2C_TIMEOUT_MS 100
 #define MOD_IO_RELAY_WRITE_COMMAND 0x10U
@@ -94,6 +95,50 @@ static esp_err_t mod_io_validate_input_id(uint8_t input_id)
 static uint64_t mod_io_timestamp_ms(void)
 {
     return (uint64_t)(esp_timer_get_time() / 1000LL);
+}
+
+static void mod_io_publish_change_event(uint8_t relay_id, bool state, uint64_t ts_ms)
+{
+    evb_relay_relay_changed_event_t event = {
+        .group = EVB_RELAY_RELAY_GROUP_MODIO,
+        .id = relay_id,
+        .state = state,
+        .ts_ms = ts_ms,
+    };
+    esp_err_t err = esp_event_post(EVB_RELAY_EVENT, EVB_RELAY_EVENT_RELAY_CHANGED, &event,
+                                   sizeof(event), 0);
+
+    if (err == ESP_ERR_INVALID_STATE) {
+        ESP_LOGD(TAG,
+                 "Skipping MOD-IO relay event for relay %u because the default event loop is not ready",
+                 (unsigned)relay_id);
+        return;
+    }
+
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to publish MOD-IO relay change event for relay %u: %s",
+                 (unsigned)relay_id, esp_err_to_name(err));
+    }
+}
+
+static void mod_io_publish_change_events(uint8_t changed_mask, uint8_t relay_mask)
+{
+    uint64_t ts_ms;
+
+    if (changed_mask == 0U) {
+        return;
+    }
+
+    ts_ms = mod_io_timestamp_ms();
+    for (uint8_t relay_id = 1U; relay_id <= MOD_IO_RELAY_COUNT; ++relay_id) {
+        uint8_t relay_bit = (uint8_t)(1U << (relay_id - 1U));
+
+        if ((changed_mask & relay_bit) == 0U) {
+            continue;
+        }
+
+        mod_io_publish_change_event(relay_id, (relay_mask & relay_bit) != 0U, ts_ms);
+    }
 }
 
 static void mod_io_mark_absent_locked(void)
@@ -355,9 +400,10 @@ esp_err_t mod_io_get_relays(uint8_t *out_mask, mod_io_relay_sync_t *out_sync)
     return err;
 }
 
-static esp_err_t mod_io_write_relays_locked(uint8_t relay_mask)
+static esp_err_t mod_io_write_relays_locked(uint8_t relay_mask, uint8_t *out_changed_mask)
 {
     uint8_t command_buffer[2];
+    uint8_t previous_mask = s_state.relay_mask;
     esp_err_t err;
 
     command_buffer[0] = MOD_IO_RELAY_WRITE_COMMAND;
@@ -367,6 +413,9 @@ static esp_err_t mod_io_write_relays_locked(uint8_t relay_mask)
                               MOD_IO_I2C_TIMEOUT_MS);
     if (err == ESP_OK) {
         mod_io_mark_synchronized_locked(relay_mask);
+        if (out_changed_mask != NULL) {
+            *out_changed_mask = (uint8_t)(previous_mask ^ s_state.relay_mask);
+        }
         ESP_LOGD(TAG, "Set MOD-IO relays to mask=0x%02X at ts_ms=%llu", relay_mask,
                  (unsigned long long)mod_io_timestamp_ms());
     } else {
@@ -378,20 +427,27 @@ static esp_err_t mod_io_write_relays_locked(uint8_t relay_mask)
 
 esp_err_t mod_io_set_relays(uint8_t relay_mask)
 {
+    uint8_t changed_mask = 0;
     esp_err_t err;
 
     ESP_RETURN_ON_ERROR(mod_io_validate_relay_mask(relay_mask), TAG, "Invalid relay mask");
     ESP_RETURN_ON_ERROR(mod_io_lock(), TAG, "Failed to lock MOD-IO state");
     err = mod_io_ensure_present_locked();
     if (err == ESP_OK) {
-        err = mod_io_write_relays_locked(relay_mask);
+        err = mod_io_write_relays_locked(relay_mask, &changed_mask);
     }
     mod_io_unlock();
+
+    if (err == ESP_OK) {
+        mod_io_publish_change_events(changed_mask, relay_mask);
+    }
+
     return err;
 }
 
 esp_err_t mod_io_set_relay(uint8_t relay_id, bool state)
 {
+    uint8_t changed_mask = 0;
     uint8_t relay_mask;
     esp_err_t err;
 
@@ -410,8 +466,13 @@ esp_err_t mod_io_set_relay(uint8_t relay_id, bool state)
         relay_mask &= (uint8_t)~(1U << (relay_id - 1U));
     }
 
-    err = mod_io_write_relays_locked(relay_mask);
+    err = mod_io_write_relays_locked(relay_mask, &changed_mask);
     mod_io_unlock();
+
+    if (err == ESP_OK) {
+        mod_io_publish_change_events(changed_mask, relay_mask);
+    }
+
     return err;
 }
 
@@ -432,7 +493,7 @@ esp_err_t mod_io_read_digital_inputs(uint8_t *out_mask)
     err = i2c_master_transmit_receive(s_state.device_handle, &command, sizeof(command), &read_value,
                                       sizeof(read_value), MOD_IO_I2C_TIMEOUT_MS);
     if (err == ESP_OK) {
-        *out_mask = (uint8_t)(read_value & MOD_IO_RELAY_MASK_ALL);
+        *out_mask = (uint8_t)(read_value & MOD_IO_DIGITAL_INPUT_MASK_ALL);
     } else {
         err = mod_io_reconcile_after_transaction_failure_locked(err);
     }
