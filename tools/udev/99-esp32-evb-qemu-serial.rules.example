@@ -1,6 +1,6 @@
-# Stable alias for the ESP32-EVB CH340 USB-serial adapter passed through
-# from the host via USB device passthrough.
+# Stable alias for the ESP32-EVB serial adapter exposed in the guest as
+# a QEMU PCI 16550A UART at a fixed parent PCI slot.
 # Copy to /etc/udev/rules.d/99-esp32-evb-qemu-serial.rules, then:
 #   sudo udevadm control --reload
 #   sudo udevadm trigger --subsystem-match=tty
-SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="esp32-evb"
+SUBSYSTEM=="tty", KERNELS=="0000:00:09.0", SYMLINK+="esp32-evb"
