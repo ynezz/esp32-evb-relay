@@ -3,6 +3,7 @@
 #include <inttypes.h>
 #include <string.h>
 
+#include "sdkconfig.h"
 #include "board.h"
 #include "device_config.h"
 #include "driver/gpio.h"
@@ -97,6 +98,7 @@ static uint32_t input_monitor_poll_interval_ms(void)
     return poll_interval_ms;
 }
 
+#if CONFIG_ESP_TASK_WDT_EN
 static bool input_monitor_task_watchdog_register(void)
 {
     esp_err_t err = esp_task_wdt_status(NULL);
@@ -139,6 +141,18 @@ static bool input_monitor_task_watchdog_reset(bool registered)
 
     return false;
 }
+#else
+static bool input_monitor_task_watchdog_register(void)
+{
+    return false;
+}
+
+static bool input_monitor_task_watchdog_reset(bool registered)
+{
+    (void)registered;
+    return false;
+}
+#endif
 
 static void input_monitor_publish_event(int32_t event_id,
                                         const void *event_data,

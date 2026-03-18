@@ -247,6 +247,27 @@ static void perform_http_request(uint16_t port,
     close(sock);
 }
 
+static size_t count_substring_occurrences(const char *haystack, const char *needle)
+{
+    const char *cursor;
+    size_t count = 0U;
+    size_t needle_len;
+
+    TEST_ASSERT_NOT_NULL(haystack);
+    TEST_ASSERT_NOT_NULL(needle);
+
+    needle_len = strlen(needle);
+    TEST_ASSERT_GREATER_THAN_UINT32(0U, (uint32_t)needle_len);
+
+    cursor = haystack;
+    while ((cursor = strstr(cursor, needle)) != NULL) {
+        ++count;
+        cursor += needle_len;
+    }
+
+    return count;
+}
+
 static void perform_status_request(uint16_t port,
                                    const char *authorization_header,
                                    char *response,
@@ -845,6 +866,12 @@ TEST_CASE("rest_api device reports input sample unavailable before the monitor s
           "[qa][rest_api][device]")
 {
     static const uint16_t test_port = 18092U;
+    static const char *paths[] = {
+        "/api/v1/inputs/digital",
+        "/api/v1/inputs/digital/1",
+        "/api/v1/inputs/analog",
+        "/api/v1/inputs/analog/1",
+    };
     static const rest_api_config_t config = {
         .port = test_port,
         .auth_handler = allow_auth_handler,
@@ -855,18 +882,28 @@ TEST_CASE("rest_api device reports input sample unavailable before the monitor s
     ensure_tcpip_ready();
     TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
 
-    perform_http_request(test_port, "GET", "/api/v1/inputs/digital", NULL, NULL, response, sizeof(response));
+    for (size_t index = 0; index < (sizeof(paths) / sizeof(paths[0])); ++index) {
+        perform_http_request(test_port, "GET", paths[index], NULL, NULL, response, sizeof(response));
 
-    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 503 Service Unavailable"));
-    TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"MODIO_SAMPLE_UNAVAILABLE\""));
-    TEST_ASSERT_NOT_NULL(strstr(response, "\"retryable\":true"));
-    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Present: true"));
-    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Sync: synchronized"));
+        TEST_ASSERT_EQUAL_UINT32(1U,
+                                 (uint32_t)count_substring_occurrences(response, "HTTP/1.1 "));
+        TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 503 Service Unavailable"));
+        TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"MODIO_SAMPLE_UNAVAILABLE\""));
+        TEST_ASSERT_NOT_NULL(strstr(response, "\"retryable\":true"));
+        TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Present: true"));
+        TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Sync: synchronized"));
+    }
 }
 
 TEST_CASE("rest_api device reports absent MOD-IO on input routes", "[qa][rest_api][device]")
 {
     static const uint16_t test_port = 18093U;
+    static const char *paths[] = {
+        "/api/v1/inputs/digital",
+        "/api/v1/inputs/digital/1",
+        "/api/v1/inputs/analog",
+        "/api/v1/inputs/analog/1",
+    };
     static const rest_api_config_t config = {
         .port = test_port,
         .auth_handler = allow_auth_handler,
@@ -877,12 +914,16 @@ TEST_CASE("rest_api device reports absent MOD-IO on input routes", "[qa][rest_ap
     ensure_tcpip_ready();
     TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
 
-    perform_http_request(test_port, "GET", "/api/v1/inputs/analog/1", NULL, NULL, response, sizeof(response));
+    for (size_t index = 0; index < (sizeof(paths) / sizeof(paths[0])); ++index) {
+        perform_http_request(test_port, "GET", paths[index], NULL, NULL, response, sizeof(response));
 
-    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 503 Service Unavailable"));
-    TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"MODIO_NOT_PRESENT\""));
-    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Present: false"));
-    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Sync: absent"));
+        TEST_ASSERT_EQUAL_UINT32(1U,
+                                 (uint32_t)count_substring_occurrences(response, "HTTP/1.1 "));
+        TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 503 Service Unavailable"));
+        TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"MODIO_NOT_PRESENT\""));
+        TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Present: false"));
+        TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Sync: absent"));
+    }
 }
 
 TEST_CASE("rest_api device exposes cached digital and analog input snapshots",

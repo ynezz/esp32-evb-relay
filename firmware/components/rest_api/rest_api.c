@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "sdkconfig.h"
 #include "cJSON.h"
 #include "device_config.h"
 #include "esp_app_desc.h"
@@ -115,6 +116,7 @@ static esp_err_t rest_api_send_error_with_retryable(httpd_req_t *req,
 static esp_err_t rest_api_sse_start(void);
 static void rest_api_sse_stop(void);
 
+#if CONFIG_ESP_TASK_WDT_EN
 static bool rest_api_task_watchdog_register(const char *task_name)
 {
     esp_err_t err = esp_task_wdt_status(NULL);
@@ -167,6 +169,26 @@ static void rest_api_task_watchdog_delete(TaskHandle_t task_handle, const char *
                  esp_err_to_name(err));
     }
 }
+#else
+static bool rest_api_task_watchdog_register(const char *task_name)
+{
+    (void)task_name;
+    return false;
+}
+
+static bool rest_api_task_watchdog_reset(bool registered, const char *task_name)
+{
+    (void)registered;
+    (void)task_name;
+    return false;
+}
+
+static void rest_api_task_watchdog_delete(TaskHandle_t task_handle, const char *task_name)
+{
+    (void)task_handle;
+    (void)task_name;
+}
+#endif
 
 static const char *rest_api_http_status_text(int http_status)
 {
@@ -1368,15 +1390,23 @@ static esp_err_t rest_api_prepare_input_snapshot(httpd_req_t *req,
     if (err == ESP_ERR_INVALID_STATE) {
         if (!out_status->modio_present) {
             out_status->modio_sync = REST_API_MODIO_SYNC_ABSENT;
-            return rest_api_send_error(req, 503, "MODIO_NOT_PRESENT", "MOD-IO is not present", true);
+            err = rest_api_send_error(req, 503, "MODIO_NOT_PRESENT", "MOD-IO is not present", true);
+            if (err != ESP_OK) {
+                return err;
+            }
+            return ESP_ERR_NOT_FOUND;
         }
 
-        return rest_api_send_error_with_retryable(req,
-                                                  503,
-                                                  "MODIO_SAMPLE_UNAVAILABLE",
-                                                  "MOD-IO input sample is not available yet",
-                                                  true,
-                                                  true);
+        err = rest_api_send_error_with_retryable(req,
+                                                 503,
+                                                 "MODIO_SAMPLE_UNAVAILABLE",
+                                                 "MOD-IO input sample is not available yet",
+                                                 true,
+                                                 true);
+        if (err != ESP_OK) {
+            return err;
+        }
+        return ESP_ERR_NOT_FOUND;
     }
     if (err != ESP_OK) {
         return rest_api_send_error(req, 500, "INPUT_UNAVAILABLE", "Failed to read input snapshot", true);
@@ -1385,16 +1415,24 @@ static esp_err_t rest_api_prepare_input_snapshot(httpd_req_t *req,
     out_status->modio_present = out_snapshot->modio_present;
     if (!out_snapshot->modio_present) {
         out_status->modio_sync = REST_API_MODIO_SYNC_ABSENT;
-        return rest_api_send_error(req, 503, "MODIO_NOT_PRESENT", "MOD-IO is not present", true);
+        err = rest_api_send_error(req, 503, "MODIO_NOT_PRESENT", "MOD-IO is not present", true);
+        if (err != ESP_OK) {
+            return err;
+        }
+        return ESP_ERR_NOT_FOUND;
     }
 
     if (!out_snapshot->sample_valid) {
-        return rest_api_send_error_with_retryable(req,
-                                                  503,
-                                                  "MODIO_SAMPLE_UNAVAILABLE",
-                                                  "MOD-IO input sample is not available yet",
-                                                  true,
-                                                  true);
+        err = rest_api_send_error_with_retryable(req,
+                                                 503,
+                                                 "MODIO_SAMPLE_UNAVAILABLE",
+                                                 "MOD-IO input sample is not available yet",
+                                                 true,
+                                                 true);
+        if (err != ESP_OK) {
+            return err;
+        }
+        return ESP_ERR_NOT_FOUND;
     }
 
     err = device_config_get_poll_interval_ms(out_poll_interval_ms);
