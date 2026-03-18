@@ -26,6 +26,7 @@
 #include "ota.h"
 #include "relay.h"
 #include "relay_events.h"
+#include "rest_api_request_recv.h"
 
 static const char *TAG = "rest_api";
 
@@ -151,6 +152,7 @@ static esp_err_t rest_api_send_error_with_retryable(httpd_req_t *req,
                                                     const char *message,
                                                     bool authenticated,
                                                     bool retryable);
+static esp_err_t rest_api_send_request_body_read_error(httpd_req_t *req, esp_err_t err);
 static esp_err_t rest_api_sse_start(void);
 static void rest_api_sse_stop(void);
 
@@ -1226,9 +1228,6 @@ static esp_err_t rest_api_read_request_body(httpd_req_t *req,
                                             size_t buffer_size,
                                             size_t *out_len)
 {
-    size_t remaining;
-    size_t offset = 0;
-
     ESP_RETURN_ON_FALSE(req != NULL, ESP_ERR_INVALID_ARG, TAG, "HTTP request is required");
     ESP_RETURN_ON_FALSE(buffer != NULL, ESP_ERR_INVALID_ARG, TAG, "Request body buffer is required");
     ESP_RETURN_ON_FALSE(buffer_size > 1U, ESP_ERR_INVALID_ARG, TAG, "Request body buffer is too small");
@@ -1237,32 +1236,13 @@ static esp_err_t rest_api_read_request_body(httpd_req_t *req,
         return ESP_ERR_INVALID_SIZE;
     }
 
-    remaining = (size_t)req->content_len;
-    while (remaining > 0U) {
-        int received;
-        size_t chunk_len = remaining;
+    esp_err_t err = rest_api_request_recv_exact(req, buffer, (size_t)req->content_len, out_len);
 
-        if (chunk_len > (buffer_size - offset - 1U)) {
-            chunk_len = buffer_size - offset - 1U;
-        }
-
-        received = httpd_req_recv(req, buffer + offset, chunk_len);
-        if (received == HTTPD_SOCK_ERR_TIMEOUT) {
-            continue;
-        }
-        if (received <= 0) {
-            return ESP_FAIL;
-        }
-
-        remaining -= (size_t)received;
-        offset += (size_t)received;
+    if (err != ESP_OK) {
+        return err;
     }
 
-    buffer[offset] = '\0';
-    if (out_len != NULL) {
-        *out_len = offset;
-    }
-
+    buffer[req->content_len] = '\0';
     return ESP_OK;
 }
 
@@ -1278,19 +1258,8 @@ static esp_err_t rest_api_parse_boolean_state_request(httpd_req_t *req, bool *ou
     ESP_RETURN_ON_FALSE(out_state != NULL, ESP_ERR_INVALID_ARG, TAG, "State output is required");
 
     err = rest_api_read_request_body(req, request_body, sizeof(request_body), &request_len);
-    if (err == ESP_ERR_INVALID_SIZE) {
-        return rest_api_send_error(req,
-                                   400,
-                                   "INVALID_BODY",
-                                   "Request body is missing or too large",
-                                   true);
-    }
     if (err != ESP_OK) {
-        return rest_api_send_error(req,
-                                   400,
-                                   "INVALID_BODY",
-                                   "Failed to read request body",
-                                   true);
+        return rest_api_send_request_body_read_error(req, err);
     }
 
     root = cJSON_ParseWithLength(request_body, request_len);
@@ -1326,19 +1295,8 @@ static esp_err_t rest_api_parse_modio_relay_states_request(httpd_req_t *req, uin
     ESP_RETURN_ON_FALSE(out_relay_mask != NULL, ESP_ERR_INVALID_ARG, TAG, "Relay mask output is required");
 
     err = rest_api_read_request_body(req, request_body, sizeof(request_body), &request_len);
-    if (err == ESP_ERR_INVALID_SIZE) {
-        return rest_api_send_error(req,
-                                   400,
-                                   "INVALID_BODY",
-                                   "Request body is missing or too large",
-                                   true);
-    }
     if (err != ESP_OK) {
-        return rest_api_send_error(req,
-                                   400,
-                                   "INVALID_BODY",
-                                   "Failed to read request body",
-                                   true);
+        return rest_api_send_request_body_read_error(req, err);
     }
 
     root = cJSON_ParseWithLength(request_body, request_len);
@@ -1889,18 +1847,23 @@ static esp_err_t rest_api_ota_handler(httpd_req_t *req)
 
     remaining = (size_t)req->content_len;
     while (remaining > 0U) {
-        int received;
         size_t chunk_len = remaining;
 
         if (chunk_len > sizeof(chunk)) {
             chunk_len = sizeof(chunk);
         }
 
-        received = httpd_req_recv(req, (char *)chunk, chunk_len);
-        if (received == HTTPD_SOCK_ERR_TIMEOUT) {
-            continue;
+        err = rest_api_request_recv_exact(req, (char *)chunk, chunk_len, NULL);
+        if (err == ESP_ERR_TIMEOUT) {
+            ota_abort_update();
+            return rest_api_send_error_with_retryable(req,
+                                                      408,
+                                                      "REQUEST_TIMEOUT",
+                                                      "Timed out while receiving the firmware image",
+                                                      true,
+                                                      true);
         }
-        if (received <= 0) {
+        if (err != ESP_OK) {
             ota_abort_update();
             return rest_api_send_error_with_retryable(req,
                                                       400,
@@ -1910,7 +1873,7 @@ static esp_err_t rest_api_ota_handler(httpd_req_t *req)
                                                       true);
         }
 
-        err = ota_write_chunk(chunk, (size_t)received);
+        err = ota_write_chunk(chunk, chunk_len);
         if (err != ESP_OK) {
             ota_abort_update();
             if (err == ESP_ERR_OTA_VALIDATE_FAILED) {
@@ -1928,8 +1891,8 @@ static esp_err_t rest_api_ota_handler(httpd_req_t *req)
                                                       true);
         }
 
-        remaining -= (size_t)received;
-        bytes_received += (size_t)received;
+        remaining -= chunk_len;
+        bytes_received += chunk_len;
     }
 
     err = ota_finalize_update();
@@ -1982,19 +1945,8 @@ static esp_err_t rest_api_config_update_handler(httpd_req_t *req)
     }
 
     err = rest_api_read_request_body(req, request_body, sizeof(request_body), &request_len);
-    if (err == ESP_ERR_INVALID_SIZE) {
-        return rest_api_send_error(req,
-                                   400,
-                                   "INVALID_BODY",
-                                   "Request body is missing or too large",
-                                   true);
-    }
     if (err != ESP_OK) {
-        return rest_api_send_error(req,
-                                   400,
-                                   "INVALID_BODY",
-                                   "Failed to read request body",
-                                   true);
+        return rest_api_send_request_body_read_error(req, err);
     }
 
     request_root = cJSON_ParseWithLength(request_body, request_len);
@@ -2869,6 +2821,32 @@ static esp_err_t rest_api_send_error_with_retryable(httpd_req_t *req,
                                         authenticated,
                                         true,
                                         retryable);
+}
+
+static esp_err_t rest_api_send_request_body_read_error(httpd_req_t *req, esp_err_t err)
+{
+    if (err == ESP_ERR_INVALID_SIZE) {
+        return rest_api_send_error(req,
+                                   400,
+                                   "INVALID_BODY",
+                                   "Request body is missing or too large",
+                                   true);
+    }
+
+    if (err == ESP_ERR_TIMEOUT) {
+        return rest_api_send_error_with_retryable(req,
+                                                  408,
+                                                  "REQUEST_TIMEOUT",
+                                                  "Timed out while receiving request body",
+                                                  true,
+                                                  true);
+    }
+
+    return rest_api_send_error(req,
+                               400,
+                               "INVALID_BODY",
+                               "Failed to read request body",
+                               true);
 }
 
 esp_err_t rest_api_send_error(httpd_req_t *req,

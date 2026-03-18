@@ -49,6 +49,7 @@ add_executable(host_tests
     "${FIRMWARE_DIR}/components/input_monitor/input_monitor.c"
     "${FIRMWARE_DIR}/components/device_config/device_config.c"
     "${FIRMWARE_DIR}/components/ota/ota.c"
+    "${FIRMWARE_DIR}/components/rest_api/rest_api_request_recv.c"
 )
 
 target_include_directories(host_tests PRIVATE
@@ -59,6 +60,7 @@ target_include_directories(host_tests PRIVATE
     "${FIRMWARE_DIR}/components/input_monitor/include"
     "${FIRMWARE_DIR}/components/device_config/include"
     "${FIRMWARE_DIR}/components/ota/include"
+    "${FIRMWARE_DIR}/components/rest_api"
     "${FIRMWARE_DIR}/components/rest_api/include"
     "${FIRMWARE_DIR}/components/relay_events/include"
 )
