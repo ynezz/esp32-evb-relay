@@ -33,7 +33,7 @@ test-device: _ensure-python-tools
     cd firmware/test_app && \
         idf.py -DSDKCONFIG_DEFAULTS="{{test_app_sdkconfig_defaults}}" build
     cd firmware/test_app && \
-        {{venv_python}} -m pytest --target esp32 -p no:cacheprovider \
+        ../../{{venv_python}} -m pytest --target esp32 -p no:cacheprovider \
         pytest_evb_relay.py \
         --esptool-baud 115200 \
         --port {{serial_port}}
@@ -42,7 +42,7 @@ test-integration: _ensure-python-tools
     cd firmware && \
         idf.py build
     cd firmware && \
-        {{venv_python}} -m pytest --target esp32 -p no:cacheprovider \
+        ../{{venv_python}} -m pytest --target esp32 -p no:cacheprovider \
         test_integration \
         --port {{serial_port}}
 

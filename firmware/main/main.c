@@ -1,3 +1,5 @@
+#include <string.h>
+
 #include "auth.h"
 #include "board.h"
 #include "device_config.h"
@@ -5,6 +7,7 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "mod_io.h"
+#include "network.h"
 #include "relay.h"
 #include "rest_api.h"
 
@@ -25,9 +28,15 @@ static rest_api_modio_sync_t app_modio_sync_to_rest_api(mod_io_relay_sync_t rela
 static esp_err_t app_status_provider(rest_api_status_view_t *status, void *ctx)
 {
     mod_io_status_t mod_io_status;
+    network_status_t network_status;
     esp_err_t err;
 
     (void)ctx;
+    err = network_get_status(&network_status);
+    if (err != ESP_OK) {
+        return err;
+    }
+
     err = mod_io_probe();
     if ((err != ESP_OK) && (err != ESP_ERR_NOT_FOUND)) {
         ESP_LOGW(TAG, "Failed to refresh MOD-IO state from readback: %s", esp_err_to_name(err));
@@ -38,6 +47,11 @@ static esp_err_t app_status_provider(rest_api_status_view_t *status, void *ctx)
         return err;
     }
 
+    status->network.connected = network_status.connected;
+    memcpy(status->network.hostname, network_status.hostname, sizeof(status->network.hostname));
+    memcpy(status->network.ip, network_status.ip, sizeof(status->network.ip));
+    memcpy(status->network.netmask, network_status.netmask, sizeof(status->network.netmask));
+    memcpy(status->network.gateway, network_status.gateway, sizeof(status->network.gateway));
     status->modio_present = mod_io_status.present;
     status->modio_sync = app_modio_sync_to_rest_api(mod_io_status.relay_sync);
     return ESP_OK;
@@ -85,6 +99,24 @@ void app_main(void)
     err = mod_io_init(board_i2c_bus_handle());
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize MOD-IO component: %s", esp_err_to_name(err));
+        return;
+    }
+
+    err = network_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize Ethernet networking: %s", esp_err_to_name(err));
+        return;
+    }
+
+    err = network_wait_for_ip(NETWORK_DEFAULT_WAIT_FOR_IP_TIMEOUT_MS);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to acquire an Ethernet IP address: %s", esp_err_to_name(err));
+        return;
+    }
+
+    err = network_register_mdns_service(api_config.port);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register mDNS service: %s", esp_err_to_name(err));
         return;
     }
 

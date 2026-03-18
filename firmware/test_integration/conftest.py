@@ -238,7 +238,7 @@ def dut_endpoint(auth_token: str) -> DutEndpoint:
     except RuntimeError as exc:
         pytest.skip(f"could not resolve DUT host {host!r}: {exc}")
 
-    return DutEndpoint(host=host, ip=ip, port=port, base_url=f"http://{host}:{port}")
+    return DutEndpoint(host=host, ip=ip, port=port, base_url=f"http://{ip}:{port}")
 
 
 @pytest.fixture(scope="session")

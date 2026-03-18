@@ -18,7 +18,7 @@ def _assert_no_device_context_headers(response: requests.Response) -> None:
 
 @pytest.mark.esp32
 @pytest.mark.integration
-def test_status_endpoint_returns_expected_schema(http_client) -> None:
+def test_status_endpoint_returns_expected_schema(http_client, dut_endpoint) -> None:
     response = http_client.request("GET", "/api/v1/status")
 
     assert response.status_code == 200
@@ -34,10 +34,13 @@ def test_status_endpoint_returns_expected_schema(http_client) -> None:
 
     network = payload["network"]
     assert isinstance(network["hostname"], str)
-    assert isinstance(network["connected"], bool)
-    assert isinstance(network["ip"], str)
+    assert network["hostname"]
+    assert network["connected"] is True
+    assert network["ip"] == dut_endpoint.ip
     assert isinstance(network["netmask"], str)
+    assert network["netmask"]
     assert isinstance(network["gateway"], str)
+    assert network["gateway"]
 
     modio = payload["modio"]
     assert isinstance(modio["present"], bool)
