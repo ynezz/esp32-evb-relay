@@ -12,3 +12,6 @@ target_compile_definitions(${device_config_lib} PRIVATE DEVICE_CONFIG_ENABLE_TES
 
 idf_component_get_property(input_monitor_lib input_monitor COMPONENT_LIB)
 target_compile_definitions(${input_monitor_lib} PRIVATE INPUT_MONITOR_ENABLE_TESTING_API=1)
+
+idf_component_get_property(rest_api_lib rest_api COMPONENT_LIB)
+target_compile_definitions(${rest_api_lib} PRIVATE REST_API_ENABLE_TESTING_API=1)

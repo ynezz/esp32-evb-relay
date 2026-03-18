@@ -1,5 +1,6 @@
 #include "rest_api.h"
 
+#include <inttypes.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,6 +14,10 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
 #include "input_monitor.h"
 #include "mod_io.h"
 #include "relay.h"
@@ -26,6 +31,24 @@ static rest_api_config_t s_config;
 static rest_api_auth_result_t rest_api_authorize_request(httpd_req_t *req);
 
 #define REST_API_MAX_REQUEST_BODY_LEN 512U
+#define REST_API_SSE_MAX_CLIENTS 4U
+#define REST_API_SSE_DISPATCH_QUEUE_LENGTH 16U
+#define REST_API_SSE_CLIENT_QUEUE_LENGTH 8U
+#define REST_API_SSE_EVENT_NAME_MAX_LEN 24U
+#define REST_API_SSE_DATA_MAX_LEN 128U
+#define REST_API_SSE_CLIENT_TASK_STACK_WORDS 4096U
+#define REST_API_SSE_CLIENT_TASK_PRIORITY 5U
+#define REST_API_SSE_DISPATCH_TASK_STACK_WORDS 4096U
+#define REST_API_SSE_DISPATCH_TASK_PRIORITY 6U
+#define REST_API_SSE_CONNECTED_COMMENT ":connected\n\n"
+#define REST_API_SSE_HEARTBEAT_COMMENT ":heartbeat\n\n"
+#define REST_API_SSE_CLIENT_POLL_WAIT_MS 1000U
+
+#if defined(REST_API_ENABLE_TESTING_API)
+#define REST_API_SSE_HEARTBEAT_MS 250U
+#else
+#define REST_API_SSE_HEARTBEAT_MS 30000U
+#endif
 
 static const char *REST_API_RELAYS_URI = "/api/v1/relays";
 static const char *REST_API_ONBOARD_RELAYS_URI = "/api/v1/relays/onboard";
@@ -37,6 +60,7 @@ static const char *REST_API_DIGITAL_INPUTS_URI = "/api/v1/inputs/digital";
 static const char *REST_API_DIGITAL_INPUT_ID_PREFIX = "/api/v1/inputs/digital/";
 static const char *REST_API_ANALOG_INPUTS_URI = "/api/v1/inputs/analog";
 static const char *REST_API_ANALOG_INPUT_ID_PREFIX = "/api/v1/inputs/analog/";
+static const char *REST_API_EVENTS_URI = "/api/v1/events";
 static const char *REST_API_CONFIG_URI = "/api/v1/config";
 
 typedef struct {
@@ -51,12 +75,40 @@ typedef struct {
     device_config_modio_boot_policy_t modio_boot_policy;
 } rest_api_config_update_request_t;
 
+typedef struct {
+    char event[REST_API_SSE_EVENT_NAME_MAX_LEN];
+    char data[REST_API_SSE_DATA_MAX_LEN];
+} rest_api_sse_message_t;
+
+typedef struct {
+    bool active;
+    bool close_requested;
+    QueueHandle_t queue;
+    TaskHandle_t task_handle;
+    httpd_req_t *req;
+    rest_api_status_view_t status;
+    int sockfd;
+} rest_api_sse_client_t;
+
+typedef struct {
+    bool started;
+    QueueHandle_t dispatch_queue;
+    SemaphoreHandle_t lock;
+    TaskHandle_t dispatch_task;
+    esp_event_handler_instance_t event_handler;
+    rest_api_sse_client_t clients[REST_API_SSE_MAX_CLIENTS];
+} rest_api_sse_state_t;
+
+static rest_api_sse_state_t s_sse_state;
+
 static esp_err_t rest_api_send_error_with_retryable(httpd_req_t *req,
                                                     int http_status,
                                                     const char *code,
                                                     const char *message,
                                                     bool authenticated,
                                                     bool retryable);
+static esp_err_t rest_api_sse_start(void);
+static void rest_api_sse_stop(void);
 
 static const char *rest_api_http_status_text(int http_status)
 {
@@ -538,6 +590,468 @@ static void rest_api_add_sample_metadata(cJSON *root,
     cJSON_AddNumberToObject(root, "sample_ts_ms", (double)sample_ts_ms);
     cJSON_AddNumberToObject(root, "staleness_ms", (double)staleness_ms);
     cJSON_AddNumberToObject(root, "poll_interval_ms", (double)poll_interval_ms);
+}
+
+static bool rest_api_sse_lock(void)
+{
+    return (s_sse_state.lock != NULL) && (xSemaphoreTake(s_sse_state.lock, portMAX_DELAY) == pdTRUE);
+}
+
+static void rest_api_sse_unlock(void)
+{
+    if (s_sse_state.lock != NULL) {
+        xSemaphoreGive(s_sse_state.lock);
+    }
+}
+
+static const char *rest_api_sse_group_name(evb_relay_relay_group_t group)
+{
+    switch (group) {
+    case EVB_RELAY_RELAY_GROUP_ONBOARD:
+        return "onboard";
+    case EVB_RELAY_RELAY_GROUP_MODIO:
+        return "modio";
+    default:
+        return "unknown";
+    }
+}
+
+static bool rest_api_sse_format_message(int32_t event_id,
+                                        const void *event_data,
+                                        rest_api_sse_message_t *out_message)
+{
+    int written = 0;
+
+    if ((event_data == NULL) || (out_message == NULL)) {
+        return false;
+    }
+
+    memset(out_message, 0, sizeof(*out_message));
+
+    switch (event_id) {
+    case EVB_RELAY_EVENT_DIGITAL_INPUT: {
+        const evb_relay_digital_input_event_t *event = event_data;
+
+        strncpy(out_message->event, "digital_input", sizeof(out_message->event) - 1U);
+        written = snprintf(out_message->data,
+                           sizeof(out_message->data),
+                           "{\"id\":%u,\"state\":%s,\"ts_ms\":%" PRIu64 "}",
+                           (unsigned)event->id,
+                           event->state ? "true" : "false",
+                           event->ts_ms);
+        break;
+    }
+    case EVB_RELAY_EVENT_ANALOG_INPUT: {
+        const evb_relay_analog_input_event_t *event = event_data;
+
+        strncpy(out_message->event, "analog_input", sizeof(out_message->event) - 1U);
+        written = snprintf(out_message->data,
+                           sizeof(out_message->data),
+                           "{\"id\":%u,\"value\":%u,\"ts_ms\":%" PRIu64 "}",
+                           (unsigned)event->id,
+                           (unsigned)event->value,
+                           event->ts_ms);
+        break;
+    }
+    case EVB_RELAY_EVENT_RELAY_CHANGED: {
+        const evb_relay_relay_changed_event_t *event = event_data;
+
+        strncpy(out_message->event, "relay_changed", sizeof(out_message->event) - 1U);
+        written = snprintf(out_message->data,
+                           sizeof(out_message->data),
+                           "{\"group\":\"%s\",\"id\":%u,\"state\":%s,\"ts_ms\":%" PRIu64 "}",
+                           rest_api_sse_group_name(event->group),
+                           (unsigned)event->id,
+                           event->state ? "true" : "false",
+                           event->ts_ms);
+        break;
+    }
+    case EVB_RELAY_EVENT_BUTTON: {
+        const evb_relay_button_event_t *event = event_data;
+
+        strncpy(out_message->event, "button", sizeof(out_message->event) - 1U);
+        written = snprintf(out_message->data,
+                           sizeof(out_message->data),
+                           "{\"pressed\":%s,\"ts_ms\":%" PRIu64 "}",
+                           event->pressed ? "true" : "false",
+                           event->ts_ms);
+        break;
+    }
+    default:
+        return false;
+    }
+
+    return (written > 0) && ((size_t)written < sizeof(out_message->data));
+}
+
+static void rest_api_sse_release_client_slot(rest_api_sse_client_t *client)
+{
+    QueueHandle_t queue = NULL;
+    httpd_req_t *req = NULL;
+
+    if (client == NULL) {
+        return;
+    }
+
+    if (rest_api_sse_lock()) {
+        queue = client->queue;
+        req = client->req;
+        memset(client, 0, sizeof(*client));
+        client->sockfd = 0;
+        rest_api_sse_unlock();
+    } else {
+        queue = client->queue;
+        req = client->req;
+        memset(client, 0, sizeof(*client));
+    }
+
+    if (queue != NULL) {
+        vQueueDelete(queue);
+    }
+
+    if (req != NULL) {
+        (void)httpd_resp_send_chunk(req, NULL, 0);
+        (void)httpd_req_async_handler_complete(req);
+    }
+}
+
+static void rest_api_sse_dispatch_event_handler(void *arg,
+                                                esp_event_base_t event_base,
+                                                int32_t event_id,
+                                                void *event_data)
+{
+    rest_api_sse_message_t message;
+
+    (void)arg;
+
+    if ((event_base != EVB_RELAY_EVENT) || !s_sse_state.started || (s_sse_state.dispatch_queue == NULL)) {
+        return;
+    }
+
+    if (!rest_api_sse_format_message(event_id, event_data, &message)) {
+        return;
+    }
+
+    if (xQueueSend(s_sse_state.dispatch_queue, &message, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "Dropping SSE event because the dispatch queue is full");
+    }
+}
+
+static void rest_api_sse_dispatch_task(void *arg)
+{
+    rest_api_sse_message_t message;
+
+    (void)arg;
+
+    while (s_sse_state.started) {
+        if ((s_sse_state.dispatch_queue == NULL) ||
+                (xQueueReceive(s_sse_state.dispatch_queue,
+                               &message,
+                               pdMS_TO_TICKS(REST_API_SSE_CLIENT_POLL_WAIT_MS)) != pdTRUE)) {
+            continue;
+        }
+
+        if (!rest_api_sse_lock()) {
+            continue;
+        }
+
+        for (size_t index = 0; index < REST_API_SSE_MAX_CLIENTS; ++index) {
+            rest_api_sse_client_t *client = &s_sse_state.clients[index];
+
+            if (!client->active || client->close_requested || (client->queue == NULL)) {
+                continue;
+            }
+
+            if (xQueueSend(client->queue, &message, 0) != pdTRUE) {
+                client->close_requested = true;
+                if ((s_server != NULL) && (client->sockfd >= 0)) {
+                    (void)httpd_sess_trigger_close(s_server, client->sockfd);
+                }
+            }
+        }
+
+        rest_api_sse_unlock();
+    }
+
+    s_sse_state.dispatch_task = NULL;
+    vTaskDelete(NULL);
+}
+
+static void rest_api_sse_client_task(void *arg)
+{
+    rest_api_sse_client_t *client = arg;
+    TickType_t last_send_tick = xTaskGetTickCount();
+    esp_err_t err = ESP_OK;
+
+    if ((client == NULL) || (client->req == NULL) || (client->queue == NULL)) {
+        vTaskDelete(NULL);
+        return;
+    }
+
+    httpd_resp_set_type(client->req, "text/event-stream");
+    httpd_resp_set_hdr(client->req, "Cache-Control", "no-cache");
+    httpd_resp_set_hdr(client->req, "Connection", "keep-alive");
+    httpd_resp_set_hdr(client->req, "X-Accel-Buffering", "no");
+    rest_api_try_attach_device_context_headers(client->req, &client->status, true);
+
+    err = httpd_resp_send_chunk(client->req,
+                                REST_API_SSE_CONNECTED_COMMENT,
+                                HTTPD_RESP_USE_STRLEN);
+    if (err == ESP_OK) {
+        last_send_tick = xTaskGetTickCount();
+    }
+
+    while ((err == ESP_OK) && !client->close_requested) {
+        rest_api_sse_message_t message;
+
+        if (xQueueReceive(client->queue,
+                          &message,
+                          pdMS_TO_TICKS(REST_API_SSE_CLIENT_POLL_WAIT_MS)) == pdTRUE) {
+            char chunk[REST_API_SSE_EVENT_NAME_MAX_LEN + REST_API_SSE_DATA_MAX_LEN + 32U];
+            int written = snprintf(chunk,
+                                   sizeof(chunk),
+                                   "event: %s\ndata: %s\n\n",
+                                   message.event,
+                                   message.data);
+
+            if ((written <= 0) || ((size_t)written >= sizeof(chunk))) {
+                err = ESP_FAIL;
+                break;
+            }
+
+            err = httpd_resp_send_chunk(client->req, chunk, HTTPD_RESP_USE_STRLEN);
+            last_send_tick = xTaskGetTickCount();
+            continue;
+        }
+
+        if (client->close_requested) {
+            break;
+        }
+
+        if ((xTaskGetTickCount() - last_send_tick) < pdMS_TO_TICKS(REST_API_SSE_HEARTBEAT_MS)) {
+            continue;
+        }
+
+        err = httpd_resp_send_chunk(client->req,
+                                    REST_API_SSE_HEARTBEAT_COMMENT,
+                                    HTTPD_RESP_USE_STRLEN);
+        last_send_tick = xTaskGetTickCount();
+    }
+
+    rest_api_sse_release_client_slot(client);
+    vTaskDelete(NULL);
+}
+
+static esp_err_t rest_api_events_handler(httpd_req_t *req)
+{
+    rest_api_status_view_t status;
+    rest_api_sse_client_t *client = NULL;
+    httpd_req_t *async_req = NULL;
+    BaseType_t task_result;
+    esp_err_t err;
+
+    err = rest_api_require_authenticated_status(req, &status);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    if (!s_sse_state.started) {
+        return rest_api_send_error(req,
+                                   503,
+                                   "SSE_UNAVAILABLE",
+                                   "Event stream is not available",
+                                   true);
+    }
+
+    err = httpd_req_async_handler_begin(req, &async_req);
+    if (err != ESP_OK) {
+        return rest_api_send_error(req,
+                                   503,
+                                   "SSE_UNAVAILABLE",
+                                   "Failed to open event stream",
+                                   true);
+    }
+
+    if (!rest_api_sse_lock()) {
+        (void)httpd_req_async_handler_complete(async_req);
+        return rest_api_send_error(req,
+                                   503,
+                                   "SSE_UNAVAILABLE",
+                                   "Event stream is not available",
+                                   true);
+    }
+
+    for (size_t index = 0; index < REST_API_SSE_MAX_CLIENTS; ++index) {
+        if (!s_sse_state.clients[index].active) {
+            client = &s_sse_state.clients[index];
+            memset(client, 0, sizeof(*client));
+            client->active = true;
+            client->req = async_req;
+            client->status = status;
+            client->sockfd = httpd_req_to_sockfd(req);
+            break;
+        }
+    }
+    rest_api_sse_unlock();
+
+    if (client == NULL) {
+        (void)httpd_req_async_handler_complete(async_req);
+        return rest_api_send_error(req,
+                                   503,
+                                   "SSE_CLIENT_LIMIT_REACHED",
+                                   "Too many SSE clients are connected",
+                                   true);
+    }
+
+    client->queue = xQueueCreate(REST_API_SSE_CLIENT_QUEUE_LENGTH, sizeof(rest_api_sse_message_t));
+    if (client->queue == NULL) {
+        rest_api_sse_release_client_slot(client);
+        return rest_api_send_error(req,
+                                   503,
+                                   "SSE_UNAVAILABLE",
+                                   "Failed to allocate event stream buffers",
+                                   true);
+    }
+
+    task_result = xTaskCreate(rest_api_sse_client_task,
+                              "rest_api_sse",
+                              REST_API_SSE_CLIENT_TASK_STACK_WORDS,
+                              client,
+                              REST_API_SSE_CLIENT_TASK_PRIORITY,
+                              &client->task_handle);
+    if (task_result != pdPASS) {
+        rest_api_sse_release_client_slot(client);
+        return rest_api_send_error(req,
+                                   503,
+                                   "SSE_UNAVAILABLE",
+                                   "Failed to start event stream task",
+                                   true);
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t rest_api_sse_start(void)
+{
+    BaseType_t task_result;
+    esp_err_t err;
+
+    if (s_sse_state.started) {
+        return ESP_OK;
+    }
+
+    memset(&s_sse_state, 0, sizeof(s_sse_state));
+
+    s_sse_state.lock = xSemaphoreCreateMutex();
+    if (s_sse_state.lock == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    s_sse_state.dispatch_queue = xQueueCreate(REST_API_SSE_DISPATCH_QUEUE_LENGTH,
+                                              sizeof(rest_api_sse_message_t));
+    if (s_sse_state.dispatch_queue == NULL) {
+        vSemaphoreDelete(s_sse_state.lock);
+        s_sse_state.lock = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+
+    s_sse_state.started = true;
+    task_result = xTaskCreate(rest_api_sse_dispatch_task,
+                              "rest_api_sse_dispatch",
+                              REST_API_SSE_DISPATCH_TASK_STACK_WORDS,
+                              NULL,
+                              REST_API_SSE_DISPATCH_TASK_PRIORITY,
+                              &s_sse_state.dispatch_task);
+    if (task_result != pdPASS) {
+        s_sse_state.started = false;
+        vQueueDelete(s_sse_state.dispatch_queue);
+        vSemaphoreDelete(s_sse_state.lock);
+        s_sse_state.dispatch_queue = NULL;
+        s_sse_state.lock = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+
+    err = esp_event_handler_instance_register(EVB_RELAY_EVENT,
+                                              ESP_EVENT_ANY_ID,
+                                              rest_api_sse_dispatch_event_handler,
+                                              NULL,
+                                              &s_sse_state.event_handler);
+    if (err != ESP_OK) {
+        rest_api_sse_stop();
+        return err;
+    }
+
+    return ESP_OK;
+}
+
+static void rest_api_sse_stop(void)
+{
+    if (!s_sse_state.started && (s_sse_state.lock == NULL) &&
+            (s_sse_state.dispatch_queue == NULL) && (s_sse_state.dispatch_task == NULL)) {
+        return;
+    }
+
+    if (s_sse_state.event_handler != NULL) {
+        (void)esp_event_handler_instance_unregister(EVB_RELAY_EVENT,
+                                                    ESP_EVENT_ANY_ID,
+                                                    s_sse_state.event_handler);
+        s_sse_state.event_handler = NULL;
+    }
+
+    s_sse_state.started = false;
+
+    if (rest_api_sse_lock()) {
+        for (size_t index = 0; index < REST_API_SSE_MAX_CLIENTS; ++index) {
+            rest_api_sse_client_t *client = &s_sse_state.clients[index];
+
+            if (!client->active) {
+                continue;
+            }
+
+            client->close_requested = true;
+            if ((s_server != NULL) && (client->sockfd >= 0)) {
+                (void)httpd_sess_trigger_close(s_server, client->sockfd);
+            }
+        }
+        rest_api_sse_unlock();
+    }
+
+    for (uint8_t attempt = 0U; attempt < 15U; ++attempt) {
+        bool any_active = false;
+
+        if (rest_api_sse_lock()) {
+            for (size_t index = 0; index < REST_API_SSE_MAX_CLIENTS; ++index) {
+                if (s_sse_state.clients[index].active) {
+                    any_active = true;
+                    break;
+                }
+            }
+            rest_api_sse_unlock();
+        }
+
+        if (!any_active) {
+            break;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(REST_API_SSE_CLIENT_POLL_WAIT_MS));
+    }
+
+    if (s_sse_state.dispatch_task != NULL) {
+        vTaskDelete(s_sse_state.dispatch_task);
+        s_sse_state.dispatch_task = NULL;
+    }
+
+    if (s_sse_state.dispatch_queue != NULL) {
+        vQueueDelete(s_sse_state.dispatch_queue);
+        s_sse_state.dispatch_queue = NULL;
+    }
+
+    if (s_sse_state.lock != NULL) {
+        vSemaphoreDelete(s_sse_state.lock);
+        s_sse_state.lock = NULL;
+    }
+
+    memset(s_sse_state.clients, 0, sizeof(s_sse_state.clients));
 }
 
 static esp_err_t rest_api_read_request_body(httpd_req_t *req,
@@ -2105,6 +2619,12 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
         .handler = rest_api_analog_input_handler,
         .user_ctx = NULL,
     };
+    httpd_uri_t events_uri = {
+        .uri = REST_API_EVENTS_URI,
+        .method = HTTP_GET,
+        .handler = rest_api_events_handler,
+        .user_ctx = NULL,
+    };
     httpd_uri_t config_uri = {
         .uri = REST_API_CONFIG_URI,
         .method = HTTP_GET,
@@ -2240,6 +2760,14 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
         return err;
     }
 
+    err = httpd_register_uri_handler(s_server, &events_uri);
+    if (err != ESP_OK) {
+        httpd_stop(s_server);
+        s_server = NULL;
+        memset(&s_config, 0, sizeof(s_config));
+        return err;
+    }
+
     err = httpd_register_uri_handler(s_server, &config_uri);
     if (err != ESP_OK) {
         httpd_stop(s_server);
@@ -2249,6 +2777,14 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
     }
 
     err = httpd_register_uri_handler(s_server, &config_update_uri);
+    if (err != ESP_OK) {
+        httpd_stop(s_server);
+        s_server = NULL;
+        memset(&s_config, 0, sizeof(s_config));
+        return err;
+    }
+
+    err = rest_api_sse_start();
     if (err != ESP_OK) {
         httpd_stop(s_server);
         s_server = NULL;
@@ -2266,6 +2802,7 @@ esp_err_t rest_api_stop(void)
         return ESP_OK;
     }
 
+    rest_api_sse_stop();
     ESP_RETURN_ON_ERROR(httpd_stop(s_server), TAG, "Failed to stop REST API server");
     s_server = NULL;
     memset(&s_config, 0, sizeof(s_config));

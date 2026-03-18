@@ -15,6 +15,7 @@
 #include "lwip/sockets.h"
 #include "mod_io.h"
 #include "relay.h"
+#include "relay_events.h"
 #include "rest_api.h"
 #include "unity.h"
 
@@ -255,6 +256,96 @@ static void perform_status_request(uint16_t port,
                          NULL,
                          response,
                          response_size);
+}
+
+static int open_http_stream_request(uint16_t port,
+                                    const char *path,
+                                    const char *authorization_header)
+{
+    char request[768];
+    struct sockaddr_in dest_addr = {
+        .sin_family = AF_INET,
+        .sin_port = htons(port),
+        .sin_addr.s_addr = htonl(INADDR_LOOPBACK),
+    };
+    struct timeval timeout = {
+        .tv_sec = 2,
+        .tv_usec = 0,
+    };
+    int sock;
+    int written;
+    size_t request_len = 0U;
+    ssize_t sent;
+
+    TEST_ASSERT_NOT_NULL(path);
+
+    written = snprintf(request + request_len,
+                       sizeof(request) - request_len,
+                       "GET %s HTTP/1.1\r\n"
+                       "Host: localhost\r\n"
+                       "Accept: text/event-stream\r\n",
+                       path);
+    TEST_ASSERT_GREATER_THAN_INT32(0, written);
+    request_len += (size_t)written;
+    TEST_ASSERT_LESS_THAN_UINT32(sizeof(request), request_len);
+
+    if (authorization_header != NULL) {
+        written = snprintf(request + request_len,
+                           sizeof(request) - request_len,
+                           "%s\r\n",
+                           authorization_header);
+        TEST_ASSERT_GREATER_THAN_INT32(0, written);
+        request_len += (size_t)written;
+        TEST_ASSERT_LESS_THAN_UINT32(sizeof(request), request_len);
+    }
+
+    written = snprintf(request + request_len,
+                       sizeof(request) - request_len,
+                       "Connection: keep-alive\r\n"
+                       "\r\n");
+    TEST_ASSERT_GREATER_THAN_INT32(0, written);
+    request_len += (size_t)written;
+    TEST_ASSERT_LESS_THAN_UINT32(sizeof(request), request_len + 1U);
+
+    sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+    TEST_ASSERT_GREATER_OR_EQUAL_INT32(0, sock);
+    TEST_ASSERT_GREATER_OR_EQUAL_INT32(0,
+                                       setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)));
+    TEST_ASSERT_GREATER_OR_EQUAL_INT32(0,
+                                       setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)));
+    TEST_ASSERT_GREATER_OR_EQUAL_INT32(0,
+                                       connect(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr)));
+
+    sent = send(sock, request, request_len, 0);
+    TEST_ASSERT_EQUAL_INT((int)request_len, sent);
+    return sock;
+}
+
+static void read_stream_until_contains(int sock,
+                                       const char *needle,
+                                       char *response,
+                                       size_t response_size)
+{
+    size_t total = 0U;
+
+    TEST_ASSERT_GREATER_OR_EQUAL_INT32(0, sock);
+    TEST_ASSERT_NOT_NULL(needle);
+    TEST_ASSERT_NOT_NULL(response);
+    TEST_ASSERT_GREATER_THAN_UINT32(0U, response_size);
+
+    memset(response, 0, response_size);
+    while (total < (response_size - 1U)) {
+        ssize_t received = recv(sock, response + total, response_size - total - 1U, 0);
+
+        TEST_ASSERT_GREATER_THAN_INT32(0, received);
+        total += (size_t)received;
+        response[total] = '\0';
+        if (strstr(response, needle) != NULL) {
+            return;
+        }
+    }
+
+    TEST_FAIL_MESSAGE("Expected stream fragment was not received");
 }
 
 TEST_CASE("rest_api device starts the HTTP server on the configured port",
@@ -785,6 +876,103 @@ TEST_CASE("rest_api device exposes cached digital and analog input snapshots",
 
     if (fixture_captured) {
         restore_device_config_fixture(&fixture);
+    }
+}
+
+TEST_CASE("rest_api device streams relay events over SSE", "[qa][rest_api][device]")
+{
+    static const uint16_t test_port = 18095U;
+    static const rest_api_config_t config = {
+        .port = test_port,
+        .auth_handler = allow_auth_handler,
+        .status_provider = status_provider,
+    };
+    evb_relay_relay_changed_event_t event = {
+        .group = EVB_RELAY_RELAY_GROUP_ONBOARD,
+        .id = 1U,
+        .state = true,
+        .ts_ms = 12345U,
+    };
+    char response[1024];
+    int sock = -1;
+
+    ensure_tcpip_ready();
+    TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
+
+    sock = open_http_stream_request(test_port, "/api/v1/events", NULL);
+    read_stream_until_contains(sock, ":connected", response, sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "Content-Type: text/event-stream"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Present: true"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Sync: synchronized"));
+
+    TEST_ASSERT_EQUAL(ESP_OK,
+                      esp_event_post(EVB_RELAY_EVENT,
+                                     EVB_RELAY_EVENT_RELAY_CHANGED,
+                                     &event,
+                                     sizeof(event),
+                                     portMAX_DELAY));
+    read_stream_until_contains(sock, "event: relay_changed", response, sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "event: relay_changed"));
+    TEST_ASSERT_NOT_NULL(strstr(response,
+                                "data: {\"group\":\"onboard\",\"id\":1,\"state\":true,\"ts_ms\":12345}"));
+
+    close(sock);
+}
+
+TEST_CASE("rest_api device emits SSE heartbeats", "[qa][rest_api][device]")
+{
+    static const uint16_t test_port = 18096U;
+    static const rest_api_config_t config = {
+        .port = test_port,
+        .auth_handler = allow_auth_handler,
+        .status_provider = status_provider,
+    };
+    char response[1024];
+    int sock = -1;
+
+    ensure_tcpip_ready();
+    TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
+
+    sock = open_http_stream_request(test_port, "/api/v1/events", NULL);
+    read_stream_until_contains(sock, ":connected", response, sizeof(response));
+    read_stream_until_contains(sock, ":heartbeat", response, sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, ":heartbeat"));
+
+    close(sock);
+}
+
+TEST_CASE("rest_api device enforces the SSE client limit", "[qa][rest_api][device]")
+{
+    static const uint16_t test_port = 18097U;
+    static const size_t max_sse_clients = 4U;
+    static const rest_api_config_t config = {
+        .port = test_port,
+        .auth_handler = allow_auth_handler,
+        .status_provider = status_provider,
+    };
+    char response[1024];
+    int sockets[4];
+    int extra_sock = -1;
+
+    memset(sockets, 0xFF, sizeof(sockets));
+
+    ensure_tcpip_ready();
+    TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
+
+    for (size_t index = 0; index < max_sse_clients; ++index) {
+        sockets[index] = open_http_stream_request(test_port, "/api/v1/events", NULL);
+        read_stream_until_contains(sockets[index], ":connected", response, sizeof(response));
+        TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+    }
+
+    extra_sock = open_http_stream_request(test_port, "/api/v1/events", NULL);
+    read_stream_until_contains(extra_sock, "HTTP/1.1 503 Service Unavailable", response, sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"SSE_CLIENT_LIMIT_REACHED\""));
+    close(extra_sock);
+
+    for (size_t index = 0; index < max_sse_clients; ++index) {
+        close(sockets[index]);
     }
 }
 
