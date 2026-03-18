@@ -10,7 +10,7 @@
 
 # Split-port runner: flash/control path and live UART console path.
 SUBSYSTEM=="tty", KERNEL=="ttyS*", KERNELS=="0000:00:07.0", SYMLINK+="esp32-evb-flash"
-SUBSYSTEM=="tty", KERNEL=="ttyS*", KERNELS=="0000:00:08.0", SYMLINK+="esp32-evb-console"
+SUBSYSTEM=="tty", KERNEL=="ttyS*", KERNELS=="0000:00:09.0", SYMLINK+="esp32-evb-console"
 
 # Single-port fallback: point the live UART at the default repo alias.
-SUBSYSTEM=="tty", KERNEL=="ttyS*", KERNELS=="0000:00:08.0", SYMLINK+="esp32-evb"
+SUBSYSTEM=="tty", KERNEL=="ttyS*", KERNELS=="0000:00:09.0", SYMLINK+="esp32-evb"

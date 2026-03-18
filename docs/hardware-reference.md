@@ -49,7 +49,7 @@
 - An example guest-side rule file lives at
   [`tools/udev/99-esp32-evb-qemu-serial.rules.example`](../tools/udev/99-esp32-evb-qemu-serial.rules.example).
 - For the current virsh/QEMU runner, `udevadm info` shows the pinned PCI
-  addresses `0000:00:07.0` and `0000:00:08.0` for the two guest serial
+  addresses `0000:00:07.0` and `0000:00:09.0` for the two guest serial
   adapters. The example udev rules bind aliases to those PCI addresses,
   not to transient tty node names.
 
@@ -92,7 +92,7 @@ python3 -m esptool --no-stub --chip esp32 --port /dev/esp32-evb \
 
 - The self-hosted QEMU runner currently exposes two PCI 16550 guest
   ports. The live UART console most recently enumerated as
-  `/dev/ttyS5`, but the guest `/dev/ttyS*` numbering itself is not
+  `/dev/ttyS6`, but the guest `/dev/ttyS*` numbering itself is not
   stable and should only be treated as a diagnostic detail.
 - `udevadm info` and `lspci` show both ports are guest-visible QEMU PCI
   16550A adapters (`Red Hat, Inc. QEMU PCI 16550A Adapter`), not a
@@ -102,7 +102,7 @@ python3 -m esptool --no-stub --chip esp32 --port /dev/esp32-evb \
   strongly suggests the missing download-mode assertion lives in the VM
   bridge or host-side wiring rather than in repo scripts.
 - The guest PCI device at `0000:00:07.0` appears to be the control path
-  and `0000:00:08.0` carries the live UART console. The example udev
+  and `0000:00:09.0` carries the live UART console. The example udev
   aliases map those to `/dev/esp32-evb-flash` and
   `/dev/esp32-evb-console` respectively.
 - Brute-force probing of all 64 3-step DTR/RTS sequences on the control
