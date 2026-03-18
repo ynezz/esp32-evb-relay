@@ -1,11 +1,6 @@
-# Stable guest-side alias for the ESP32-EVB UART passed through via
-# QEMU/virsh. Copy to /etc/udev/rules.d/99-esp32-evb-qemu-serial.rules,
-# then reload udev and retrigger tty devices:
+# Stable alias for the ESP32-EVB CH340 USB-serial adapter passed through
+# from the host via USB device passthrough.
+# Copy to /etc/udev/rules.d/99-esp32-evb-qemu-serial.rules, then:
 #   sudo udevadm control --reload
 #   sudo udevadm trigger --subsystem-match=tty
-#
-# The current guest exposes the board as a QEMU PCI 16550A adapter under
-# PCI slot 0000:00:09.0. The tty node itself may drift (for example,
-# ttyS4 today and ttyS6 after a guest PCI reorder), so match the stable
-# parent PCI slot instead of the transient tty name.
-SUBSYSTEM=="tty", KERNEL=="ttyS*", KERNELS=="0000:00:09.0", SYMLINK+="esp32-evb"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="esp32-evb"
