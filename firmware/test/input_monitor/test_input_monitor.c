@@ -56,7 +56,7 @@ static void init_present_mod_io(uint8_t relay_mask)
 
 static void init_absent_mod_io(void)
 {
-    i2c_stub_set_probe_result(ESP_ERR_NOT_FOUND);
+    i2c_stub_set_transmit_receive_result(ESP_ERR_NOT_FOUND);
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_init(test_bus_handle()));
 }
 
@@ -232,7 +232,7 @@ static void test_input_monitor_recovers_after_modio_absence(void)
     TEST_ASSERT_FALSE(snapshot.modio_present);
     TEST_ASSERT_FALSE(snapshot.sample_valid);
 
-    i2c_stub_set_probe_result(ESP_OK);
+    i2c_stub_set_transmit_receive_result(ESP_OK);
     esp_event_stub_reset();
     queue_read_u8(0x00U);
     queue_snapshot(0x01U, analog_values);

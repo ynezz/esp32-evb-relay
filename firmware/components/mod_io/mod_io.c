@@ -164,8 +164,20 @@ static esp_err_t mod_io_read_relay_mask_locked(uint8_t *out_mask)
 
     ESP_RETURN_ON_FALSE(out_mask != NULL, ESP_ERR_INVALID_ARG, TAG, "Relay mask output is required");
 
-    err = i2c_master_transmit_receive(s_state.device_handle, &command, sizeof(command), &relay_mask,
-                                      sizeof(relay_mask), MOD_IO_I2C_TIMEOUT_MS);
+    /* Use two separate transactions to avoid REPEATED START between the
+     * command write and the data read.  i2c_master_transmit_receive() emits
+     * START+W+[cmd]+RS+R+[data]+STOP (repeated start), which corrupts the
+     * MOD-IO PIC's I2C ISR state machine and causes it to return stale or
+     * reset data (0x00) even when relays are set.
+     * Two calls emit START+W+[cmd]+STOP then START+R+[data]+STOP, which the
+     * PIC ISR handles correctly. */
+    err = i2c_master_transmit(s_state.device_handle, &command, sizeof(command),
+                              MOD_IO_I2C_TIMEOUT_MS);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = i2c_master_receive(s_state.device_handle, &relay_mask, sizeof(relay_mask),
+                             MOD_IO_I2C_TIMEOUT_MS);
     if (err != ESP_OK) {
         return err;
     }
@@ -183,10 +195,15 @@ static esp_err_t mod_io_probe_locked(void)
     ESP_RETURN_ON_ERROR(mod_io_require_initialized_locked(), TAG, "MOD-IO is not initialized");
 
     was_present = s_state.present;
-    err = i2c_master_probe(s_state.bus_handle, MOD_IO_I2C_ADDRESS, MOD_IO_I2C_TIMEOUT_MS);
-    if (err == ESP_OK) {
-        err = mod_io_read_relay_mask_locked(&relay_mask);
-    }
+
+    /* Read the relay register directly — do NOT call i2c_master_probe() first.
+     * A bare write-address probe (START + addr + STOP, no data) causes the
+     * MOD-IO PIC's I2C ISR to see an incomplete write transaction, which can
+     * corrupt its internal command state and make the subsequent relay-register
+     * read return stale or reset data (0x00) even when relays are set.
+     * Instead we use the relay-mask read as the liveness check: if the device
+     * is absent the I2C NACK propagates as ESP_ERR_NOT_FOUND. */
+    err = mod_io_read_relay_mask_locked(&relay_mask);
     if (err == ESP_OK) {
         mod_io_mark_synchronized_locked(relay_mask);
         if (!was_present) {
@@ -270,8 +287,12 @@ static esp_err_t mod_io_read_analog_input_locked(uint8_t input_id, uint16_t *out
     ESP_RETURN_ON_ERROR(mod_io_ensure_present_locked(), TAG, "MOD-IO is not present");
 
     command = (uint8_t)(MOD_IO_ANALOG_INPUT_BASE_COMMAND + (input_id - 1U));
-    err = i2c_master_transmit_receive(s_state.device_handle, &command, sizeof(command), raw_value,
-                                      sizeof(raw_value), MOD_IO_I2C_TIMEOUT_MS);
+    err = i2c_master_transmit(s_state.device_handle, &command, sizeof(command),
+                              MOD_IO_I2C_TIMEOUT_MS);
+    if (err == ESP_OK) {
+        err = i2c_master_receive(s_state.device_handle, raw_value, sizeof(raw_value),
+                                 MOD_IO_I2C_TIMEOUT_MS);
+    }
     if (err != ESP_OK) {
         return mod_io_reconcile_after_transaction_failure_locked(err);
     }
@@ -512,8 +533,12 @@ esp_err_t mod_io_read_digital_inputs(uint8_t *out_mask)
         return err;
     }
 
-    err = i2c_master_transmit_receive(s_state.device_handle, &command, sizeof(command), &read_value,
-                                      sizeof(read_value), MOD_IO_I2C_TIMEOUT_MS);
+    err = i2c_master_transmit(s_state.device_handle, &command, sizeof(command),
+                              MOD_IO_I2C_TIMEOUT_MS);
+    if (err == ESP_OK) {
+        err = i2c_master_receive(s_state.device_handle, &read_value, sizeof(read_value),
+                                 MOD_IO_I2C_TIMEOUT_MS);
+    }
     if (err == ESP_OK) {
         *out_mask = (uint8_t)(read_value & MOD_IO_DIGITAL_INPUT_MASK_ALL);
     } else {

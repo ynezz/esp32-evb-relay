@@ -97,11 +97,11 @@ static void test_mod_io_probe_transitions_absent_to_present_with_readback(void)
 {
     const uint8_t expected_transaction[] = {0x40U};
 
-    i2c_stub_set_probe_result(ESP_ERR_NOT_FOUND);
+    i2c_stub_set_transmit_receive_result(ESP_ERR_NOT_FOUND);
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_init(test_bus_handle()));
     assert_status(false, MOD_IO_RELAY_SYNC_ABSENT, 0x00U);
 
-    i2c_stub_set_probe_result(ESP_OK);
+    i2c_stub_set_transmit_receive_result(ESP_OK);
     set_read_data_u8(0x02U);
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_probe());
 
@@ -111,7 +111,7 @@ static void test_mod_io_probe_transitions_absent_to_present_with_readback(void)
 
 static void test_mod_io_probe_keeps_absent_state_when_board_is_missing(void)
 {
-    i2c_stub_set_probe_result(ESP_ERR_NOT_FOUND);
+    i2c_stub_set_transmit_receive_result(ESP_ERR_NOT_FOUND);
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_init(test_bus_handle()));
     TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, mod_io_probe());
     assert_status(false, MOD_IO_RELAY_SYNC_ABSENT, 0x00U);
@@ -119,7 +119,7 @@ static void test_mod_io_probe_keeps_absent_state_when_board_is_missing(void)
 
 static void test_mod_io_init_treats_probe_timeouts_as_absent(void)
 {
-    i2c_stub_set_probe_result(ESP_ERR_TIMEOUT);
+    i2c_stub_set_transmit_receive_result(ESP_ERR_TIMEOUT);
 
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_init(test_bus_handle()));
     assert_status(false, MOD_IO_RELAY_SYNC_ABSENT, 0x00U);
@@ -312,7 +312,7 @@ static void test_mod_io_transaction_failure_marks_board_absent_when_reprobe_fail
 {
     init_present_mod_io(0x01U);
     i2c_stub_set_transmit_result(ESP_FAIL);
-    i2c_stub_set_probe_result(ESP_ERR_NOT_FOUND);
+    i2c_stub_set_transmit_receive_result(ESP_ERR_NOT_FOUND);
 
     TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, mod_io_set_relays(0x03U));
     assert_status(false, MOD_IO_RELAY_SYNC_ABSENT, 0x00U);

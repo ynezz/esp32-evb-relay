@@ -63,6 +63,10 @@ esp_err_t i2c_master_transmit(i2c_master_dev_handle_t dev_handle,
                               const uint8_t *write_buffer,
                               size_t write_size,
                               int timeout_ms);
+esp_err_t i2c_master_receive(i2c_master_dev_handle_t dev_handle,
+                             uint8_t *read_buffer,
+                             size_t read_size,
+                             int timeout_ms);
 esp_err_t i2c_master_transmit_receive(i2c_master_dev_handle_t dev_handle,
                                       const uint8_t *write_buffer,
                                       size_t write_size,

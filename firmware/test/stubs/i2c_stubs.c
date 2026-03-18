@@ -1,5 +1,6 @@
 #include "i2c_stubs.h"
 
+#include <stdbool.h>
 #include <string.h>
 
 #define I2C_STUB_MAX_TRANSACTION_SIZE 64
@@ -22,6 +23,7 @@ static i2c_master_bus_config_t s_last_bus_config;
 static i2c_device_config_t s_last_device_config;
 static esp_err_t s_probe_result = ESP_ERR_NOT_FOUND;
 static esp_err_t s_transmit_result = ESP_OK;
+static bool s_transmit_fail_once = false;
 static esp_err_t s_transmit_receive_result = ESP_OK;
 static uint8_t s_last_transaction[I2C_STUB_MAX_TRANSACTION_SIZE];
 static size_t s_last_transaction_size;
@@ -61,6 +63,7 @@ void i2c_stub_reset(void)
     s_read_queue_index = 0U;
     s_probe_result = ESP_ERR_NOT_FOUND;
     s_transmit_result = ESP_OK;
+    s_transmit_fail_once = false;
     s_transmit_receive_result = ESP_OK;
 }
 
@@ -72,6 +75,11 @@ void i2c_stub_set_probe_result(esp_err_t result)
 void i2c_stub_set_transmit_result(esp_err_t result)
 {
     s_transmit_result = result;
+    /* Arm the one-shot flag so only the next write-direction transmit
+     * fails.  The read-command transmit that immediately follows (as part
+     * of the two-call transmit+receive pattern) must succeed so the
+     * receive step can return its own result independently. */
+    s_transmit_fail_once = (result != ESP_OK);
 }
 
 void i2c_stub_set_transmit_receive_result(esp_err_t result)
@@ -195,7 +203,53 @@ esp_err_t i2c_master_transmit(i2c_master_dev_handle_t dev_handle,
         return err;
     }
 
-    return s_transmit_result;
+    if (s_transmit_fail_once) {
+        s_transmit_fail_once = false;
+        return s_transmit_result;
+    }
+    return ESP_OK;
+}
+
+esp_err_t i2c_master_receive(i2c_master_dev_handle_t dev_handle,
+                             uint8_t *read_buffer,
+                             size_t read_size,
+                             int timeout_ms)
+{
+    size_t bytes_to_copy;
+
+    (void)timeout_ms;
+
+    if ((dev_handle == NULL) || ((read_size > 0U) && (read_buffer == NULL))) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (s_transmit_receive_result != ESP_OK) {
+        return s_transmit_receive_result;
+    }
+
+    if (s_read_queue_index < s_read_queue_len) {
+        size_t queued_size = s_read_queue[s_read_queue_index].data_len;
+
+        bytes_to_copy = (read_size < queued_size) ? read_size : queued_size;
+        if (bytes_to_copy > 0U) {
+            memcpy(read_buffer, s_read_queue[s_read_queue_index].data, bytes_to_copy);
+        }
+        if (read_size > bytes_to_copy) {
+            memset(read_buffer + bytes_to_copy, 0, read_size - bytes_to_copy);
+        }
+        ++s_read_queue_index;
+        return ESP_OK;
+    }
+
+    bytes_to_copy = (read_size < s_read_data_size) ? read_size : s_read_data_size;
+    if (bytes_to_copy > 0U) {
+        memcpy(read_buffer, s_read_data, bytes_to_copy);
+    }
+    if (read_size > bytes_to_copy) {
+        memset(read_buffer + bytes_to_copy, 0, read_size - bytes_to_copy);
+    }
+
+    return ESP_OK;
 }
 
 esp_err_t i2c_master_transmit_receive(i2c_master_dev_handle_t dev_handle,
