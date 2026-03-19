@@ -301,6 +301,12 @@ func runInputWatch(cmd *cobra.Command, _ []string) error {
 	if !ok {
 		return exitcodes.Wrap(exitcodes.GeneralError, errors.New("runtime config is unavailable"))
 	}
+	if !runtime.Robot {
+		return exitcodes.Wrap(
+			exitcodes.BadArgument,
+			errors.New("input watch requires --robot because it emits an NDJSON stream"),
+		)
+	}
 
 	streamClient, err := client.New(client.Config{
 		Host:     runtime.Host,

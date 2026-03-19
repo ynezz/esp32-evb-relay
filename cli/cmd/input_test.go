@@ -213,6 +213,52 @@ func TestInputWatchStaysNDJSONWhenRobotJSONIsRequested(t *testing.T) {
 	}
 }
 
+func TestInputWatchRejectsHumanMode(t *testing.T) {
+	t.Parallel()
+
+	for _, args := range [][]string{
+		{
+			"--host", "http://127.0.0.1:1",
+			"--api-token", "stream-token",
+			"input", "watch",
+		},
+		{
+			"--host", "http://127.0.0.1:1",
+			"--api-token", "stream-token",
+			"--format", "json",
+			"input", "watch",
+		},
+	} {
+		args := args
+		name := "default"
+		if len(args) > 6 {
+			name = "json"
+		}
+
+		t.Run(name, func(t *testing.T) {
+			command := newRootCommand()
+			stdout := &bytes.Buffer{}
+			command.SetOut(stdout)
+			command.SetErr(&bytes.Buffer{})
+			command.SetArgs(args)
+
+			err := command.Execute()
+			if err == nil {
+				t.Fatal("Execute() succeeded; want bad-argument error")
+			}
+			if got := exitcodes.FromError(err); got != exitcodes.BadArgument {
+				t.Fatalf("exit code = %d, want %d", got, exitcodes.BadArgument)
+			}
+			if err.Error() != "input watch requires --robot because it emits an NDJSON stream" {
+				t.Fatalf("error = %q, want input-watch robot guidance", err.Error())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+		})
+	}
+}
+
 func TestInputDigitalOutputsJSONWithSampleAgeField(t *testing.T) {
 	t.Parallel()
 
