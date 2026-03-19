@@ -38,6 +38,10 @@ typedef struct {
 typedef struct {
     bool initialized;
     bool mdns_registered;
+    bool eth_event_handler_registered;
+    bool eth_got_ip_handler_registered;
+    bool wifi_event_handler_registered;
+    bool wifi_got_ip_handler_registered;
     EventGroupHandle_t event_group;
     SemaphoreHandle_t mutex;
     device_config_network_policy_t policy;
@@ -58,6 +62,23 @@ typedef struct {
 } network_state_t;
 
 static network_state_t s_state;
+
+static void network_eth_event_handler(void *arg,
+                                      esp_event_base_t event_base,
+                                      int32_t event_id,
+                                      void *event_data);
+static void network_eth_got_ip_event_handler(void *arg,
+                                             esp_event_base_t event_base,
+                                             int32_t event_id,
+                                             void *event_data);
+static void network_wifi_event_handler(void *arg,
+                                       esp_event_base_t event_base,
+                                       int32_t event_id,
+                                       void *event_data);
+static void network_wifi_got_ip_event_handler(void *arg,
+                                              esp_event_base_t event_base,
+                                              int32_t event_id,
+                                              void *event_data);
 
 static void network_clear_interface_status(network_interface_status_t *status)
 {
@@ -201,6 +222,37 @@ static const char *network_transport_name(network_transport_t transport)
     case NETWORK_TRANSPORT_NONE:
     default:
         return "none";
+    }
+}
+
+static void network_unregister_event_handlers(void)
+{
+    if (s_state.wifi_got_ip_handler_registered) {
+        (void)esp_event_handler_unregister(IP_EVENT,
+                                           IP_EVENT_STA_GOT_IP,
+                                           network_wifi_got_ip_event_handler);
+        s_state.wifi_got_ip_handler_registered = false;
+    }
+
+    if (s_state.wifi_event_handler_registered) {
+        (void)esp_event_handler_unregister(WIFI_EVENT,
+                                           ESP_EVENT_ANY_ID,
+                                           network_wifi_event_handler);
+        s_state.wifi_event_handler_registered = false;
+    }
+
+    if (s_state.eth_got_ip_handler_registered) {
+        (void)esp_event_handler_unregister(IP_EVENT,
+                                           IP_EVENT_ETH_GOT_IP,
+                                           network_eth_got_ip_event_handler);
+        s_state.eth_got_ip_handler_registered = false;
+    }
+
+    if (s_state.eth_event_handler_registered) {
+        (void)esp_event_handler_unregister(ETH_EVENT,
+                                           ESP_EVENT_ANY_ID,
+                                           network_eth_event_handler);
+        s_state.eth_event_handler_registered = false;
     }
 }
 
@@ -619,6 +671,7 @@ esp_err_t network_init(void)
                       err_cleanup,
                       TAG,
                       "Failed to register Ethernet event handler");
+    s_state.eth_event_handler_registered = true;
     ESP_GOTO_ON_ERROR(esp_event_handler_register(IP_EVENT,
                                                  IP_EVENT_ETH_GOT_IP,
                                                  network_eth_got_ip_event_handler,
@@ -626,6 +679,7 @@ esp_err_t network_init(void)
                       err_cleanup,
                       TAG,
                       "Failed to register Ethernet IP event handler");
+    s_state.eth_got_ip_handler_registered = true;
     ESP_GOTO_ON_ERROR(esp_event_handler_register(WIFI_EVENT,
                                                  ESP_EVENT_ANY_ID,
                                                  network_wifi_event_handler,
@@ -633,6 +687,7 @@ esp_err_t network_init(void)
                       err_cleanup,
                       TAG,
                       "Failed to register WiFi event handler");
+    s_state.wifi_event_handler_registered = true;
     ESP_GOTO_ON_ERROR(esp_event_handler_register(IP_EVENT,
                                                  IP_EVENT_STA_GOT_IP,
                                                  network_wifi_got_ip_event_handler,
@@ -640,6 +695,7 @@ esp_err_t network_init(void)
                       err_cleanup,
                       TAG,
                       "Failed to register WiFi IP event handler");
+    s_state.wifi_got_ip_handler_registered = true;
 
     switch (s_state.policy) {
     case DEVICE_CONFIG_NETWORK_POLICY_ETHERNET_ONLY:
@@ -661,6 +717,7 @@ esp_err_t network_init(void)
 err_cleanup:
     network_stop_wifi();
     network_stop_ethernet();
+    network_unregister_event_handlers();
     if (s_state.mutex != NULL) {
         vSemaphoreDelete(s_state.mutex);
         s_state.mutex = NULL;

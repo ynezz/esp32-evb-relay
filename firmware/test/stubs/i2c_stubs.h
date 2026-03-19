@@ -9,6 +9,7 @@
 typedef int32_t i2c_port_num_t;
 typedef void *i2c_master_bus_handle_t;
 typedef void *i2c_master_dev_handle_t;
+typedef int gpio_num_t;
 
 typedef enum {
     I2C_CLK_SRC_DEFAULT = 0,
@@ -40,6 +41,13 @@ typedef struct {
 } i2c_device_config_t;
 
 #define I2C_NUM_0 0
+#define GPIO_NUM_13 13
+#define GPIO_NUM_16 16
+#define GPIO_NUM_18 18
+#define GPIO_NUM_23 23
+#define GPIO_NUM_32 32
+#define GPIO_NUM_33 33
+#define GPIO_NUM_34 34
 
 void i2c_stub_reset(void);
 void i2c_stub_set_probe_result(esp_err_t result);

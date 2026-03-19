@@ -11,14 +11,25 @@ struct freertos_stub_task {
     uint32_t notify_count;
 };
 
+struct freertos_stub_event_group {
+    EventBits_t bits;
+};
+
 static struct freertos_stub_task s_task;
+static struct freertos_stub_event_group s_event_group;
 static BaseType_t s_task_create_result = pdPASS;
 static size_t s_task_create_count;
 static char s_last_task_name[32];
+static int s_dynamic_mutex_token;
 
 SemaphoreHandle_t xSemaphoreCreateMutexStatic(StaticSemaphore_t *buffer)
 {
     return (buffer != NULL) ? buffer : NULL;
+}
+
+SemaphoreHandle_t xSemaphoreCreateMutex(void)
+{
+    return &s_dynamic_mutex_token;
 }
 
 BaseType_t xSemaphoreTake(SemaphoreHandle_t semaphore, TickType_t ticks_to_wait)
@@ -32,9 +43,15 @@ BaseType_t xSemaphoreGive(SemaphoreHandle_t semaphore)
     return (semaphore != NULL) ? pdTRUE : pdFALSE;
 }
 
+void vSemaphoreDelete(SemaphoreHandle_t semaphore)
+{
+    (void)semaphore;
+}
+
 void freertos_stub_reset(void)
 {
     memset(&s_task, 0, sizeof(s_task));
+    memset(&s_event_group, 0, sizeof(s_event_group));
     s_task_create_result = pdPASS;
     s_task_create_count = 0U;
     memset(s_last_task_name, 0, sizeof(s_last_task_name));
@@ -58,6 +75,64 @@ const char *freertos_stub_get_last_task_name(void)
 TaskHandle_t freertos_stub_get_last_task_handle(void)
 {
     return (s_task_create_count > 0U) ? &s_task : NULL;
+}
+
+EventGroupHandle_t xEventGroupCreate(void)
+{
+    s_event_group.bits = 0U;
+    return &s_event_group;
+}
+
+void vEventGroupDelete(EventGroupHandle_t event_group)
+{
+    if (event_group != NULL) {
+        event_group->bits = 0U;
+    }
+}
+
+EventBits_t xEventGroupSetBits(EventGroupHandle_t event_group, EventBits_t bits_to_set)
+{
+    if (event_group == NULL) {
+        return 0U;
+    }
+
+    event_group->bits |= bits_to_set;
+    return event_group->bits;
+}
+
+EventBits_t xEventGroupClearBits(EventGroupHandle_t event_group, EventBits_t bits_to_clear)
+{
+    if (event_group == NULL) {
+        return 0U;
+    }
+
+    event_group->bits &= ~bits_to_clear;
+    return event_group->bits;
+}
+
+EventBits_t xEventGroupWaitBits(EventGroupHandle_t event_group,
+                                EventBits_t bits_to_wait_for,
+                                BaseType_t clear_on_exit,
+                                BaseType_t wait_for_all_bits,
+                                TickType_t ticks_to_wait)
+{
+    EventBits_t matched_bits;
+
+    (void)ticks_to_wait;
+
+    if (event_group == NULL) {
+        return 0U;
+    }
+
+    matched_bits = event_group->bits & bits_to_wait_for;
+    if (wait_for_all_bits && (matched_bits != bits_to_wait_for)) {
+        matched_bits = 0U;
+    }
+    if (clear_on_exit && (matched_bits != 0U)) {
+        event_group->bits &= ~matched_bits;
+    }
+
+    return matched_bits;
 }
 
 BaseType_t xTaskCreate(TaskFunction_t task_code,

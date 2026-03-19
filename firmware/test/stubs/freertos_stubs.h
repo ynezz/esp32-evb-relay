@@ -10,6 +10,8 @@ typedef uint32_t TickType_t;
 typedef uint32_t configSTACK_DEPTH_TYPE;
 typedef void (*TaskFunction_t)(void *arg);
 typedef struct freertos_stub_task *TaskHandle_t;
+typedef struct freertos_stub_event_group *EventGroupHandle_t;
+typedef uint32_t EventBits_t;
 
 typedef struct {
     uintptr_t opaque;
@@ -22,20 +24,33 @@ typedef void *SemaphoreHandle_t;
 #define pdPASS 1
 #define portMAX_DELAY ((TickType_t)UINT32_MAX)
 #define pdMS_TO_TICKS(xTimeInMs) ((TickType_t)(xTimeInMs))
+#define BIT0 (1U << 0)
+#define BIT1 (1U << 1)
 #define portYIELD_FROM_ISR(xHigherPriorityTaskWoken) \
     do {                                             \
         (void)(xHigherPriorityTaskWoken);            \
     } while (0)
 
 SemaphoreHandle_t xSemaphoreCreateMutexStatic(StaticSemaphore_t *buffer);
+SemaphoreHandle_t xSemaphoreCreateMutex(void);
 BaseType_t xSemaphoreTake(SemaphoreHandle_t semaphore, TickType_t ticks_to_wait);
 BaseType_t xSemaphoreGive(SemaphoreHandle_t semaphore);
+void vSemaphoreDelete(SemaphoreHandle_t semaphore);
 
 void freertos_stub_reset(void);
 void freertos_stub_set_task_create_result(BaseType_t result);
 size_t freertos_stub_get_task_create_count(void);
 const char *freertos_stub_get_last_task_name(void);
 TaskHandle_t freertos_stub_get_last_task_handle(void);
+EventGroupHandle_t xEventGroupCreate(void);
+void vEventGroupDelete(EventGroupHandle_t event_group);
+EventBits_t xEventGroupSetBits(EventGroupHandle_t event_group, EventBits_t bits_to_set);
+EventBits_t xEventGroupClearBits(EventGroupHandle_t event_group, EventBits_t bits_to_clear);
+EventBits_t xEventGroupWaitBits(EventGroupHandle_t event_group,
+                                EventBits_t bits_to_wait_for,
+                                BaseType_t clear_on_exit,
+                                BaseType_t wait_for_all_bits,
+                                TickType_t ticks_to_wait);
 
 BaseType_t xTaskCreate(TaskFunction_t task_code,
                        const char *name,

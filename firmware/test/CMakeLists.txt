@@ -129,3 +129,47 @@ endif()
 target_link_libraries(host_main_startup_tests PRIVATE unity_host)
 
 add_test(NAME host_main_startup COMMAND host_main_startup_tests)
+
+add_executable(host_network_tests
+    "${TEST_DIR}/network/test_network.c"
+    "${TEST_DIR}/network/network_stubs.c"
+    "${TEST_DIR}/stubs/esp_event_stubs.c"
+    "${TEST_DIR}/stubs/esp_idf_stubs.c"
+    "${TEST_DIR}/stubs/freertos_stubs.c"
+    "${FIRMWARE_DIR}/components/network/network.c"
+)
+
+target_include_directories(host_network_tests PRIVATE
+    "${TEST_DIR}/network"
+    "${TEST_DIR}/network/stubs"
+    "${STUBS_DIR}"
+    "${FIRMWARE_DIR}/components/board/include"
+    "${FIRMWARE_DIR}/components/device_config/include"
+    "${FIRMWARE_DIR}/components/network/include"
+)
+
+target_compile_definitions(host_network_tests PRIVATE
+    UNIT_TEST=1
+    _POSIX_C_SOURCE=200809L
+)
+
+target_compile_options(host_network_tests PRIVATE
+    -Wall
+    -Wextra
+)
+
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(host_network_tests PRIVATE
+        -fno-omit-frame-pointer
+        -fsanitize=address
+        -fsanitize=undefined
+    )
+    target_link_options(host_network_tests PRIVATE
+        -fsanitize=address
+        -fsanitize=undefined
+    )
+endif()
+
+target_link_libraries(host_network_tests PRIVATE unity_host)
+
+add_test(NAME host_network COMMAND host_network_tests)
