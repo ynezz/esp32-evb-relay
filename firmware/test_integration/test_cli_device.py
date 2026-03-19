@@ -185,5 +185,5 @@ def test_cli_auth_enforcement(cli_robot_run) -> None:
     assert wrong.stderr == ""
     assert wrong.exit_code == 3
     assert wrong.payload["exit_code"] == 3
-    assert wrong.payload["error"]["code"] in {"AUTH_FORBIDDEN", "AUTH_INVALID", "AUTH_REQUIRED"}
+    assert wrong.payload["error"]["code"] in {"AUTH_FORBIDDEN", "AUTH_REQUIRED"}
     assert wrong.payload.get("device_context") is None
