@@ -1,12 +1,6 @@
 from __future__ import annotations
 
-import json
-import os
-import shutil
-import subprocess
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import pytest
 
@@ -17,76 +11,8 @@ pytestmark = [
     pytest.mark.cli_e2e,
 ]
 
-_USE_DEFAULT_TOKEN = object()
 
-
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
-
-
-@dataclass(frozen=True)
-class CLIRunResult:
-    stdout: str
-    stderr: str
-    exit_code: int
-    payload: dict[str, Any]
-
-
-@dataclass(frozen=True)
-class CLIRunner:
-    binary_path: Path
-    host: str
-    api_token: str
-    config_home: Path
-    timeout: str = "5s"
-
-    def run_robot(
-        self,
-        *args: str,
-        api_token: object = _USE_DEFAULT_TOKEN,
-        host: str | None = None,
-    ) -> CLIRunResult:
-        command = [
-            str(self.binary_path),
-            "--host",
-            host or self.host,
-            "--timeout",
-            self.timeout,
-            "--robot",
-            "--format",
-            "json",
-        ]
-        if api_token is _USE_DEFAULT_TOKEN:
-            command.extend(["--api-token", self.api_token])
-        elif api_token is not None:
-            command.extend(["--api-token", str(api_token)])
-        command.extend(args)
-
-        env = os.environ.copy()
-        env["XDG_CONFIG_HOME"] = str(self.config_home)
-        env.pop("EVB_RELAY_HOST", None)
-        env.pop("EVB_RELAY_API_TOKEN", None)
-        env.pop("EVB_RELAY_ROBOT", None)
-        env.pop("EVB_RELAY_TIMEOUT", None)
-
-        completed = subprocess.run(
-            command,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            env=env,
-        )
-        payload = json.loads(completed.stdout)
-        return CLIRunResult(
-            stdout=completed.stdout,
-            stderr=completed.stderr,
-            exit_code=completed.returncode,
-            payload=payload,
-        )
-
-
-def _assert_success(result: CLIRunResult, command: str) -> dict[str, Any]:
+def _assert_success(result: Any, command: str) -> dict[str, Any]:
     assert result.stderr == ""
     assert result.exit_code == 0
     assert result.payload["command"] == command
@@ -120,44 +46,8 @@ def _restore_onboard_relays(http_client) -> None:
 
 
 @pytest.fixture(scope="session")
-def cli_binary(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    if shutil.which("go") is None:
-        pytest.skip("Go toolchain is not available")
-
-    repo_root = _repo_root()
-    binary_path = tmp_path_factory.mktemp("cli-device") / "evb-relay"
-    completed = subprocess.run(
-        ["go", "build", "-o", str(binary_path), "."],
-        cwd=repo_root / "cli",
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    if completed.returncode != 0:
-        pytest.fail(f"failed to build CLI binary:\n{completed.stderr}")
-    return binary_path
-
-
-@pytest.fixture(scope="session")
-def cli_runner(
-    cli_binary: Path,
-    dut_endpoint,
-    auth_token: str,
-    tmp_path_factory: pytest.TempPathFactory,
-) -> Iterator[CLIRunner]:
-    runner = CLIRunner(
-        binary_path=cli_binary,
-        host=f"{dut_endpoint.ip}:{dut_endpoint.port}",
-        api_token=auth_token,
-        config_home=tmp_path_factory.mktemp("cli-config"),
-    )
-    yield runner
-
-
-@pytest.fixture(scope="session")
-def require_modio(cli_runner: CLIRunner) -> dict[str, Any]:
-    data = _assert_success(cli_runner.run_robot("status"), "status")
+def require_modio(cli_robot_run) -> dict[str, Any]:
+    data = _assert_success(cli_robot_run("status"), "status")
     status = _status_payload(data)
     if not status["modio"]["present"]:
         pytest.skip("MOD-IO is not present on this device")
@@ -169,8 +59,8 @@ def onboard_relay_cleanup(cleanup_actions, http_client) -> None:
     cleanup_actions.append(lambda: _restore_onboard_relays(http_client))
 
 
-def test_cli_status_round_trip(cli_runner: CLIRunner, dut_endpoint) -> None:
-    data = _assert_success(cli_runner.run_robot("status"), "status")
+def test_cli_status_round_trip(cli_robot_run, dut_endpoint) -> None:
+    data = _assert_success(cli_robot_run("status"), "status")
     status = _status_payload(data)
 
     assert float(status["uptime_seconds"]) >= 0
@@ -183,8 +73,8 @@ def test_cli_status_round_trip(cli_runner: CLIRunner, dut_endpoint) -> None:
     assert status["modio"]["sync"] in {"absent", "synchronized"}
 
 
-def test_cli_relay_list_round_trip(cli_runner: CLIRunner) -> None:
-    data = _assert_success(cli_runner.run_robot("relay", "list"), "relay list")
+def test_cli_relay_list_round_trip(cli_robot_run) -> None:
+    data = _assert_success(cli_robot_run("relay", "list"), "relay list")
     relays = data["relays"]
     assert isinstance(relays, list)
 
@@ -200,37 +90,37 @@ def test_cli_relay_list_round_trip(cli_runner: CLIRunner) -> None:
         assert all(group != "modio" for group, _ in states)
 
 
-def test_cli_onboard_relay_on_off_round_trip(cli_runner: CLIRunner, onboard_relay_cleanup) -> None:
-    on_data = _assert_success(cli_runner.run_robot("relay", "on", "onboard:1"), "relay on")
+def test_cli_onboard_relay_on_off_round_trip(cli_robot_run, onboard_relay_cleanup) -> None:
+    on_data = _assert_success(cli_robot_run("relay", "on", "onboard:1"), "relay on")
     assert on_data["relay"] == {"group": "onboard", "id": 1, "state": True, "sync": None}
 
-    list_data = _assert_success(cli_runner.run_robot("relay", "list"), "relay list")
+    list_data = _assert_success(cli_robot_run("relay", "list"), "relay list")
     assert _relay_state_by_target(list_data["relays"])[("onboard", 1)] is True
 
-    off_data = _assert_success(cli_runner.run_robot("relay", "off", "onboard:1"), "relay off")
+    off_data = _assert_success(cli_robot_run("relay", "off", "onboard:1"), "relay off")
     assert off_data["relay"] == {"group": "onboard", "id": 1, "state": False, "sync": None}
 
-    list_data = _assert_success(cli_runner.run_robot("relay", "list"), "relay list")
+    list_data = _assert_success(cli_robot_run("relay", "list"), "relay list")
     assert _relay_state_by_target(list_data["relays"])[("onboard", 1)] is False
 
 
-def test_cli_relay_toggle_round_trip(cli_runner: CLIRunner, onboard_relay_cleanup) -> None:
-    initial_data = _assert_success(cli_runner.run_robot("relay", "list"), "relay list")
+def test_cli_relay_toggle_round_trip(cli_robot_run, onboard_relay_cleanup) -> None:
+    initial_data = _assert_success(cli_robot_run("relay", "list"), "relay list")
     initial_states = _relay_state_by_target(initial_data["relays"])
     initial_state = initial_states[("onboard", 2)]
 
-    toggle_data = _assert_success(cli_runner.run_robot("relay", "toggle", "onboard:2"), "relay toggle")
+    toggle_data = _assert_success(cli_robot_run("relay", "toggle", "onboard:2"), "relay toggle")
     assert toggle_data["relay"]["group"] == "onboard"
     assert toggle_data["relay"]["id"] == 2
     assert toggle_data["relay"]["state"] is (not initial_state)
 
-    restore_data = _assert_success(cli_runner.run_robot("relay", "toggle", "onboard:2"), "relay toggle")
+    restore_data = _assert_success(cli_robot_run("relay", "toggle", "onboard:2"), "relay toggle")
     assert restore_data["relay"]["state"] is initial_state
 
 
-def test_cli_relay_set_batch_round_trip(cli_runner: CLIRunner, onboard_relay_cleanup) -> None:
+def test_cli_relay_set_batch_round_trip(cli_robot_run, onboard_relay_cleanup) -> None:
     data = _assert_success(
-        cli_runner.run_robot("relay", "set", "onboard:1=on", "onboard:2=off"),
+        cli_robot_run("relay", "set", "onboard:1=on", "onboard:2=off"),
         "relay set",
     )
     assert data["all_ok"] is True
@@ -251,8 +141,8 @@ def test_cli_relay_set_batch_round_trip(cli_runner: CLIRunner, onboard_relay_cle
 
 
 @pytest.mark.modio
-def test_cli_input_digital_round_trip(cli_runner: CLIRunner, require_modio) -> None:
-    data = _assert_success(cli_runner.run_robot("input", "digital"), "input digital")
+def test_cli_input_digital_round_trip(cli_robot_run, require_modio) -> None:
+    data = _assert_success(cli_robot_run("input", "digital"), "input digital")
     assert int(data["sample_ts_ms"]) >= 0
     assert int(data["sample_age_ms"]) >= 0
     assert int(data["poll_interval_ms"]) > 0
@@ -261,14 +151,14 @@ def test_cli_input_digital_round_trip(cli_runner: CLIRunner, require_modio) -> N
     assert len(inputs) == 4
     assert [int(item["id"]) for item in inputs] == [1, 2, 3, 4]
 
-    single = _assert_success(cli_runner.run_robot("input", "digital", "1"), "input digital")
+    single = _assert_success(cli_robot_run("input", "digital", "1"), "input digital")
     assert single["input"]["id"] == 1
     assert isinstance(single["input"]["state"], bool)
 
 
 @pytest.mark.modio
-def test_cli_input_analog_round_trip(cli_runner: CLIRunner, require_modio) -> None:
-    data = _assert_success(cli_runner.run_robot("input", "analog"), "input analog")
+def test_cli_input_analog_round_trip(cli_robot_run, require_modio) -> None:
+    data = _assert_success(cli_robot_run("input", "analog"), "input analog")
     assert int(data["sample_ts_ms"]) >= 0
     assert int(data["sample_age_ms"]) >= 0
     assert int(data["poll_interval_ms"]) > 0
@@ -278,20 +168,20 @@ def test_cli_input_analog_round_trip(cli_runner: CLIRunner, require_modio) -> No
     assert [int(item["id"]) for item in inputs] == [1, 2, 3, 4]
     assert all(int(item["value"]) >= 0 for item in inputs)
 
-    single = _assert_success(cli_runner.run_robot("input", "analog", "3"), "input analog")
+    single = _assert_success(cli_robot_run("input", "analog", "3"), "input analog")
     assert single["input"]["id"] == 3
     assert int(single["input"]["value"]) >= 0
 
 
-def test_cli_auth_enforcement(cli_runner: CLIRunner) -> None:
-    missing = cli_runner.run_robot("status", api_token=None)
+def test_cli_auth_enforcement(cli_robot_run) -> None:
+    missing = cli_robot_run("status", api_token=None)
     assert missing.stderr == ""
     assert missing.exit_code == 3
     assert missing.payload["exit_code"] == 3
     assert missing.payload["error"]["code"] == "AUTH_REQUIRED"
     assert missing.payload.get("device_context") is None
 
-    wrong = cli_runner.run_robot("status", api_token="wrong-secret")
+    wrong = cli_robot_run("status", api_token="wrong-secret")
     assert wrong.stderr == ""
     assert wrong.exit_code == 3
     assert wrong.payload["exit_code"] == 3

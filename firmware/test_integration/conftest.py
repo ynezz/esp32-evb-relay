@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import secrets
+import shutil
 import socket
 import subprocess
 import sys
@@ -10,7 +12,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import Any, Callable, Iterator, Mapping
 
 import pytest
 import requests
@@ -27,6 +29,8 @@ DEFAULT_REQUEST_TIMEOUT = 5.0
 DEFAULT_DISCOVERY_TIMEOUT = 15.0
 DEFAULT_SERIAL_ENDPOINT_TIMEOUT = 30.0
 DEFAULT_BOOT_SETTLE_SECONDS = 3.0
+DEFAULT_CLI_TIMEOUT_SECONDS = 30.0
+DEFAULT_CLI_REQUEST_TIMEOUT = "5s"
 PARTTOOL_ESPTOOL_ARGS = ("--esptool-args", "no-stub")
 ETHERNET_IP_LOG_PATTERN = re.compile(r"Ethernet got IP: ip=(\d+\.\d+\.\d+\.\d+)")
 SAFE_OFF_PATHS = (
@@ -38,6 +42,7 @@ SAFE_OFF_PATHS = (
     "/api/v1/relays/modio/4",
 )
 IGNORED_CLEANUP_STATUS_CODES = {404, 405, 501, 503}
+_USE_DEFAULT_TOKEN = object()
 
 
 @dataclass(frozen=True)
@@ -59,6 +64,21 @@ class IntegrationHttpClient:
         if not path.startswith("/"):
             raise ValueError(f"path must start with '/': {path!r}")
         return self.session.request(method, f"{self.base_url}{path}", timeout=timeout, **kwargs)
+
+
+@dataclass(frozen=True)
+class CLIRunResult:
+    stdout: str
+    stderr: str
+    exit_code: int
+
+
+@dataclass(frozen=True)
+class CLIRobotRunResult:
+    stdout: str
+    stderr: str
+    exit_code: int
+    payload: dict[str, Any]
 
 
 def _repo_root() -> Path:
@@ -120,6 +140,18 @@ def _run_command(args: list[str], cwd: Path | None = None) -> str:
                             text=True,
                             capture_output=True)
     return result.stdout
+
+
+def _cli_env(config_home: Path, extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
+    env = os.environ.copy()
+    env["XDG_CONFIG_HOME"] = str(config_home)
+    env.pop("EVB_RELAY_HOST", None)
+    env.pop("EVB_RELAY_API_TOKEN", None)
+    env.pop("EVB_RELAY_ROBOT", None)
+    env.pop("EVB_RELAY_TIMEOUT", None)
+    if extra_env:
+        env.update(extra_env)
+    return env
 
 
 def _parttool_command(
@@ -376,6 +408,105 @@ def http_client(auth_token: str, dut_endpoint: DutEndpoint) -> Iterator[Integrat
         yield client
     finally:
         session.close()
+
+
+@pytest.fixture(scope="session")
+def cli_binary(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    if shutil.which("go") is None:
+        pytest.skip("Go toolchain is not available")
+
+    repo_root = _repo_root()
+    binary_path = tmp_path_factory.mktemp("cli-device") / "evb-relay"
+    completed = subprocess.run(
+        ["go", "build", "-o", str(binary_path), "."],
+        cwd=repo_root / "cli",
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if completed.returncode != 0:
+        pytest.fail(f"failed to build CLI binary:\n{completed.stderr}")
+    return binary_path
+
+
+@pytest.fixture(scope="session")
+def cli_run(
+    cli_binary: Path,
+    dut_endpoint: DutEndpoint,
+    auth_token: str,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Callable[..., CLIRunResult]:
+    config_home = tmp_path_factory.mktemp("cli-config")
+    default_host = f"{dut_endpoint.ip}:{dut_endpoint.port}"
+
+    def run(
+        *args: str,
+        api_token: object = _USE_DEFAULT_TOKEN,
+        host: str | None = None,
+        extra_env: Mapping[str, str] | None = None,
+        request_timeout: str = DEFAULT_CLI_REQUEST_TIMEOUT,
+        timeout_seconds: float = DEFAULT_CLI_TIMEOUT_SECONDS,
+    ) -> CLIRunResult:
+        command = [
+            str(cli_binary),
+            "--host",
+            host or default_host,
+            "--timeout",
+            request_timeout,
+        ]
+        if api_token is _USE_DEFAULT_TOKEN:
+            command.extend(["--api-token", auth_token])
+        elif api_token is not None:
+            command.extend(["--api-token", str(api_token)])
+        command.extend(args)
+
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            env=_cli_env(config_home, extra_env),
+        )
+        return CLIRunResult(
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+            exit_code=completed.returncode,
+        )
+
+    return run
+
+
+@pytest.fixture(scope="session")
+def cli_robot_run(cli_run: Callable[..., CLIRunResult]) -> Callable[..., CLIRobotRunResult]:
+    def run(
+        *args: str,
+        api_token: object = _USE_DEFAULT_TOKEN,
+        host: str | None = None,
+        extra_env: Mapping[str, str] | None = None,
+        request_timeout: str = DEFAULT_CLI_REQUEST_TIMEOUT,
+        timeout_seconds: float = DEFAULT_CLI_TIMEOUT_SECONDS,
+    ) -> CLIRobotRunResult:
+        result = cli_run(
+            "--robot",
+            "--format",
+            "json",
+            *args,
+            api_token=api_token,
+            host=host,
+            extra_env=extra_env,
+            request_timeout=request_timeout,
+            timeout_seconds=timeout_seconds,
+        )
+        return CLIRobotRunResult(
+            stdout=result.stdout,
+            stderr=result.stderr,
+            exit_code=result.exit_code,
+            payload=json.loads(result.stdout),
+        )
+
+    return run
 
 
 @pytest.fixture
