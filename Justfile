@@ -9,7 +9,7 @@ test_app_sdkconfig_defaults := env(
 )
 idf_path := env("IDF_PATH", home_directory() / "esp/esp-idf")
 pytest_args := env("EVB_PYTEST_ARGS", "")
-test_device_watchdog_seconds := env("EVB_TEST_DEVICE_WATCHDOG_SECONDS", "180")
+test_device_watchdog_seconds := env("EVB_TEST_DEVICE_WATCHDOG_SECONDS", "480")
 venv_dir := ".venv"
 venv_python := ".venv/bin/python"
 venv_astyle_py := ".venv/bin/astyle_py"

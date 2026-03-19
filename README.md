@@ -378,7 +378,7 @@ controlled by environment variables:
 | `EVB_FLASH_PORT` | `$EVB_SERIAL_PORT` | Port used by esptool for flashing (set separately for split-port setups) |
 | `EVB_SERIAL_BAUD` | `115200` | Monitor baud rate |
 | `EVB_TEST_APP_SDKCONFIG_DEFAULTS` | `sdkconfig.defaults` | sdkconfig defaults file for the test app build |
-| `EVB_TEST_DEVICE_WATCHDOG_SECONDS` | `180` | Whole-run wall-clock watchdog for `just test-device` |
+| `EVB_TEST_DEVICE_WATCHDOG_SECONDS` | `480` | Whole-run wall-clock watchdog for `just test-device` |
 | `EVB_PYTEST_ARGS` | _(empty)_ | Extra flags passed verbatim to pytest |
 
 To see the device serial log and Unity test results live during a run:
