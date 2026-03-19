@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
 import signal
 import subprocess
@@ -112,14 +113,56 @@ def _init_pre_commit_test_repo(tmp_path: Path) -> Path:
 
 
 def _gofmt_source(source: str) -> str:
-    result = subprocess.run(
-        ["gofmt"],
-        input=textwrap.dedent(source),
-        check=True,
-        text=True,
-        capture_output=True,
+    return textwrap.dedent(source)
+
+
+def _install_fake_go_tools(tmp_path: Path) -> dict[str, str]:
+    bin_dir = tmp_path / "fake-go-bin"
+    bin_dir.mkdir()
+
+    (bin_dir / "go").write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env python3
+            from pathlib import Path
+            import sys
+
+            if len(sys.argv) < 2 or sys.argv[1] != "vet":
+                raise SystemExit(2)
+
+            for path in Path(".").rglob("*.go"):
+                source = path.read_text(encoding="utf-8")
+                if 'fmt.Printf("%d", "broken")' in source:
+                    raise SystemExit(1)
+                if 'fmt.Printf("%d", "worktree-only-breakage")' in source:
+                    raise SystemExit(1)
+
+            raise SystemExit(0)
+            """
+        ),
+        encoding="utf-8",
     )
-    return result.stdout
+    (bin_dir / "gofmt").write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env python3
+            import sys
+
+            if len(sys.argv) > 1 and sys.argv[1] in {"-l", "-d"}:
+                raise SystemExit(0)
+
+            sys.stdout.write(sys.stdin.read())
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    for tool in (bin_dir / "go", bin_dir / "gofmt"):
+        tool.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    return env
 
 
 def test_firmware_build_disables_download_stub() -> None:
@@ -240,6 +283,7 @@ def test_pre_commit_hook_rejects_bad_staged_go_even_when_worktree_is_fixed(
     tmp_path: Path,
 ) -> None:
     repo = _init_pre_commit_test_repo(tmp_path)
+    env = _install_fake_go_tools(tmp_path)
     main_go = repo / "cli/main.go"
 
     main_go.write_text(
@@ -279,6 +323,7 @@ def test_pre_commit_hook_rejects_bad_staged_go_even_when_worktree_is_fixed(
         check=False,
         text=True,
         capture_output=True,
+        env=env,
     )
     assert worktree_vet.returncode == 0
 
@@ -288,6 +333,7 @@ def test_pre_commit_hook_rejects_bad_staged_go_even_when_worktree_is_fixed(
         check=False,
         text=True,
         capture_output=True,
+        env=env,
     )
 
     assert hook_result.returncode != 0
@@ -297,6 +343,7 @@ def test_pre_commit_hook_ignores_unstaged_worktree_breakage_when_index_is_clean(
     tmp_path: Path,
 ) -> None:
     repo = _init_pre_commit_test_repo(tmp_path)
+    env = _install_fake_go_tools(tmp_path)
     main_go = repo / "cli/main.go"
 
     main_go.write_text(
@@ -336,6 +383,7 @@ def test_pre_commit_hook_ignores_unstaged_worktree_breakage_when_index_is_clean(
         check=False,
         text=True,
         capture_output=True,
+        env=env,
     )
     assert worktree_vet.returncode != 0
 
@@ -345,6 +393,7 @@ def test_pre_commit_hook_ignores_unstaged_worktree_breakage_when_index_is_clean(
         check=False,
         text=True,
         capture_output=True,
+        env=env,
     )
 
     assert hook_result.returncode == 0
