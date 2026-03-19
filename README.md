@@ -50,7 +50,7 @@ tools/      Pre-commit hook and udev helper files
 Prerequisites:
 
 - ESP-IDF v5.4 with `IDF_PATH` set
-- Go 1.24.x
+- Go 1.25.x, or Go 1.24.4 with automatic toolchain downloads enabled
 - Python 3 with `venv`
 - `just`
 
@@ -71,8 +71,9 @@ cd cli && go build -o ../bin/evb-relay .
 
 Notes:
 
-- `just setup` creates the local Python environment used by formatting
-  and pytest-based checks.
+- `just setup` creates the local `.venv`, installs the Python tooling
+  used by formatting and pytest-based checks, and installs the repo
+  pre-commit hook.
 - `just ci` is the main quality gate. It runs firmware format checks,
   firmware build, host tests, CLI format checks, `golangci-lint`,
   `go vet`, and CLI tests.

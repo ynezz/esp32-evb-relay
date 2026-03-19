@@ -418,7 +418,7 @@ does **not** impose a hard 120-column line-length cap by itself.
 | `just format-check` | astyle_py dry-run                           | Format gate |
 | `just ci`           | format-check + build + test + CLI gates + CLI e2e | Full gate   |
 | `just ci-full`      | ci + test-device + test-integration         | Full + HW (self-hosted) |
-| `just setup`        | install QA Python deps in IDF env + hook    | One-time    |
+| `just setup`        | create local `.venv`, install QA Python deps, and install hook | One-time    |
 | `just clean`        | rm build artifacts                          | Cleanup     |
 
 ### Recipe Details
@@ -431,8 +431,9 @@ Hardware recipes should keep the build and pytest invocation in the same
 recipe. `pytest-embedded` will flash and monitor the built app, but the app
 still needs to be built first from the matching ESP-IDF project directory.
 
-All `idf.py`, `pytest-embedded`, and ESP-IDF Unity invocations assume the
-ESP-IDF environment is already active in the current shell
+Justfile recipes that call `idf.py` source `export.sh` automatically when
+`idf.py` is not already on `PATH`. Direct `idf.py` commands outside the
+Justfile still require an active ESP-IDF environment
 (`. $IDF_PATH/export.sh` or equivalent).
 
 For CI hardware lanes, set
@@ -665,7 +666,7 @@ Each step is a discrete, committable unit of work:
 
 ```bash
 . "$IDF_PATH/export.sh"  # Or activate the equivalent ESP-IDF environment
-just setup              # Install deps + hook
+just setup              # Create .venv, install deps, and install hook
 just ci                 # format-check + build + host tests
 just test-device        # On-device Unity tests (requires hardware)
 just test-integration   # System-level pytest (requires hardware)
