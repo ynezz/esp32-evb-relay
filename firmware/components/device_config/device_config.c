@@ -21,6 +21,9 @@ typedef struct {
     char api_token[DEVICE_CONFIG_API_TOKEN_MAX_LEN + 1];
     uint32_t poll_interval_ms;
     char hostname[DEVICE_CONFIG_HOSTNAME_MAX_LEN + 1];
+    char wifi_ssid[DEVICE_CONFIG_WIFI_SSID_MAX_LEN + 1];
+    char wifi_passphrase[DEVICE_CONFIG_WIFI_PASSPHRASE_MAX_LEN + 1];
+    device_config_network_policy_t network_policy;
     device_config_modio_boot_policy_t modio_boot_policy;
 } device_config_state_t;
 
@@ -57,6 +60,36 @@ static const device_config_key_metadata_t s_key_metadata[DEVICE_CONFIG_KEY_COUNT
         },
         .nvs_key = "hostname",
     },
+    [DEVICE_CONFIG_KEY_WIFI_SSID] = {
+        .descriptor =
+        {
+            .key = DEVICE_CONFIG_KEY_WIFI_SSID,
+            .name = "wifi_ssid",
+            .secret = true,
+            .apply_mode = DEVICE_CONFIG_APPLY_MODE_RESTART_REQUIRED,
+        },
+        .nvs_key = "wifi_ssid",
+    },
+    [DEVICE_CONFIG_KEY_WIFI_PASSPHRASE] = {
+        .descriptor =
+        {
+            .key = DEVICE_CONFIG_KEY_WIFI_PASSPHRASE,
+            .name = "wifi_passphrase",
+            .secret = true,
+            .apply_mode = DEVICE_CONFIG_APPLY_MODE_RESTART_REQUIRED,
+        },
+        .nvs_key = "wifi_pass",
+    },
+    [DEVICE_CONFIG_KEY_NETWORK_POLICY] = {
+        .descriptor =
+        {
+            .key = DEVICE_CONFIG_KEY_NETWORK_POLICY,
+            .name = "network_policy",
+            .secret = false,
+            .apply_mode = DEVICE_CONFIG_APPLY_MODE_RESTART_REQUIRED,
+        },
+        .nvs_key = "net_policy",
+    },
     [DEVICE_CONFIG_KEY_MODIO_BOOT_POLICY] = {
         .descriptor =
         {
@@ -76,6 +109,9 @@ static device_config_state_t s_state = {
     .api_token = "",
     .poll_interval_ms = DEVICE_CONFIG_DEFAULT_POLL_INTERVAL_MS,
     .hostname = DEVICE_CONFIG_DEFAULT_HOSTNAME,
+    .wifi_ssid = "",
+    .wifi_passphrase = "",
+    .network_policy = DEVICE_CONFIG_NETWORK_POLICY_ETHERNET_ONLY,
     .modio_boot_policy = DEVICE_CONFIG_MODIO_BOOT_POLICY_LEAVE_UNCHANGED,
 };
 
@@ -84,6 +120,9 @@ static void device_config_apply_defaults(device_config_state_t *state)
     state->api_token[0] = '\0';
     state->poll_interval_ms = DEVICE_CONFIG_DEFAULT_POLL_INTERVAL_MS;
     memcpy(state->hostname, DEVICE_CONFIG_DEFAULT_HOSTNAME, sizeof(DEVICE_CONFIG_DEFAULT_HOSTNAME));
+    state->wifi_ssid[0] = '\0';
+    state->wifi_passphrase[0] = '\0';
+    state->network_policy = DEVICE_CONFIG_NETWORK_POLICY_ETHERNET_ONLY;
     state->modio_boot_policy = DEVICE_CONFIG_MODIO_BOOT_POLICY_LEAVE_UNCHANGED;
 }
 
@@ -158,6 +197,62 @@ static esp_err_t device_config_validate_api_token(const char *token)
     }
 
     return ESP_OK;
+}
+
+static esp_err_t device_config_validate_wifi_ssid(const char *ssid)
+{
+    size_t length;
+
+    if (ssid == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    length = strnlen(ssid, DEVICE_CONFIG_WIFI_SSID_MAX_LEN + 2U);
+    if ((length == 0U) || (length > DEVICE_CONFIG_WIFI_SSID_MAX_LEN)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t device_config_validate_wifi_passphrase(const char *passphrase)
+{
+    size_t length;
+
+    if (passphrase == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    length = strnlen(passphrase, DEVICE_CONFIG_WIFI_PASSPHRASE_MAX_LEN + 2U);
+    if (length > DEVICE_CONFIG_WIFI_PASSPHRASE_MAX_LEN) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if ((length > 0U) && (length < 8U)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t device_config_validate_wifi_credentials_pair(const device_config_state_t *state)
+{
+    bool ssid_set;
+
+    if (state == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    ssid_set = state->wifi_ssid[0] != '\0';
+    if (!ssid_set) {
+        return (state->wifi_passphrase[0] == '\0') ? ESP_OK : ESP_ERR_INVALID_ARG;
+    }
+
+    if (device_config_validate_wifi_ssid(state->wifi_ssid) != ESP_OK) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    return device_config_validate_wifi_passphrase(state->wifi_passphrase);
 }
 
 static void device_config_fill_apply_result(device_config_key_t key, device_config_apply_result_t *result)
@@ -294,6 +389,163 @@ static esp_err_t device_config_load_hostname(nvs_handle_t handle, device_config_
     return ESP_OK;
 }
 
+static esp_err_t device_config_load_wifi_ssid(nvs_handle_t handle, device_config_state_t *state, bool *dirty)
+{
+    size_t required_size = sizeof(state->wifi_ssid);
+    esp_err_t err = nvs_get_str(handle,
+                                s_key_metadata[DEVICE_CONFIG_KEY_WIFI_SSID].nvs_key,
+                                state->wifi_ssid,
+                                &required_size);
+
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        state->wifi_ssid[0] = '\0';
+        return ESP_OK;
+    }
+
+    if (err == ESP_ERR_NVS_INVALID_LENGTH) {
+        ESP_LOGW(TAG, "Resetting invalid stored value for %s",
+                 s_key_metadata[DEVICE_CONFIG_KEY_WIFI_SSID].descriptor.name);
+        state->wifi_ssid[0] = '\0';
+        ESP_RETURN_ON_ERROR(nvs_erase_key(handle, s_key_metadata[DEVICE_CONFIG_KEY_WIFI_SSID].nvs_key), TAG,
+                            "Failed to erase invalid NVS key for %s",
+                            s_key_metadata[DEVICE_CONFIG_KEY_WIFI_SSID].descriptor.name);
+        *dirty = true;
+        return ESP_OK;
+    }
+
+    ESP_RETURN_ON_ERROR(err, TAG, "Failed to load %s",
+                        s_key_metadata[DEVICE_CONFIG_KEY_WIFI_SSID].descriptor.name);
+
+    if ((state->wifi_ssid[0] != '\0') && (device_config_validate_wifi_ssid(state->wifi_ssid) != ESP_OK)) {
+        ESP_LOGW(TAG, "Resetting invalid stored value for %s",
+                 s_key_metadata[DEVICE_CONFIG_KEY_WIFI_SSID].descriptor.name);
+        state->wifi_ssid[0] = '\0';
+        ESP_RETURN_ON_ERROR(nvs_erase_key(handle, s_key_metadata[DEVICE_CONFIG_KEY_WIFI_SSID].nvs_key), TAG,
+                            "Failed to erase invalid NVS key for %s",
+                            s_key_metadata[DEVICE_CONFIG_KEY_WIFI_SSID].descriptor.name);
+        *dirty = true;
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t device_config_load_wifi_passphrase(nvs_handle_t handle,
+                                                    device_config_state_t *state,
+                                                    bool *dirty)
+{
+    size_t required_size = sizeof(state->wifi_passphrase);
+    esp_err_t err = nvs_get_str(handle,
+                                s_key_metadata[DEVICE_CONFIG_KEY_WIFI_PASSPHRASE].nvs_key,
+                                state->wifi_passphrase,
+                                &required_size);
+
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        state->wifi_passphrase[0] = '\0';
+        return ESP_OK;
+    }
+
+    if (err == ESP_ERR_NVS_INVALID_LENGTH) {
+        ESP_LOGW(TAG, "Resetting invalid stored value for %s",
+                 s_key_metadata[DEVICE_CONFIG_KEY_WIFI_PASSPHRASE].descriptor.name);
+        state->wifi_passphrase[0] = '\0';
+        ESP_RETURN_ON_ERROR(nvs_erase_key(handle, s_key_metadata[DEVICE_CONFIG_KEY_WIFI_PASSPHRASE].nvs_key),
+                            TAG,
+                            "Failed to erase invalid NVS key for %s",
+                            s_key_metadata[DEVICE_CONFIG_KEY_WIFI_PASSPHRASE].descriptor.name);
+        *dirty = true;
+        return ESP_OK;
+    }
+
+    ESP_RETURN_ON_ERROR(err, TAG, "Failed to load %s",
+                        s_key_metadata[DEVICE_CONFIG_KEY_WIFI_PASSPHRASE].descriptor.name);
+
+    if (device_config_validate_wifi_passphrase(state->wifi_passphrase) != ESP_OK) {
+        ESP_LOGW(TAG, "Resetting invalid stored value for %s",
+                 s_key_metadata[DEVICE_CONFIG_KEY_WIFI_PASSPHRASE].descriptor.name);
+        state->wifi_passphrase[0] = '\0';
+        ESP_RETURN_ON_ERROR(nvs_erase_key(handle, s_key_metadata[DEVICE_CONFIG_KEY_WIFI_PASSPHRASE].nvs_key),
+                            TAG,
+                            "Failed to erase invalid NVS key for %s",
+                            s_key_metadata[DEVICE_CONFIG_KEY_WIFI_PASSPHRASE].descriptor.name);
+        *dirty = true;
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t device_config_load_network_policy(nvs_handle_t handle,
+                                                   device_config_state_t *state,
+                                                   bool *dirty)
+{
+    uint8_t raw_policy = 0;
+    esp_err_t err = nvs_get_u8(handle, s_key_metadata[DEVICE_CONFIG_KEY_NETWORK_POLICY].nvs_key, &raw_policy);
+
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        state->network_policy = DEVICE_CONFIG_NETWORK_POLICY_ETHERNET_ONLY;
+        ESP_RETURN_ON_ERROR(nvs_set_u8(handle,
+                                       s_key_metadata[DEVICE_CONFIG_KEY_NETWORK_POLICY].nvs_key,
+                                       (uint8_t)state->network_policy),
+                            TAG, "Failed to store default value for %s",
+                            s_key_metadata[DEVICE_CONFIG_KEY_NETWORK_POLICY].descriptor.name);
+        *dirty = true;
+        return ESP_OK;
+    }
+
+    ESP_RETURN_ON_ERROR(err, TAG, "Failed to load %s",
+                        s_key_metadata[DEVICE_CONFIG_KEY_NETWORK_POLICY].descriptor.name);
+
+    if (raw_policy > (uint8_t)DEVICE_CONFIG_NETWORK_POLICY_PREFER_ETHERNET) {
+        ESP_LOGW(TAG, "Resetting invalid stored value for %s",
+                 s_key_metadata[DEVICE_CONFIG_KEY_NETWORK_POLICY].descriptor.name);
+        state->network_policy = DEVICE_CONFIG_NETWORK_POLICY_ETHERNET_ONLY;
+        ESP_RETURN_ON_ERROR(nvs_set_u8(handle,
+                                       s_key_metadata[DEVICE_CONFIG_KEY_NETWORK_POLICY].nvs_key,
+                                       (uint8_t)state->network_policy),
+                            TAG, "Failed to store default value for %s",
+                            s_key_metadata[DEVICE_CONFIG_KEY_NETWORK_POLICY].descriptor.name);
+        *dirty = true;
+        return ESP_OK;
+    }
+
+    state->network_policy = (device_config_network_policy_t)raw_policy;
+    return ESP_OK;
+}
+
+static esp_err_t device_config_load_wifi_credentials_pair(nvs_handle_t handle,
+                                                          device_config_state_t *state,
+                                                          bool *dirty)
+{
+    esp_err_t err;
+
+    err = device_config_load_wifi_ssid(handle, state, dirty);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = device_config_load_wifi_passphrase(handle, state, dirty);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    if (device_config_validate_wifi_credentials_pair(state) == ESP_OK) {
+        return ESP_OK;
+    }
+
+    ESP_LOGW(TAG, "Resetting inconsistent stored WiFi credentials");
+    state->wifi_ssid[0] = '\0';
+    state->wifi_passphrase[0] = '\0';
+    err = nvs_erase_key(handle, s_key_metadata[DEVICE_CONFIG_KEY_WIFI_SSID].nvs_key);
+    if ((err != ESP_OK) && (err != ESP_ERR_NVS_NOT_FOUND)) {
+        return err;
+    }
+    err = nvs_erase_key(handle, s_key_metadata[DEVICE_CONFIG_KEY_WIFI_PASSPHRASE].nvs_key);
+    if ((err != ESP_OK) && (err != ESP_ERR_NVS_NOT_FOUND)) {
+        return err;
+    }
+    *dirty = true;
+    return ESP_OK;
+}
+
 static esp_err_t device_config_load_modio_boot_policy(nvs_handle_t handle,
                                                       device_config_state_t *state,
                                                       bool *dirty)
@@ -358,6 +610,16 @@ static esp_err_t device_config_load_state(device_config_state_t *state)
         goto cleanup;
     }
 
+    err = device_config_load_wifi_credentials_pair(handle, state, &dirty);
+    if (err != ESP_OK) {
+        goto cleanup;
+    }
+
+    err = device_config_load_network_policy(handle, state, &dirty);
+    if (err != ESP_OK) {
+        goto cleanup;
+    }
+
     err = device_config_load_modio_boot_policy(handle, state, &dirty);
     if (err != ESP_OK) {
         goto cleanup;
@@ -395,6 +657,45 @@ const char *device_config_apply_mode_to_string(device_config_apply_mode_t apply_
     default:
         return "unknown";
     }
+}
+
+const char *device_config_network_policy_to_string(device_config_network_policy_t policy)
+{
+    switch (policy) {
+    case DEVICE_CONFIG_NETWORK_POLICY_ETHERNET_ONLY:
+        return "ethernet_only";
+    case DEVICE_CONFIG_NETWORK_POLICY_WIFI_ONLY:
+        return "wifi_only";
+    case DEVICE_CONFIG_NETWORK_POLICY_PREFER_ETHERNET:
+        return "prefer_ethernet";
+    default:
+        return "unknown";
+    }
+}
+
+esp_err_t device_config_parse_network_policy(const char *value,
+                                             device_config_network_policy_t *out)
+{
+    if ((value == NULL) || (out == NULL)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (strcmp(value, "ethernet_only") == 0) {
+        *out = DEVICE_CONFIG_NETWORK_POLICY_ETHERNET_ONLY;
+        return ESP_OK;
+    }
+
+    if (strcmp(value, "wifi_only") == 0) {
+        *out = DEVICE_CONFIG_NETWORK_POLICY_WIFI_ONLY;
+        return ESP_OK;
+    }
+
+    if (strcmp(value, "prefer_ethernet") == 0) {
+        *out = DEVICE_CONFIG_NETWORK_POLICY_PREFER_ETHERNET;
+        return ESP_OK;
+    }
+
+    return ESP_ERR_INVALID_ARG;
 }
 
 const char *device_config_modio_boot_policy_to_string(device_config_modio_boot_policy_t policy)
@@ -465,6 +766,9 @@ esp_err_t device_config_get_snapshot(device_config_snapshot_t *out)
     xSemaphoreTake(s_lock, portMAX_DELAY);
     out->poll_interval_ms = s_state.poll_interval_ms;
     memcpy(out->hostname, s_state.hostname, sizeof(out->hostname));
+    out->wifi_ssid_set = (s_state.wifi_ssid[0] != '\0');
+    out->wifi_passphrase_set = (s_state.wifi_passphrase[0] != '\0');
+    out->network_policy = s_state.network_policy;
     out->modio_boot_policy = s_state.modio_boot_policy;
     out->api_token_set = (s_state.api_token[0] != '\0');
     xSemaphoreGive(s_lock);
@@ -655,6 +959,151 @@ esp_err_t device_config_set_hostname(const char *hostname, device_config_apply_r
         memcpy(s_state.hostname, hostname, hostname_len);
         s_state.hostname[hostname_len] = '\0';
         device_config_fill_apply_result(DEVICE_CONFIG_KEY_HOSTNAME, result);
+    }
+
+    nvs_close(handle);
+    xSemaphoreGive(s_lock);
+    return err;
+}
+
+esp_err_t device_config_get_wifi_sta_credentials(device_config_wifi_sta_credentials_t *out)
+{
+    ESP_RETURN_ON_FALSE(out != NULL, ESP_ERR_INVALID_ARG, TAG, "WiFi credentials output buffer is required");
+    ESP_RETURN_ON_ERROR(device_config_init(), TAG, "Failed to initialize device config");
+
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    out->ssid_set = (s_state.wifi_ssid[0] != '\0');
+    out->passphrase_set = (s_state.wifi_passphrase[0] != '\0');
+    memcpy(out->ssid, s_state.wifi_ssid, sizeof(out->ssid));
+    memcpy(out->passphrase, s_state.wifi_passphrase, sizeof(out->passphrase));
+    xSemaphoreGive(s_lock);
+
+    return ESP_OK;
+}
+
+esp_err_t device_config_set_wifi_sta_credentials(const char *ssid,
+                                                 const char *passphrase,
+                                                 device_config_apply_result_t *result)
+{
+    bool clear_credentials = (ssid == NULL) || (ssid[0] == '\0');
+    nvs_handle_t handle = 0;
+    esp_err_t err;
+
+    if (clear_credentials) {
+        ESP_RETURN_ON_FALSE((passphrase == NULL) || (passphrase[0] == '\0'),
+                            ESP_ERR_INVALID_ARG,
+                            TAG,
+                            "Passphrase requires an SSID");
+    } else {
+        ESP_RETURN_ON_ERROR(device_config_validate_wifi_ssid(ssid), TAG, "Invalid WiFi SSID");
+        ESP_RETURN_ON_ERROR(device_config_validate_wifi_passphrase(passphrase), TAG, "Invalid WiFi passphrase");
+    }
+    ESP_RETURN_ON_ERROR(device_config_init(), TAG, "Failed to initialize device config");
+
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (clear_credentials && (s_state.wifi_ssid[0] == '\0') && (s_state.wifi_passphrase[0] == '\0')) {
+        device_config_fill_apply_result(DEVICE_CONFIG_KEY_WIFI_SSID, result);
+        xSemaphoreGive(s_lock);
+        return ESP_OK;
+    }
+
+    if (!clear_credentials &&
+            (strcmp(s_state.wifi_ssid, ssid) == 0) &&
+            (strcmp(s_state.wifi_passphrase, passphrase) == 0)) {
+        device_config_fill_apply_result(DEVICE_CONFIG_KEY_WIFI_SSID, result);
+        xSemaphoreGive(s_lock);
+        return ESP_OK;
+    }
+
+    err = nvs_open(DEVICE_CONFIG_NVS_NAMESPACE, NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        xSemaphoreGive(s_lock);
+        return err;
+    }
+
+    if (clear_credentials) {
+        err = nvs_erase_key(handle, s_key_metadata[DEVICE_CONFIG_KEY_WIFI_SSID].nvs_key);
+        if ((err == ESP_OK) || (err == ESP_ERR_NVS_NOT_FOUND)) {
+            err = nvs_erase_key(handle, s_key_metadata[DEVICE_CONFIG_KEY_WIFI_PASSPHRASE].nvs_key);
+            if ((err == ESP_OK) || (err == ESP_ERR_NVS_NOT_FOUND)) {
+                err = ESP_OK;
+            }
+        }
+    } else {
+        err = nvs_set_str(handle, s_key_metadata[DEVICE_CONFIG_KEY_WIFI_SSID].nvs_key, ssid);
+        if (err == ESP_OK) {
+            err = nvs_set_str(handle, s_key_metadata[DEVICE_CONFIG_KEY_WIFI_PASSPHRASE].nvs_key, passphrase);
+        }
+    }
+
+    if (err == ESP_OK) {
+        err = nvs_commit(handle);
+    }
+
+    if (err == ESP_OK) {
+        if (clear_credentials) {
+            s_state.wifi_ssid[0] = '\0';
+            s_state.wifi_passphrase[0] = '\0';
+        } else {
+            size_t ssid_len = strnlen(ssid, DEVICE_CONFIG_WIFI_SSID_MAX_LEN);
+            size_t passphrase_len = strnlen(passphrase, DEVICE_CONFIG_WIFI_PASSPHRASE_MAX_LEN);
+
+            memcpy(s_state.wifi_ssid, ssid, ssid_len);
+            s_state.wifi_ssid[ssid_len] = '\0';
+            memcpy(s_state.wifi_passphrase, passphrase, passphrase_len);
+            s_state.wifi_passphrase[passphrase_len] = '\0';
+        }
+        device_config_fill_apply_result(DEVICE_CONFIG_KEY_WIFI_SSID, result);
+    }
+
+    nvs_close(handle);
+    xSemaphoreGive(s_lock);
+    return err;
+}
+
+esp_err_t device_config_get_network_policy(device_config_network_policy_t *out)
+{
+    ESP_RETURN_ON_FALSE(out != NULL, ESP_ERR_INVALID_ARG, TAG, "Network policy output buffer is required");
+    ESP_RETURN_ON_ERROR(device_config_init(), TAG, "Failed to initialize device config");
+
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    *out = s_state.network_policy;
+    xSemaphoreGive(s_lock);
+
+    return ESP_OK;
+}
+
+esp_err_t device_config_set_network_policy(device_config_network_policy_t policy,
+                                           device_config_apply_result_t *result)
+{
+    nvs_handle_t handle = 0;
+    esp_err_t err;
+
+    ESP_RETURN_ON_FALSE(policy <= DEVICE_CONFIG_NETWORK_POLICY_PREFER_ETHERNET, ESP_ERR_INVALID_ARG, TAG,
+                        "Invalid network policy");
+    ESP_RETURN_ON_ERROR(device_config_init(), TAG, "Failed to initialize device config");
+
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (s_state.network_policy == policy) {
+        device_config_fill_apply_result(DEVICE_CONFIG_KEY_NETWORK_POLICY, result);
+        xSemaphoreGive(s_lock);
+        return ESP_OK;
+    }
+
+    err = nvs_open(DEVICE_CONFIG_NVS_NAMESPACE, NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        xSemaphoreGive(s_lock);
+        return err;
+    }
+
+    err = nvs_set_u8(handle, s_key_metadata[DEVICE_CONFIG_KEY_NETWORK_POLICY].nvs_key, (uint8_t)policy);
+    if (err == ESP_OK) {
+        err = nvs_commit(handle);
+    }
+
+    if (err == ESP_OK) {
+        s_state.network_policy = policy;
+        device_config_fill_apply_result(DEVICE_CONFIG_KEY_NETWORK_POLICY, result);
     }
 
     nvs_close(handle);

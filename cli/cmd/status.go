@@ -22,6 +22,7 @@ const statusCommandName = "status"
 type deviceNetworkStatus struct {
 	Hostname  string `json:"hostname"`
 	Connected bool   `json:"connected"`
+	Transport string `json:"transport"`
 	IP        string `json:"ip"`
 	Netmask   string `json:"netmask"`
 	Gateway   string `json:"gateway"`
@@ -60,6 +61,7 @@ func newStatusCommand() *cobra.Command {
 			"status.free_heap_bytes",
 			"status.network.hostname",
 			"status.network.connected",
+			"status.network.transport",
 			"status.network.ip",
 			"status.network.netmask",
 			"status.network.gateway",
@@ -164,6 +166,7 @@ func (r statusResult) TableOutput() (outputformat.TableData, error) {
 			"FREE HEAP (B)",
 			"HOSTNAME",
 			"CONNECTED",
+			"TRANSPORT",
 			"IP",
 			"NETMASK",
 			"GATEWAY",
@@ -176,6 +179,7 @@ func (r statusResult) TableOutput() (outputformat.TableData, error) {
 			formatStatusNumber(r.Status.FreeHeapBytes),
 			r.Status.Network.Hostname,
 			strconv.FormatBool(r.Status.Network.Connected),
+			r.Status.Network.Transport,
 			r.Status.Network.IP,
 			r.Status.Network.Netmask,
 			r.Status.Network.Gateway,
@@ -192,6 +196,7 @@ func (r statusResult) PlainOutput() ([]string, error) {
 		fmt.Sprintf("free_heap_bytes=%s", formatStatusNumber(r.Status.FreeHeapBytes)),
 		fmt.Sprintf("network.hostname=%s", r.Status.Network.Hostname),
 		fmt.Sprintf("network.connected=%t", r.Status.Network.Connected),
+		fmt.Sprintf("network.transport=%s", r.Status.Network.Transport),
 		fmt.Sprintf("network.ip=%s", r.Status.Network.IP),
 		fmt.Sprintf("network.netmask=%s", r.Status.Network.Netmask),
 		fmt.Sprintf("network.gateway=%s", r.Status.Network.Gateway),

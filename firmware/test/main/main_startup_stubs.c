@@ -62,6 +62,7 @@ void main_startup_stub_reset(void)
     s_state.rest_api_start_result = ESP_OK;
 
     s_state.network_status.connected = true;
+    s_state.network_status.transport = NETWORK_TRANSPORT_ETHERNET;
     (void)snprintf(s_state.network_status.hostname,
                    sizeof(s_state.network_status.hostname),
                    "esp32-evb-relay");

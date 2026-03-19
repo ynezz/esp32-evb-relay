@@ -50,6 +50,22 @@ static void test_rest_api_modio_sync_from_driver_maps_unknown_to_absent(void)
                           rest_api_modio_sync_from_driver((mod_io_relay_sync_t)99));
 }
 
+static void test_rest_api_network_transport_to_string_maps_known_values(void)
+{
+    TEST_ASSERT_EQUAL_STRING("none",
+                             rest_api_network_transport_to_string(REST_API_NETWORK_TRANSPORT_NONE));
+    TEST_ASSERT_EQUAL_STRING("ethernet",
+                             rest_api_network_transport_to_string(REST_API_NETWORK_TRANSPORT_ETHERNET));
+    TEST_ASSERT_EQUAL_STRING("wifi",
+                             rest_api_network_transport_to_string(REST_API_NETWORK_TRANSPORT_WIFI));
+}
+
+static void test_rest_api_network_transport_to_string_maps_unknown_to_none(void)
+{
+    TEST_ASSERT_EQUAL_STRING("none",
+                             rest_api_network_transport_to_string((rest_api_network_transport_t)99));
+}
+
 static void test_rest_api_request_recv_exact_times_out_after_three_consecutive_timeouts(void)
 {
     static const int responses[] = {
@@ -115,6 +131,8 @@ void test_rest_api_suite(void)
     RUN_TEST(test_rest_api_modio_sync_from_driver_maps_absent);
     RUN_TEST(test_rest_api_modio_sync_from_driver_maps_synchronized);
     RUN_TEST(test_rest_api_modio_sync_from_driver_maps_unknown_to_absent);
+    RUN_TEST(test_rest_api_network_transport_to_string_maps_known_values);
+    RUN_TEST(test_rest_api_network_transport_to_string_maps_unknown_to_none);
     RUN_TEST(test_rest_api_request_recv_exact_times_out_after_three_consecutive_timeouts);
     RUN_TEST(test_rest_api_request_recv_exact_resets_timeout_budget_after_progress);
     RUN_TEST(test_rest_api_request_recv_exact_returns_failure_for_socket_errors);

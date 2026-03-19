@@ -43,6 +43,7 @@ static void test_app_main_initializes_network_before_starting_http(void)
     rest_api_status_view_t status;
     network_status_t network_status = {
         .connected = true,
+        .transport = NETWORK_TRANSPORT_WIFI,
         .hostname = "relay-test",
         .ip = "192.0.2.44",
         .netmask = "255.255.255.0",
@@ -72,6 +73,7 @@ static void test_app_main_initializes_network_before_starting_http(void)
     TEST_ASSERT_EQUAL(REST_API_AUTH_RESULT_ALLOW, config->auth_handler(NULL, NULL));
     TEST_ASSERT_EQUAL(ESP_OK, config->status_provider(&status, config->status_ctx));
     TEST_ASSERT_TRUE(status.network.connected);
+    TEST_ASSERT_EQUAL_INT(REST_API_NETWORK_TRANSPORT_WIFI, status.network.transport);
     TEST_ASSERT_EQUAL_STRING("relay-test", status.network.hostname);
     TEST_ASSERT_EQUAL_STRING("192.0.2.44", status.network.ip);
     TEST_ASSERT_EQUAL_STRING("255.255.255.0", status.network.netmask);

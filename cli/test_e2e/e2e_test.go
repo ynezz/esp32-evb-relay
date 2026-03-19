@@ -118,6 +118,9 @@ func TestCLIHappyJSON(t *testing.T) {
 		if got := payload.Status.Network.Hostname; got != "lab-relay" {
 			t.Fatalf("network.hostname = %q, want %q", got, "lab-relay")
 		}
+		if got := payload.Status.Network.Transport; got != "ethernet" {
+			t.Fatalf("network.transport = %q, want %q", got, "ethernet")
+		}
 		if !payload.Status.ModIO.Present {
 			t.Fatal("modio.present = false, want true")
 		}

@@ -27,7 +27,7 @@ func TestStatusOutputsJSON(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(
 			w,
-			`{"uptime_seconds":42,"firmware_version":"0.4.0","free_heap_bytes":123456,"network":{"hostname":"lab-relay","connected":true,"ip":"192.168.1.60","netmask":"255.255.255.0","gateway":"192.168.1.1"},"modio":{"present":true,"sync":"synchronized"}}`,
+			`{"uptime_seconds":42,"firmware_version":"0.4.0","free_heap_bytes":123456,"network":{"hostname":"lab-relay","connected":true,"transport":"wifi","ip":"192.168.1.60","netmask":"255.255.255.0","gateway":"192.168.1.1"},"modio":{"present":true,"sync":"synchronized"}}`,
 		)
 	}))
 	defer server.Close()
@@ -64,6 +64,9 @@ func TestStatusOutputsJSON(t *testing.T) {
 	if got := payload.Status.Network.Hostname; got != "lab-relay" {
 		t.Fatalf("network.hostname = %q, want %q", got, "lab-relay")
 	}
+	if got := payload.Status.Network.Transport; got != "wifi" {
+		t.Fatalf("network.transport = %q, want %q", got, "wifi")
+	}
 	if got := payload.Status.Network.IP; got != "192.168.1.60" {
 		t.Fatalf("network.ip = %q, want %q", got, "192.168.1.60")
 	}
@@ -85,7 +88,7 @@ func TestStatusSupportsRobotJSONEnvelope(t *testing.T) {
 		w.Header().Set("X-ModIO-Sync", "synchronized")
 		_, _ = io.WriteString(
 			w,
-			`{"uptime_seconds":42,"firmware_version":"0.4.0","free_heap_bytes":123456,"network":{"hostname":"lab-relay","connected":true,"ip":"192.168.1.60","netmask":"255.255.255.0","gateway":"192.168.1.1"},"modio":{"present":true,"sync":"synchronized"}}`,
+			`{"uptime_seconds":42,"firmware_version":"0.4.0","free_heap_bytes":123456,"network":{"hostname":"lab-relay","connected":true,"transport":"wifi","ip":"192.168.1.60","netmask":"255.255.255.0","gateway":"192.168.1.1"},"modio":{"present":true,"sync":"synchronized"}}`,
 		)
 	}))
 	defer server.Close()
@@ -164,6 +167,7 @@ func TestStatusResultTableOutput(t *testing.T) {
 			Network: deviceNetworkStatus{
 				Hostname:  "lab-relay",
 				Connected: true,
+				Transport: "ethernet",
 				IP:        "192.168.1.60",
 				Netmask:   "255.255.255.0",
 				Gateway:   "192.168.1.1",
@@ -179,8 +183,8 @@ func TestStatusResultTableOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TableOutput() error = %v", err)
 	}
-	if len(table.Headers) != 10 {
-		t.Fatalf("header count = %d, want 10", len(table.Headers))
+	if len(table.Headers) != 11 {
+		t.Fatalf("header count = %d, want 11", len(table.Headers))
 	}
 	if len(table.Rows) != 1 {
 		t.Fatalf("row count = %d, want 1", len(table.Rows))
@@ -188,7 +192,10 @@ func TestStatusResultTableOutput(t *testing.T) {
 	if got := table.Rows[0][0]; got != "42" {
 		t.Fatalf("uptime cell = %q, want %q", got, "42")
 	}
-	if got := table.Rows[0][8]; got != "true" {
+	if got := table.Rows[0][5]; got != "ethernet" {
+		t.Fatalf("transport cell = %q, want %q", got, "ethernet")
+	}
+	if got := table.Rows[0][9]; got != "true" {
 		t.Fatalf("modio present cell = %q, want %q", got, "true")
 	}
 }
@@ -204,6 +211,7 @@ func TestStatusResultPlainOutput(t *testing.T) {
 			Network: deviceNetworkStatus{
 				Hostname:  "lab-relay",
 				Connected: true,
+				Transport: "ethernet",
 				IP:        "192.168.1.60",
 				Netmask:   "255.255.255.0",
 				Gateway:   "192.168.1.1",
@@ -219,13 +227,16 @@ func TestStatusResultPlainOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlainOutput() error = %v", err)
 	}
-	if len(lines) != 10 {
-		t.Fatalf("line count = %d, want 10", len(lines))
+	if len(lines) != 11 {
+		t.Fatalf("line count = %d, want 11", len(lines))
 	}
 	if got := lines[0]; got != "uptime_seconds=42" {
 		t.Fatalf("line 0 = %q, want %q", got, "uptime_seconds=42")
 	}
-	if got := lines[8]; got != "modio.present=true" {
-		t.Fatalf("line 8 = %q, want %q", got, "modio.present=true")
+	if got := lines[5]; got != "network.transport=ethernet" {
+		t.Fatalf("line 5 = %q, want %q", got, "network.transport=ethernet")
+	}
+	if got := lines[9]; got != "modio.present=true" {
+		t.Fatalf("line 9 = %q, want %q", got, "modio.present=true")
 	}
 }

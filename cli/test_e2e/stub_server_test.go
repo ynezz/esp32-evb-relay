@@ -29,6 +29,7 @@ type stubStatusResponse struct {
 type stubNetworkStatus struct {
 	Hostname  string `json:"hostname"`
 	Connected bool   `json:"connected"`
+	Transport string `json:"transport"`
 	IP        string `json:"ip"`
 	Netmask   string `json:"netmask"`
 	Gateway   string `json:"gateway"`
@@ -316,6 +317,7 @@ func (c *stubServerControl) handleStatus(w http.ResponseWriter) {
 		Network: stubNetworkStatus{
 			Hostname:  "lab-relay",
 			Connected: true,
+			Transport: "ethernet",
 			IP:        "192.168.1.60",
 			Netmask:   "255.255.255.0",
 			Gateway:   "192.168.1.1",

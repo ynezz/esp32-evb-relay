@@ -26,8 +26,15 @@ typedef enum {
     REST_API_MODIO_SYNC_SYNCHRONIZED,
 } rest_api_modio_sync_t;
 
+typedef enum {
+    REST_API_NETWORK_TRANSPORT_NONE = 0,
+    REST_API_NETWORK_TRANSPORT_ETHERNET,
+    REST_API_NETWORK_TRANSPORT_WIFI,
+} rest_api_network_transport_t;
+
 typedef struct {
     bool connected;
+    rest_api_network_transport_t transport;
     char hostname[REST_API_HOSTNAME_MAX_LEN + 1];
     char ip[REST_API_IPV4_ADDR_STR_LEN];
     char netmask[REST_API_IPV4_ADDR_STR_LEN];
@@ -60,6 +67,19 @@ static inline rest_api_modio_sync_t rest_api_modio_sync_from_driver(mod_io_relay
         return REST_API_MODIO_SYNC_SYNCHRONIZED;
     default:
         return REST_API_MODIO_SYNC_ABSENT;
+    }
+}
+
+static inline const char *rest_api_network_transport_to_string(rest_api_network_transport_t transport)
+{
+    switch (transport) {
+    case REST_API_NETWORK_TRANSPORT_ETHERNET:
+        return "ethernet";
+    case REST_API_NETWORK_TRANSPORT_WIFI:
+        return "wifi";
+    case REST_API_NETWORK_TRANSPORT_NONE:
+    default:
+        return "none";
     }
 }
 

@@ -28,7 +28,7 @@ func TestConfigShowOutputsJSON(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"config":{"poll_interval_ms":250,"hostname":"lab-relay","modio_boot_policy":"all_off","api_token_set":true}}`)
+		_, _ = io.WriteString(w, `{"config":{"poll_interval_ms":250,"hostname":"lab-relay","modio_boot_policy":"all_off","api_token_set":true,"wifi":{"ssid_set":true,"passphrase_set":true,"network_policy":"prefer_ethernet"}}}`)
 	}))
 	defer server.Close()
 
@@ -64,6 +64,15 @@ func TestConfigShowOutputsJSON(t *testing.T) {
 	}
 	if !payload.Config.APITokenSet {
 		t.Fatal("api_token_set = false, want true")
+	}
+	if !payload.Config.WiFi.SSIDSet {
+		t.Fatal("wifi.ssid_set = false, want true")
+	}
+	if !payload.Config.WiFi.PassphraseSet {
+		t.Fatal("wifi.passphrase_set = false, want true")
+	}
+	if payload.Config.WiFi.NetworkPolicy != "prefer_ethernet" {
+		t.Fatalf("wifi.network_policy = %q, want %q", payload.Config.WiFi.NetworkPolicy, "prefer_ethernet")
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
@@ -217,6 +226,91 @@ func TestConfigSetSupportsRobotJSONEnvelope(t *testing.T) {
 
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestConfigWiFiParsesAssignmentsAndWarnsOnRestart(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Fatalf("request method = %q, want %q", r.Method, http.MethodPut)
+		}
+		if r.URL.Path != "/api/v1/config/wifi" {
+			t.Fatalf("request path = %q, want %q", r.URL.Path, "/api/v1/config/wifi")
+		}
+
+		var requestBody map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatalf("json.Decode() error = %v", err)
+		}
+
+		if got := requestBody["ssid"]; got != "lab-net" {
+			t.Fatalf("ssid = %#v, want %q", got, "lab-net")
+		}
+		if got := requestBody["passphrase"]; got != "new-secret" {
+			t.Fatalf("passphrase = %#v, want %q", got, "new-secret")
+		}
+		if got := requestBody["network_policy"]; got != "wifi_only" {
+			t.Fatalf("network_policy = %#v, want %q", got, "wifi_only")
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"changes":[{"key":"wifi_ssid_set","old":false,"new":true,"live":false},{"key":"wifi_passphrase_set","old":false,"new":true,"live":false},{"key":"network_policy","old":"ethernet_only","new":"wifi_only","live":false}],"restart_required":true}`)
+	}))
+	defer server.Close()
+
+	command := newRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	command.SetOut(stdout)
+	command.SetErr(stderr)
+	command.SetArgs([]string{
+		"--host", server.URL,
+		"--api-token", "cfg-token",
+		"--format", "json",
+		"config", "wifi",
+		"ssid=lab-net",
+		"passphrase=new-secret",
+		"network_policy=wifi_only",
+	})
+
+	if err := command.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	var payload configSetResult
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if len(payload.Changes) != 3 {
+		t.Fatalf("changes length = %d, want 3", len(payload.Changes))
+	}
+	if !payload.RestartRequired {
+		t.Fatal("restart_required = false, want true")
+	}
+	if got := stderr.String(); !strings.Contains(got, "Restart the device for all changes to take full effect.") {
+		t.Fatalf("stderr = %q, want restart warning", got)
+	}
+}
+
+func TestConfigWiFiClearBuildsNullSSID(t *testing.T) {
+	t.Parallel()
+
+	requestBody, err := parseWiFiConfigAssignments([]string{"clear=true", "network_policy=ethernet_only"})
+	if err != nil {
+		t.Fatalf("parseWiFiConfigAssignments() error = %v", err)
+	}
+
+	if _, ok := requestBody["ssid"]; !ok {
+		t.Fatalf("ssid missing from request body: %#v", requestBody)
+	}
+	if got := requestBody["ssid"]; got != nil {
+		t.Fatalf("ssid = %#v, want nil", got)
+	}
+	if got := requestBody["network_policy"]; got != "ethernet_only" {
+		t.Fatalf("network_policy = %#v, want %q", got, "ethernet_only")
 	}
 }
 

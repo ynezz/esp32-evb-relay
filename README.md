@@ -5,15 +5,16 @@ ESP32-EVB and MOD-IO expansion board. This repository contains the
 production ESP-IDF firmware in `firmware/` and the `evb-relay` Go CLI in
 `cli/` for both human operators and automation.
 
-The current system exposes an authenticated REST API over Ethernet,
-advertises itself with mDNS, streams live device events over SSE, and
-supports OTA firmware updates.
+The current system exposes an authenticated REST API over Ethernet or
+WiFi STA, advertises itself with mDNS, streams live device events over
+SSE, and supports OTA firmware updates.
 
 ## What It Does
 
 - Controls 2 onboard ESP32-EVB relays and 4 MOD-IO relays
 - Reads 4 MOD-IO digital inputs and 4 MOD-IO analog inputs
-- Exposes an authenticated `/api/v1` HTTP interface over Ethernet
+- Exposes an authenticated `/api/v1` HTTP interface over Ethernet or
+  WiFi STA with explicit transport policy
 - Publishes live `digital_input`, `analog_input`, `relay_changed`, and
   `button` events
 - Supports runtime configuration updates and API-token provisioning
@@ -125,6 +126,7 @@ read inputs, and perform OTA updates.
 
 ./bin/evb-relay -H esp32-evb-relay.local -k "$EVB_RELAY_API_TOKEN" config show
 ./bin/evb-relay -H esp32-evb-relay.local -k "$EVB_RELAY_API_TOKEN" config set hostname=lab-relay poll_interval_ms=250
+./bin/evb-relay -H esp32-evb-relay.local -k "$EVB_RELAY_API_TOKEN" config wifi ssid=lab-net passphrase=supersecret network_policy=prefer_ethernet
 
 ./bin/evb-relay -H esp32-evb-relay.local -k "$EVB_RELAY_API_TOKEN" ota flash path/to/firmware.bin
 ```
@@ -174,6 +176,18 @@ the CLI:
 - `hostname`
 - `poll_interval_ms`
 - `modio_boot_policy`
+- `wifi.network_policy`
+- `wifi.ssid_set`
+- `wifi.passphrase_set`
+
+Set WiFi credentials and policy with `config wifi` / `PUT /api/v1/config/wifi`.
+WiFi credentials are write-only at the API layer.
+
+`wifi.network_policy` accepts:
+
+- `ethernet_only`
+- `wifi_only`
+- `prefer_ethernet`
 
 `modio_boot_policy` accepts:
 
@@ -181,7 +195,9 @@ the CLI:
 - `all_off`
 
 The API token is write-only at the device API layer. `config show`
-returns `api_token_set` instead of echoing the token value.
+returns `api_token_set` instead of echoing the token value. WiFi
+credentials follow the same rule: `config show` returns only
+`wifi.ssid_set` and `wifi.passphrase_set`.
 
 ## Agents / Robots
 

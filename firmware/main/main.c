@@ -15,6 +15,19 @@
 
 static const char *TAG = "main";
 
+static rest_api_network_transport_t app_status_transport_from_network(network_transport_t transport)
+{
+    switch (transport) {
+    case NETWORK_TRANSPORT_ETHERNET:
+        return REST_API_NETWORK_TRANSPORT_ETHERNET;
+    case NETWORK_TRANSPORT_WIFI:
+        return REST_API_NETWORK_TRANSPORT_WIFI;
+    case NETWORK_TRANSPORT_NONE:
+    default:
+        return REST_API_NETWORK_TRANSPORT_NONE;
+    }
+}
+
 static esp_err_t app_status_provider(rest_api_status_view_t *status, void *ctx)
 {
     mod_io_status_t mod_io_status;
@@ -37,6 +50,7 @@ static esp_err_t app_status_provider(rest_api_status_view_t *status, void *ctx)
         return err;
     }
 
+    status->network.transport = app_status_transport_from_network(network_status.transport);
     status->network.connected = network_status.connected;
     memcpy(status->network.hostname, network_status.hostname, sizeof(status->network.hostname));
     memcpy(status->network.ip, network_status.ip, sizeof(status->network.ip));
