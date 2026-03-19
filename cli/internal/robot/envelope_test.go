@@ -197,8 +197,8 @@ func TestBuildErrorDetailsMapsAuthAndNetworkRemediation(t *testing.T) {
 	if authCode != exitcodes.AuthError {
 		t.Fatalf("auth exit code = %d, want %d", authCode, exitcodes.AuthError)
 	}
-	if authDetails.Code != "AUTH_INVALID" {
-		t.Fatalf("auth code = %q, want %q", authDetails.Code, "AUTH_INVALID")
+	if authDetails.Code != "AUTH_FORBIDDEN" {
+		t.Fatalf("auth code = %q, want %q", authDetails.Code, "AUTH_FORBIDDEN")
 	}
 	if authDetails.Remediation == nil || *authDetails.Remediation != authRemediation {
 		t.Fatalf("auth remediation = %#v, want %q", authDetails.Remediation, authRemediation)

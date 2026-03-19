@@ -450,7 +450,7 @@ error:
 | `MODIO_NOT_PRESENT` (503) | 7 | *(none — hardware)* |
 | `MODIO_SAMPLE_UNAVAILABLE` (503) | 7 | *(retryable: true, wait for poll cycle)* |
 | `RELAY_NOT_FOUND` (404) | 4 | *(none — bad ID)* |
-| `AUTH_REQUIRED`/`AUTH_INVALID` (401/403) | 3 | Provide a valid API token via `--api-token`, `EVB_RELAY_API_TOKEN`, or the CLI config file |
+| `AUTH_REQUIRED`/`AUTH_FORBIDDEN` (401/403) | 3 | Provide a valid API token via `--api-token`, `EVB_RELAY_API_TOKEN`, or the CLI config file |
 | Network timeout | 2 | Retry; if the target host is stale or unknown, re-run `evb-relay discover` |
 
 When `error.remediation` or `next[]` contains angle-bracket placeholders such
@@ -527,7 +527,7 @@ robot mode, capabilities is complex/nested and JSON is better here). No
     "MODIO_SAMPLE_UNAVAILABLE": {"exit_code": 7, "retryable": true, "remediation": null},
     "RELAY_NOT_FOUND": {"exit_code": 4, "retryable": false, "remediation": null},
     "AUTH_REQUIRED": {"exit_code": 3, "retryable": false, "remediation": null},
-    "AUTH_INVALID": {"exit_code": 3, "retryable": false, "remediation": null},
+    "AUTH_FORBIDDEN": {"exit_code": 3, "retryable": false, "remediation": null},
     "PARTIAL_FAILURE": {"exit_code": 1, "retryable": false, "remediation": null}
   },
   "state_machine": {

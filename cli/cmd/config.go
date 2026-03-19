@@ -84,7 +84,7 @@ func newConfigShowCommand() *cobra.Command {
 			"config.wifi.passphrase_set",
 			"config.wifi.network_policy",
 		},
-		Errors:  []string{"NETWORK_ERROR", "AUTH_REQUIRED", "AUTH_FORBIDDEN", "AUTH_INVALID"},
+		Errors:  []string{"NETWORK_ERROR", "AUTH_REQUIRED", "AUTH_FORBIDDEN"},
 		Example: "evb-relay config show",
 	})
 
@@ -113,7 +113,6 @@ func newConfigSetCommand() *cobra.Command {
 			"NETWORK_ERROR",
 			"AUTH_REQUIRED",
 			"AUTH_FORBIDDEN",
-			"AUTH_INVALID",
 		},
 		Example: "evb-relay config set poll_interval_ms=200 hostname=lab-relay",
 	})
@@ -143,7 +142,6 @@ func newConfigWiFiCommand() *cobra.Command {
 			"NETWORK_ERROR",
 			"AUTH_REQUIRED",
 			"AUTH_FORBIDDEN",
-			"AUTH_INVALID",
 		},
 		Example: "evb-relay config wifi ssid=lab-net passphrase=supersecret network_policy=prefer_ethernet",
 	})

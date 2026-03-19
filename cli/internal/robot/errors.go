@@ -53,7 +53,7 @@ func buildErrorDetails(err error) (ErrorDetails, exitcodes.Code, []string) {
 
 	var apiErr *client.APIError
 	if errors.As(err, &apiErr) {
-		if code := strings.ToUpper(strings.TrimSpace(apiErr.Code)); code != "" {
+		if code := canonicalAPIErrorCode(strings.ToUpper(strings.TrimSpace(apiErr.Code))); code != "" {
 			details.Code = code
 		} else {
 			details.Code = apiStatusCode(apiErr.Status, exitCode)
@@ -103,10 +103,6 @@ func knownErrorPolicies() map[string]errorPolicy {
 			Retryable:   false,
 			Remediation: stringPtr(authRemediation),
 		},
-		"AUTH_INVALID": {
-			Retryable:   false,
-			Remediation: stringPtr(authRemediation),
-		},
 		"PARTIAL_FAILURE": {
 			Retryable: false,
 		},
@@ -140,6 +136,15 @@ func apiStatusCode(status int, code exitcodes.Code) string {
 		return "AUTH_FORBIDDEN"
 	default:
 		return fallbackErrorCode(code)
+	}
+}
+
+func canonicalAPIErrorCode(code string) string {
+	switch code {
+	case "AUTH_INVALID":
+		return "AUTH_FORBIDDEN"
+	default:
+		return code
 	}
 }
 

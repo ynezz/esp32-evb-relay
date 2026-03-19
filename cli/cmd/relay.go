@@ -129,7 +129,6 @@ func newRelayListCommand() *cobra.Command {
 			"NETWORK_ERROR",
 			"AUTH_REQUIRED",
 			"AUTH_FORBIDDEN",
-			"AUTH_INVALID",
 		},
 		Example: "evb-relay relay list",
 	})
@@ -161,7 +160,6 @@ func newRelayOnCommand() *cobra.Command {
 			"NETWORK_ERROR",
 			"AUTH_REQUIRED",
 			"AUTH_FORBIDDEN",
-			"AUTH_INVALID",
 			"RELAY_NOT_FOUND",
 			"MODIO_NOT_PRESENT",
 		},
@@ -195,7 +193,6 @@ func newRelayOffCommand() *cobra.Command {
 			"NETWORK_ERROR",
 			"AUTH_REQUIRED",
 			"AUTH_FORBIDDEN",
-			"AUTH_INVALID",
 			"RELAY_NOT_FOUND",
 			"MODIO_NOT_PRESENT",
 		},
@@ -227,7 +224,6 @@ func newRelayToggleCommand() *cobra.Command {
 			"NETWORK_ERROR",
 			"AUTH_REQUIRED",
 			"AUTH_FORBIDDEN",
-			"AUTH_INVALID",
 			"RELAY_NOT_FOUND",
 			"MODIO_NOT_PRESENT",
 		},
@@ -265,7 +261,6 @@ func newRelaySetCommand() *cobra.Command {
 			"NETWORK_ERROR",
 			"AUTH_REQUIRED",
 			"AUTH_FORBIDDEN",
-			"AUTH_INVALID",
 			"RELAY_NOT_FOUND",
 			"MODIO_NOT_PRESENT",
 			"PARTIAL_FAILURE",
@@ -780,7 +775,7 @@ func relayBatchErrorFrom(err error) *relayBatchError {
 func relayErrorCode(err error) string {
 	var apiErr *client.APIError
 	if errors.As(err, &apiErr) {
-		if code := strings.ToUpper(strings.TrimSpace(apiErr.Code)); code != "" {
+		if code := canonicalRelayErrorCode(strings.ToUpper(strings.TrimSpace(apiErr.Code))); code != "" {
 			return code
 		}
 		switch apiErr.Status {
@@ -806,6 +801,15 @@ func relayErrorCode(err error) string {
 		return "HARDWARE_UNAVAILABLE"
 	default:
 		return "GENERAL_ERROR"
+	}
+}
+
+func canonicalRelayErrorCode(code string) string {
+	switch code {
+	case "AUTH_INVALID":
+		return "AUTH_FORBIDDEN"
+	default:
+		return code
 	}
 }
 

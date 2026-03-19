@@ -340,7 +340,6 @@ Common machine-meaningful error codes include:
 - `NETWORK_ERROR`
 - `AUTH_REQUIRED`
 - `AUTH_FORBIDDEN`
-- `AUTH_INVALID`
 - `RELAY_NOT_FOUND`
 - `INPUT_NOT_FOUND`
 - `MODIO_NOT_PRESENT`

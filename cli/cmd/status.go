@@ -72,7 +72,6 @@ func newStatusCommand() *cobra.Command {
 			"NETWORK_ERROR",
 			"AUTH_REQUIRED",
 			"AUTH_FORBIDDEN",
-			"AUTH_INVALID",
 		},
 		Example: "evb-relay status",
 	})

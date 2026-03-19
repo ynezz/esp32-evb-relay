@@ -128,7 +128,6 @@ func newInputDigitalCommand() *cobra.Command {
 			"NETWORK_ERROR",
 			"AUTH_REQUIRED",
 			"AUTH_FORBIDDEN",
-			"AUTH_INVALID",
 			"INPUT_NOT_FOUND",
 			"MODIO_NOT_PRESENT",
 			"MODIO_SAMPLE_UNAVAILABLE",
@@ -164,7 +163,6 @@ func newInputAnalogCommand() *cobra.Command {
 			"NETWORK_ERROR",
 			"AUTH_REQUIRED",
 			"AUTH_FORBIDDEN",
-			"AUTH_INVALID",
 			"INPUT_NOT_FOUND",
 			"MODIO_NOT_PRESENT",
 			"MODIO_SAMPLE_UNAVAILABLE",
@@ -193,7 +191,7 @@ func newInputWatchCommand() *cobra.Command {
 			"reason",
 			"received_at",
 		},
-		Errors:  []string{"NETWORK_ERROR", "AUTH_REQUIRED", "AUTH_FORBIDDEN", "AUTH_INVALID"},
+		Errors:  []string{"NETWORK_ERROR", "AUTH_REQUIRED", "AUTH_FORBIDDEN"},
 		Example: "evb-relay --robot input watch",
 	})
 

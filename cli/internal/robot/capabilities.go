@@ -93,11 +93,6 @@ func BuildCapabilities(root *cobra.Command, version string) (Capabilities, error
 				Retryable:   false,
 				Remediation: stringPtr(authRemediation),
 			},
-			"AUTH_INVALID": {
-				ExitCode:    3,
-				Retryable:   false,
-				Remediation: stringPtr(authRemediation),
-			},
 			"AUTH_REQUIRED": {
 				ExitCode:    3,
 				Retryable:   false,
