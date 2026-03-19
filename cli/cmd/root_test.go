@@ -294,6 +294,26 @@ func TestRobotCapabilitiesExposeCommandAndContractMetadata(t *testing.T) {
 	if got := authForbidden["exit_code"]; got != float64(3) {
 		t.Fatalf("AUTH_FORBIDDEN exit_code = %#v, want 3", got)
 	}
+	if _, exists := payload.ErrorCodes["AUTH_INVALID"]; exists {
+		t.Fatalf("error_codes unexpectedly includes stale AUTH_INVALID alias: %#v", payload.ErrorCodes["AUTH_INVALID"])
+	}
+
+	for _, command := range payload.Commands {
+		name, _ := command["name"].(string)
+		errorsValue, ok := command["errors"]
+		if !ok {
+			continue
+		}
+		errorList, ok := errorsValue.([]any)
+		if !ok {
+			t.Fatalf("command %q errors = %#v; want array", name, errorsValue)
+		}
+		for _, errorValue := range errorList {
+			if errorCode, _ := errorValue.(string); errorCode == "AUTH_INVALID" {
+				t.Fatalf("command %q unexpectedly advertises stale AUTH_INVALID alias: %#v", name, errorList)
+			}
+		}
+	}
 
 	envNames := make([]string, 0, len(payload.EnvironmentVariables))
 	for _, item := range payload.EnvironmentVariables {
