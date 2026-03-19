@@ -360,6 +360,74 @@ func TestRelaySetRobotEnvelopeReportsPartialFailure(t *testing.T) {
 	}
 }
 
+func TestRelaySetJSONPartialFailureMapsRawForbiddenToAuthForbidden(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/relays/onboard/1":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"relay":{"group":"onboard","id":1,"state":true}}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/relays/modio":
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = io.WriteString(w, "access denied")
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	command := newRootCommand()
+	stdout := &bytes.Buffer{}
+	command.SetOut(stdout)
+	command.SetErr(&bytes.Buffer{})
+	command.SetArgs([]string{
+		"--host", server.URL,
+		"--api-token", "relay-token",
+		"--format", "json",
+		"relay", "set", "onboard:1=on", "modio:2=off",
+	})
+
+	err := command.Execute()
+	if err == nil {
+		t.Fatal("Execute() succeeded; want partial failure")
+	}
+	if got := exitcodes.FromError(err); got != exitcodes.GeneralError {
+		t.Fatalf("exit code = %d, want %d", got, exitcodes.GeneralError)
+	}
+
+	var payload relaySetResult
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if payload.AllOK {
+		t.Fatalf("all_ok = true, want false; payload=%#v", payload)
+	}
+	if len(payload.Results) != 2 {
+		t.Fatalf("result count = %d, want 2", len(payload.Results))
+	}
+	if !payload.Results[0].OK {
+		t.Fatalf("first result = %#v, want ok", payload.Results[0])
+	}
+	if payload.Results[1].OK {
+		t.Fatalf("second result = %#v, want failure", payload.Results[1])
+	}
+	if payload.Results[1].Error == nil {
+		t.Fatalf("second error = nil, want auth forbidden details; payload=%#v", payload)
+	}
+	if got := payload.Results[1].Error.Code; got != "AUTH_FORBIDDEN" {
+		t.Fatalf("second error code = %q, want %q", got, "AUTH_FORBIDDEN")
+	}
+	if got := payload.Results[1].Error.Message; got != "access denied" {
+		t.Fatalf("second error message = %q, want %q", got, "access denied")
+	}
+	if got := payload.Results[1].Error.HTTPStatus; got != http.StatusForbidden {
+		t.Fatalf("second error status = %d, want %d", got, http.StatusForbidden)
+	}
+}
+
 func TestRelaySetSurfacesModIONotPresentForModioOnlyBatch(t *testing.T) {
 	t.Parallel()
 

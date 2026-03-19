@@ -787,7 +787,7 @@ func relayErrorCode(err error) string {
 		case http.StatusUnauthorized:
 			return "AUTH_REQUIRED"
 		case http.StatusForbidden:
-			return "AUTH_INVALID"
+			return "AUTH_FORBIDDEN"
 		}
 	}
 
