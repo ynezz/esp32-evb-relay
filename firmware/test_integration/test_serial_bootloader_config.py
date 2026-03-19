@@ -6,6 +6,7 @@ import re
 import signal
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -41,6 +42,10 @@ def _watchdog_script_path() -> Path:
     return _repo_root() / "scripts/run_with_watchdog.py"
 
 
+def _pre_commit_hook_path() -> Path:
+    return _repo_root() / "tools/pre-commit-hook.sh"
+
+
 def _load_watchdog_script():
     watchdog_path = _watchdog_script_path()
     spec = importlib.util.spec_from_file_location("run_with_watchdog", watchdog_path)
@@ -74,6 +79,47 @@ def _load_partition_table():
         )
 
     return partition_rows
+
+
+def _init_pre_commit_test_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "pre-commit-repo"
+    cli_dir = repo / "cli"
+
+    cli_dir.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+
+    (cli_dir / "go.mod").write_text(
+        "module example.com/precommit\n\ngo 1.25.0\n",
+        encoding="utf-8",
+    )
+    (cli_dir / "main.go").write_text(
+        _gofmt_source(
+            """\
+            package main
+
+            import "fmt"
+
+            func main() {
+                fmt.Printf("%s", "ok")
+            }
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    subprocess.run(["git", "add", "cli/go.mod", "cli/main.go"], cwd=repo, check=True)
+    return repo
+
+
+def _gofmt_source(source: str) -> str:
+    result = subprocess.run(
+        ["gofmt"],
+        input=textwrap.dedent(source),
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    return result.stdout
 
 
 def test_firmware_build_disables_download_stub() -> None:
@@ -188,6 +234,120 @@ def test_watchdog_wrapper_times_out_and_reports_the_command() -> None:
     assert "command timed out after" in result.stderr
     assert "limit 0.2s" in result.stderr
     assert "time.sleep(10)" in result.stderr
+
+
+def test_pre_commit_hook_rejects_bad_staged_go_even_when_worktree_is_fixed(
+    tmp_path: Path,
+) -> None:
+    repo = _init_pre_commit_test_repo(tmp_path)
+    main_go = repo / "cli/main.go"
+
+    main_go.write_text(
+        _gofmt_source(
+            """\
+            package main
+
+            import "fmt"
+
+            func main() {
+                fmt.Printf("%d", "broken")
+            }
+            """
+        ),
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "cli/main.go"], cwd=repo, check=True)
+
+    main_go.write_text(
+        _gofmt_source(
+            """\
+            package main
+
+            import "fmt"
+
+            func main() {
+                fmt.Printf("%s", "fixed")
+            }
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    worktree_vet = subprocess.run(
+        ["go", "vet", "./..."],
+        cwd=repo / "cli",
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    assert worktree_vet.returncode == 0
+
+    hook_result = subprocess.run(
+        ["bash", str(_pre_commit_hook_path())],
+        cwd=repo,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+    assert hook_result.returncode != 0
+
+
+def test_pre_commit_hook_ignores_unstaged_worktree_breakage_when_index_is_clean(
+    tmp_path: Path,
+) -> None:
+    repo = _init_pre_commit_test_repo(tmp_path)
+    main_go = repo / "cli/main.go"
+
+    main_go.write_text(
+        _gofmt_source(
+            """\
+            package main
+
+            import "fmt"
+
+            func main() {
+                fmt.Printf("%s", "staged")
+            }
+            """
+        ),
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "cli/main.go"], cwd=repo, check=True)
+
+    main_go.write_text(
+        _gofmt_source(
+            """\
+            package main
+
+            import "fmt"
+
+            func main() {
+                fmt.Printf("%d", "worktree-only-breakage")
+            }
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    worktree_vet = subprocess.run(
+        ["go", "vet", "./..."],
+        cwd=repo / "cli",
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    assert worktree_vet.returncode != 0
+
+    hook_result = subprocess.run(
+        ["bash", str(_pre_commit_hook_path())],
+        cwd=repo,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+    assert hook_result.returncode == 0
 
 
 def test_watchdog_signals_process_group_even_if_parent_already_exited(monkeypatch: pytest.MonkeyPatch) -> None:

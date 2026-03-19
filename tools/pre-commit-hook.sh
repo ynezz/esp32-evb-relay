@@ -85,8 +85,14 @@ if [ "${#STAGED_GO_FILES[@]}" -gt 0 ]; then
         fi
     done
 
+    INDEX_SNAPSHOT_DIR="$TMPDIR/index"
+    mkdir -p "$INDEX_SNAPSHOT_DIR"
+    git checkout-index --all --prefix="$INDEX_SNAPSHOT_DIR/"
+
     (
-        cd cli
+        # Vet the staged index snapshot so unstaged edits cannot hide
+        # or invent failures for the commit being created.
+        cd "$INDEX_SNAPSHOT_DIR/cli"
         go vet "${GO_PACKAGES[@]}"
     )
 fi
