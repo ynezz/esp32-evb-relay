@@ -52,11 +52,34 @@ static void require_mod_io_or_skip(void)
 
     err = mod_io_probe();
     if (err == ESP_ERR_NOT_FOUND) {
-        TEST_IGNORE_MESSAGE("MOD-IO board is not connected");
+        TEST_IGNORE_MESSAGE("MOD-IO board is not connected or the I2C bus is unavailable");
     }
 
     TEST_ASSERT_EQUAL(ESP_OK, err);
     TEST_ASSERT_TRUE(mod_io_is_present());
+}
+
+static bool prepare_mod_io(void)
+{
+    esp_err_t err;
+
+    mod_io_reset_for_testing();
+    board_reset_for_testing();
+
+    err = board_init();
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = mod_io_init(board_i2c_bus_handle());
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = mod_io_probe();
+    if (err == ESP_ERR_NOT_FOUND) {
+        return false;
+    }
+
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+    TEST_ASSERT_TRUE(mod_io_is_present());
+    return true;
 }
 
 TEST_CASE("mod_io device probe detects board", "[qa][mod_io][device]")
@@ -133,11 +156,13 @@ TEST_CASE("mod_io device publishes relay_changed event after write", "[qa][mod_i
     volatile bool handler_registered = false;
     volatile bool mod_io_ready = false;
 
+    mod_io_ready = prepare_mod_io();
+    if (!mod_io_ready) {
+        TEST_IGNORE_MESSAGE("MOD-IO board is not connected or the I2C bus is unavailable");
+    }
+
     ensure_default_event_loop();
     if (TEST_PROTECT()) {
-        require_mod_io_or_skip();
-        mod_io_ready = true;
-
         TEST_ASSERT_EQUAL(ESP_OK, mod_io_set_relays(0x00U));
         TEST_ASSERT_EQUAL(ESP_OK,
                           esp_event_handler_instance_register(EVB_RELAY_EVENT,

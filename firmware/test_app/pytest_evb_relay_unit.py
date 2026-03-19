@@ -1,6 +1,12 @@
 from types import SimpleNamespace
 
-from pytest_evb_relay import CRASH_RECOVERY_TIMEOUT, _install_fail_fast_case_analyzer
+from pytest_evb_relay import (
+    CRASH_RECOVERY_TIMEOUT,
+    _case_complete,
+    _install_fail_fast_case_analyzer,
+    _recover_case_input_prompt,
+    _serial_read_until,
+)
 
 
 class _FakeMatch:
@@ -28,6 +34,57 @@ class _FakeDut:
 
     def _add_test_case_to_suite(self, attrs: dict[str, object]) -> None:
         self.recorded_cases.append(attrs)
+
+
+class _FakeSerial:
+    def __init__(self, chunks: list[bytes] | None = None) -> None:
+        self._chunks = list(chunks or [])
+        self.writes: list[bytes] = []
+
+    def read_all(self) -> bytes:
+        if self._chunks:
+            return self._chunks.pop(0)
+        return b""
+
+    def write(self, data: bytes) -> None:
+        self.writes.append(data)
+
+
+def test_serial_read_until_accepts_complete_initial_buffer() -> None:
+    serial = _FakeSerial()
+
+    result = _serial_read_until(
+        serial,
+        timeout=0.01,
+        predicate=lambda buffer: b"ready" in buffer,
+        initial_buffer=b"already ready",
+    )
+
+    assert result == b"already ready"
+
+
+def test_case_complete_stops_on_ready_prompt_without_unity_result() -> None:
+    assert _case_complete(
+        b"Running ota upload case...\r\nEnter next test, or 'enter' to see menu\r\n",
+        "rest_api device accepts OTA uploads and switches the boot partition",
+    )
+
+
+def test_recover_case_input_prompt_reopens_menu_after_boot_prompt() -> None:
+    serial = _FakeSerial(
+        [
+            b"Here's the test menu, pick your combo:\r\n(1)\t\"foo\"\r\nEnter test for running.\r\n",
+        ]
+    )
+
+    buffer = _recover_case_input_prompt(
+        serial,
+        timeout=0.01,
+        initial_buffer=b"Press ENTER to see the list of tests\r\n",
+    )
+
+    assert serial.writes == [b"\n"]
+    assert b"Enter test for running." in buffer
 
 
 def test_fail_fast_analyzer_records_crash_and_consumed_menu() -> None:

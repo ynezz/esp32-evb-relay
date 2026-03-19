@@ -11,6 +11,7 @@
 #include "relay_events.h"
 
 #define MOD_IO_I2C_TIMEOUT_MS 100
+#define MOD_IO_REPROBE_BACKOFF_MS 5000U
 #define MOD_IO_RELAY_WRITE_COMMAND 0x10U
 #define MOD_IO_DIGITAL_INPUT_READ_COMMAND 0x20U
 #define MOD_IO_ANALOG_INPUT_BASE_COMMAND 0x30U
@@ -23,6 +24,8 @@ typedef struct {
     bool present;
     mod_io_relay_sync_t relay_sync;
     uint8_t relay_mask;
+    esp_err_t last_probe_err;
+    uint64_t next_probe_after_ms;
 } mod_io_state_t;
 
 static const char *TAG = "mod_io";
@@ -36,6 +39,8 @@ static mod_io_state_t s_state = {
     .present = false,
     .relay_sync = MOD_IO_RELAY_SYNC_ABSENT,
     .relay_mask = 0,
+    .last_probe_err = ESP_OK,
+    .next_probe_after_ms = 0,
 };
 
 static esp_err_t mod_io_ensure_lock(void)
@@ -142,11 +147,40 @@ static void mod_io_publish_change_events(uint8_t changed_mask, uint8_t relay_mas
     }
 }
 
-static void mod_io_mark_absent_locked(void)
+static bool mod_io_probe_error_is_absent(esp_err_t err)
+{
+    switch (err) {
+    case ESP_ERR_NOT_FOUND:
+    case ESP_ERR_TIMEOUT:
+    case ESP_ERR_INVALID_STATE:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool mod_io_probe_error_needs_backoff(esp_err_t err)
+{
+    switch (err) {
+    case ESP_ERR_TIMEOUT:
+    case ESP_ERR_INVALID_STATE:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static void mod_io_mark_absent_locked(esp_err_t probe_err)
 {
     s_state.present = false;
     s_state.relay_sync = MOD_IO_RELAY_SYNC_ABSENT;
     s_state.relay_mask = 0;
+    s_state.last_probe_err = probe_err;
+    if (mod_io_probe_error_needs_backoff(probe_err)) {
+        s_state.next_probe_after_ms = mod_io_timestamp_ms() + MOD_IO_REPROBE_BACKOFF_MS;
+    } else {
+        s_state.next_probe_after_ms = 0;
+    }
 }
 
 static void mod_io_mark_synchronized_locked(uint8_t relay_mask)
@@ -154,6 +188,8 @@ static void mod_io_mark_synchronized_locked(uint8_t relay_mask)
     s_state.present = true;
     s_state.relay_sync = MOD_IO_RELAY_SYNC_SYNCHRONIZED;
     s_state.relay_mask = (uint8_t)(relay_mask & MOD_IO_RELAY_MASK_ALL);
+    s_state.last_probe_err = ESP_OK;
+    s_state.next_probe_after_ms = 0;
 }
 
 static esp_err_t mod_io_read_relay_mask_locked(uint8_t *out_mask)
@@ -186,7 +222,7 @@ static esp_err_t mod_io_read_relay_mask_locked(uint8_t *out_mask)
     return ESP_OK;
 }
 
-static esp_err_t mod_io_probe_locked(void)
+static esp_err_t mod_io_probe_hardware_locked(void)
 {
     esp_err_t err;
     bool was_present;
@@ -213,12 +249,32 @@ static esp_err_t mod_io_probe_locked(void)
         return ESP_OK;
     }
 
-    mod_io_mark_absent_locked();
+    mod_io_mark_absent_locked(err);
     if ((err == ESP_ERR_NOT_FOUND) && was_present) {
         ESP_LOGW(TAG, "MOD-IO disappeared from the I2C bus; relay state reset to absent");
     } else if ((err != ESP_ERR_NOT_FOUND) && was_present) {
         ESP_LOGW(TAG, "MOD-IO relay readback failed; marking board absent: %s",
                  esp_err_to_name(err));
+    }
+
+    return err;
+}
+
+static esp_err_t mod_io_probe_locked(void)
+{
+    esp_err_t err;
+
+    if (!s_state.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (!s_state.present && (s_state.next_probe_after_ms > mod_io_timestamp_ms())) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    err = mod_io_probe_hardware_locked();
+    if (mod_io_probe_error_is_absent(err)) {
+        return ESP_ERR_NOT_FOUND;
     }
 
     return err;
@@ -336,9 +392,9 @@ esp_err_t mod_io_init(i2c_master_bus_handle_t bus_handle)
 
     s_state.bus_handle = bus_handle;
     s_state.initialized = true;
-    mod_io_mark_absent_locked();
+    mod_io_mark_absent_locked(ESP_OK);
 
-    probe_err = mod_io_probe_locked();
+    probe_err = mod_io_probe_hardware_locked();
     if (probe_err == ESP_ERR_NOT_FOUND) {
         ESP_LOGI(TAG, "MOD-IO not detected at 0x%02X; continuing without expansion board",
                  MOD_IO_I2C_ADDRESS);

@@ -871,6 +871,52 @@ static void rest_api_sse_release_client_slot(rest_api_sse_client_t *client)
     }
 }
 
+static void rest_api_sse_force_release_client_slot(rest_api_sse_client_t *client)
+{
+    QueueHandle_t queue = NULL;
+    httpd_req_t *req = NULL;
+    TaskHandle_t task_handle = NULL;
+
+    if (client == NULL) {
+        return;
+    }
+
+    if (rest_api_sse_lock()) {
+        if (!client->active) {
+            rest_api_sse_unlock();
+            return;
+        }
+
+        queue = client->queue;
+        req = client->req;
+        task_handle = client->task_handle;
+        memset(client, 0, sizeof(*client));
+        client->sockfd = 0;
+        rest_api_sse_unlock();
+    } else {
+        if (!client->active) {
+            return;
+        }
+
+        queue = client->queue;
+        req = client->req;
+        task_handle = client->task_handle;
+        memset(client, 0, sizeof(*client));
+    }
+
+    if ((task_handle != NULL) && (task_handle != xTaskGetCurrentTaskHandle())) {
+        vTaskDelete(task_handle);
+    }
+
+    if (queue != NULL) {
+        vQueueDelete(queue);
+    }
+
+    if (req != NULL) {
+        (void)httpd_req_async_handler_complete(req);
+    }
+}
+
 static void rest_api_sse_clear_client_slot(rest_api_sse_client_t *client)
 {
     QueueHandle_t queue = NULL;
@@ -1255,6 +1301,10 @@ static void rest_api_sse_stop(void)
         }
 
         vTaskDelay(pdMS_TO_TICKS(REST_API_SSE_CLIENT_POLL_WAIT_MS));
+    }
+
+    for (size_t index = 0; index < REST_API_SSE_MAX_CLIENTS; ++index) {
+        rest_api_sse_force_release_client_slot(&s_sse_state.clients[index]);
     }
 
 #if defined(REST_API_ENABLE_TESTING_API)

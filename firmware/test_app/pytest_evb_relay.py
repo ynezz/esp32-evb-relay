@@ -9,12 +9,19 @@ from pexpect.exceptions import TIMEOUT
 from pytest_embedded import Dut
 from pytest_embedded.unity import UNITY_SUMMARY_LINE_REGEX
 from pytest_embedded.utils import remove_asci_color_code
-from pytest_embedded_idf.unity_tester import READY_PATTERN_LIST, _parse_unity_test_output
+from pytest_embedded_idf.unity_tester import (
+    READY_PATTERN_LIST,
+    UNITY_BASIC_REGEX,
+    UNITY_FIXTURE_REGEX,
+    _parse_unity_test_output,
+)
 
 os.environ.setdefault("ESPBAUD", "115200")
 
 MENU_PARSE_PATTERN = r"Here's the test menu, pick your combo:(.+)Enter test for running."
 MENU_PARSE_RETRIES = 5
+READY_PATTERN_BYTES = [pattern.encode("utf-8") for pattern in READY_PATTERN_LIST]
+MENU_END = b"Enter test for running."
 CRASH_MARKER_PATTERNS = [
     re.compile(rb"\*\*\*ERROR\*\*\*"),
     re.compile(rb"Guru Meditation Error"),
@@ -141,9 +148,137 @@ def _install_fail_fast_case_analyzer(dut: Dut) -> None:
     dut._analyze_test_case_result = types.MethodType(_analyze_test_case_result_fail_fast, dut)
 
 
+class _SerialCaseTimeout(Exception):
+    def __init__(self, buffer: bytes) -> None:
+        super().__init__(remove_asci_color_code(buffer))
+        self.buffer = buffer
+
+
+def _serial_hard_reset(ser) -> None:
+    ser.setDTR(False)
+    ser.setRTS(False)
+    ser.reset_input_buffer()
+    ser.setRTS(True)
+    time.sleep(0.1)
+    ser.setRTS(False)
+
+
+def _serial_read_until(ser, *, timeout: float, predicate, initial_buffer: bytes = b"") -> bytes:
+    deadline = time.monotonic() + timeout
+    buf = bytearray(initial_buffer)
+
+    if predicate(bytes(buf)):
+        return bytes(buf)
+
+    while time.monotonic() < deadline:
+        chunk = ser.read_all()
+        if chunk:
+            buf.extend(chunk)
+            if predicate(bytes(buf)):
+                return bytes(buf)
+        else:
+            time.sleep(0.01)
+
+    raise _SerialCaseTimeout(bytes(buf))
+
+
+def _extract_case_attrs(log: str, case_name: str) -> dict | None:
+    for match in UNITY_FIXTURE_REGEX.finditer(log):
+        attrs = {k: v for k, v in match.groupdict().items() if v is not None}
+        if attrs.get("name") == case_name:
+            return attrs
+
+    for match in UNITY_BASIC_REGEX.finditer(log):
+        attrs = {k: v for k, v in match.groupdict().items() if v is not None}
+        if attrs.get("name") == case_name:
+            return attrs
+
+    return None
+
+
+def _prompt_seen(buffer: bytes) -> bool:
+    return any(prompt in buffer for prompt in READY_PATTERN_BYTES)
+
+
+def _case_input_ready(buffer: bytes) -> bool:
+    return MENU_END in buffer or READY_PATTERN_BYTES[1] in buffer
+
+
+def _recover_case_input_prompt(ser, *, timeout: float, initial_buffer: bytes = b"") -> bytes:
+    if _case_input_ready(initial_buffer):
+        return initial_buffer
+
+    buffer = _serial_read_until(ser, timeout=timeout, predicate=_prompt_seen, initial_buffer=initial_buffer)
+    if READY_PATTERN_BYTES[0] in buffer and not _case_input_ready(buffer):
+        ser.write(b"\n")
+        buffer += _serial_read_until(ser, timeout=timeout, predicate=_case_input_ready)
+
+    return buffer
+
+
+def _case_complete(buffer: bytes, case_name: str) -> bool:
+    if any(pattern.search(buffer) for pattern in CRASH_MARKER_PATTERNS):
+        return True
+
+    if _prompt_seen(buffer):
+        return True
+
+    log = remove_asci_color_code(buffer)
+    return _extract_case_attrs(log, case_name) is not None
+
+
+def _run_all_cases_via_serial(dut: Dut, *, timeout: float) -> None:
+    with dut.serial.disable_redirect_thread():
+        ser = dut.serial.proc
+
+        _serial_hard_reset(ser)
+        _serial_read_until(ser, timeout=20, predicate=lambda buffer: READY_PATTERN_BYTES[0] in buffer)
+        ser.write(b"\n")
+        _serial_read_until(ser, timeout=10, predicate=lambda buffer: MENU_END in buffer)
+
+        for case in dut.test_menu:
+            start_time = time.perf_counter()
+            print(f"START {case.index}: {case.name}", flush=True)
+            ser.reset_input_buffer()
+            ser.write(f"{case.index}\n".encode("utf-8"))
+            start_marker = f"Running {case.name}...".encode("utf-8")
+
+            try:
+                started = _serial_read_until(
+                    ser,
+                    timeout=10.0,
+                    predicate=lambda buffer, marker=start_marker: marker in buffer,
+                )
+                started = started[started.find(start_marker):]
+                raw = _serial_read_until(
+                    ser,
+                    timeout=timeout + 10.0,
+                    predicate=lambda buffer, case_name=case.name: _case_complete(buffer, case_name),
+                    initial_buffer=started,
+                )
+            except _SerialCaseTimeout as exc:
+                raw = exc.buffer
+
+            log = remove_asci_color_code(raw)
+            attrs = _extract_case_attrs(log, case.name)
+            if attrs is None:
+                attrs = _parse_unity_test_output(log, case.name, log[-2000:])
+            attrs.update(
+                {
+                    "app_path": dut.app.app_path,
+                    "time": round(time.perf_counter() - start_time, 3),
+                }
+            )
+            dut._add_test_case_to_suite(attrs)
+            try:
+                _recover_case_input_prompt(ser, timeout=20.0, initial_buffer=raw)
+            except _SerialCaseTimeout:
+                pass
+            print(f"END {case.index}: {case.name} -> {attrs.get('result', 'UNKNOWN')}", flush=True)
+
+
 @pytest.mark.esp32
 @pytest.mark.generic
 def test_all_cases(dut: Dut) -> None:
     _load_unity_menu_with_retries(dut)
-    _install_fail_fast_case_analyzer(dut)
-    dut.run_all_single_board_cases(timeout=120)
+    _run_all_cases_via_serial(dut, timeout=120)

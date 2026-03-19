@@ -1,5 +1,6 @@
 #include <string.h>
 
+#include "esp_idf_stubs.h"
 #include "esp_event_stubs.h"
 #include "i2c_stubs.h"
 #include "mod_io.h"
@@ -133,8 +134,26 @@ static void test_mod_io_init_treats_probe_timeouts_as_absent(void)
 
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_init(test_bus_handle()));
     assert_status(false, MOD_IO_RELAY_SYNC_ABSENT, 0x00U);
-    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, mod_io_probe());
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, mod_io_probe());
     assert_status(false, MOD_IO_RELAY_SYNC_ABSENT, 0x00U);
+}
+
+static void test_mod_io_probe_retries_after_backoff_window(void)
+{
+    esp_stub_set_time_us(0);
+    i2c_stub_set_transmit_receive_result(ESP_ERR_TIMEOUT);
+
+    TEST_ASSERT_EQUAL(ESP_OK, mod_io_init(test_bus_handle()));
+    assert_status(false, MOD_IO_RELAY_SYNC_ABSENT, 0x00U);
+
+    i2c_stub_set_transmit_receive_result(ESP_OK);
+    set_read_data_u8(0x03U);
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, mod_io_probe());
+    assert_status(false, MOD_IO_RELAY_SYNC_ABSENT, 0x00U);
+
+    esp_stub_advance_time_us(5000000LL);
+    TEST_ASSERT_EQUAL(ESP_OK, mod_io_probe());
+    assert_status(true, MOD_IO_RELAY_SYNC_SYNCHRONIZED, 0x03U);
 }
 
 static void test_mod_io_set_relays_validates_mask_and_round_trips_via_readback(void)
@@ -336,6 +355,7 @@ void test_mod_io_suite(void)
     RUN_TEST(test_mod_io_probe_keeps_absent_state_when_board_is_missing);
     RUN_TEST(test_mod_io_probe_keeps_absent_state_when_command_transmit_fails);
     RUN_TEST(test_mod_io_init_treats_probe_timeouts_as_absent);
+    RUN_TEST(test_mod_io_probe_retries_after_backoff_window);
     RUN_TEST(test_mod_io_set_relays_validates_mask_and_round_trips_via_readback);
     RUN_TEST(test_mod_io_set_relays_publishes_event_for_changed_bit);
     RUN_TEST(test_mod_io_set_relay_validates_ids_and_uses_read_modify_write);

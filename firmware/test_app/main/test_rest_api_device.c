@@ -153,6 +153,45 @@ static void restore_device_config_fixture(const device_config_fixture_t *fixture
     }
 }
 
+static void reset_mod_io_fixture(void)
+{
+    mod_io_reset_for_testing();
+    board_reset_for_testing();
+}
+
+static void require_mod_io_driver_ready(void)
+{
+    reset_mod_io_fixture();
+    TEST_ASSERT_EQUAL(ESP_OK, board_init());
+    TEST_ASSERT_EQUAL(ESP_OK, mod_io_init(board_i2c_bus_handle()));
+}
+
+static void require_mod_io_present_or_skip(void)
+{
+    esp_err_t err;
+
+    require_mod_io_driver_ready();
+    err = mod_io_probe();
+    if (err == ESP_ERR_NOT_FOUND) {
+        TEST_IGNORE_MESSAGE("MOD-IO board is not connected or the I2C bus is unavailable");
+    }
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+}
+
+static bool mod_io_driver_is_present(void)
+{
+    esp_err_t err;
+
+    require_mod_io_driver_ready();
+    err = mod_io_probe();
+    if (err == ESP_ERR_NOT_FOUND) {
+        return false;
+    }
+
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+    return true;
+}
+
 static void perform_http_request(uint16_t port,
                                  const char *method,
                                  const char *path,
@@ -622,10 +661,8 @@ TEST_CASE("rest_api device exposes combined and MOD-IO relay endpoints",
     mod_io_relay_sync_t relay_sync = MOD_IO_RELAY_SYNC_ABSENT;
 
     ensure_tcpip_ready();
-    TEST_ASSERT_EQUAL(ESP_OK, board_init());
+    require_mod_io_present_or_skip();
     TEST_ASSERT_EQUAL(ESP_OK, relay_init());
-    TEST_ASSERT_EQUAL(ESP_OK, mod_io_init(board_i2c_bus_handle()));
-    TEST_ASSERT_EQUAL(ESP_OK, mod_io_probe());
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_set_relays(0x00U));
     TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
 
@@ -701,7 +738,7 @@ TEST_CASE("rest_api device reports absent MOD-IO on relay routes", "[qa][rest_ap
     char response[1536];
 
     ensure_tcpip_ready();
-    TEST_ASSERT_EQUAL(ESP_OK, board_init());
+    require_mod_io_driver_ready();
     TEST_ASSERT_EQUAL(ESP_OK, relay_init());
     TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
 
@@ -974,14 +1011,15 @@ TEST_CASE("rest_api device exposes cached digital and analog input snapshots",
     volatile bool fixture_captured = false;
 
     ensure_tcpip_ready();
+    if (!mod_io_driver_is_present()) {
+        TEST_IGNORE_MESSAGE("MOD-IO board is not connected or the I2C bus is unavailable");
+    }
+
     if (TEST_PROTECT()) {
         capture_device_config_fixture(&fixture);
         fixture_captured = true;
 
         TEST_ASSERT_EQUAL(ESP_OK, device_config_set_poll_interval_ms(10000U, NULL));
-        TEST_ASSERT_EQUAL(ESP_OK, board_init());
-        TEST_ASSERT_EQUAL(ESP_OK, mod_io_init(board_i2c_bus_handle()));
-        TEST_ASSERT_EQUAL(ESP_OK, mod_io_probe());
         TEST_ASSERT_EQUAL(ESP_OK, input_monitor_start());
         TEST_ASSERT_EQUAL(ESP_OK, input_monitor_poll_once_for_testing());
         TEST_ASSERT_EQUAL(ESP_OK, input_monitor_get_snapshot(&snapshot));
@@ -990,7 +1028,13 @@ TEST_CASE("rest_api device exposes cached digital and analog input snapshots",
 
         TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
 
-        perform_http_request(test_port, "GET", "/api/v1/inputs/digital", NULL, NULL, response, sizeof(response));
+        perform_http_request(test_port,
+                             "GET",
+                             "/api/v1/inputs/digital",
+                             NULL,
+                             NULL,
+                             response,
+                             sizeof(response));
         TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
         TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Present: true"));
         TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Sync: synchronized"));
@@ -1004,7 +1048,8 @@ TEST_CASE("rest_api device exposes cached digital and analog input snapshots",
                          sizeof(expected_fragment),
                          "\"id\":%u,\"state\":%s",
                          (unsigned)input_id,
-                         (snapshot.digital_mask & (uint8_t)(1U << (input_id - 1U))) != 0U ? "true"
+                         (snapshot.digital_mask & (uint8_t)(1U << (input_id - 1U))) != 0U
+                         ? "true"
                          : "false"));
             TEST_ASSERT_NOT_NULL(strstr(response, expected_fragment));
         }
@@ -1032,7 +1077,13 @@ TEST_CASE("rest_api device exposes cached digital and analog input snapshots",
                      (snapshot.digital_mask & 0x01U) != 0U ? "true" : "false"));
         TEST_ASSERT_NOT_NULL(strstr(response, expected_fragment));
 
-        perform_http_request(test_port, "GET", "/api/v1/inputs/analog", NULL, NULL, response, sizeof(response));
+        perform_http_request(test_port,
+                             "GET",
+                             "/api/v1/inputs/analog",
+                             NULL,
+                             NULL,
+                             response,
+                             sizeof(response));
         TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
         TEST_ASSERT_NOT_NULL(strstr(response, "\"staleness_ms\":"));
         TEST_ASSERT_NOT_NULL(strstr(response, "\"poll_interval_ms\":10000"));
