@@ -137,7 +137,7 @@ func apiStatusCode(status int, code exitcodes.Code) string {
 	case 401:
 		return "AUTH_REQUIRED"
 	case 403:
-		return "AUTH_INVALID"
+		return "AUTH_FORBIDDEN"
 	default:
 		return fallbackErrorCode(code)
 	}

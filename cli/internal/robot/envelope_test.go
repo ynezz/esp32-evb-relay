@@ -172,6 +172,23 @@ func TestBuildErrorDetailsMapsAuthAndNetworkRemediation(t *testing.T) {
 		t.Fatalf("auth forbidden next = %#v, want none", authForbiddenNext)
 	}
 
+	rawForbiddenDetails, rawForbiddenCode, rawForbiddenNext := buildErrorDetails(&client.APIError{
+		Message: "access denied",
+		Status:  403,
+	})
+	if rawForbiddenCode != exitcodes.AuthError {
+		t.Fatalf("raw auth forbidden exit code = %d, want %d", rawForbiddenCode, exitcodes.AuthError)
+	}
+	if rawForbiddenDetails.Code != "AUTH_FORBIDDEN" {
+		t.Fatalf("raw auth forbidden code = %q, want %q", rawForbiddenDetails.Code, "AUTH_FORBIDDEN")
+	}
+	if rawForbiddenDetails.Remediation == nil || *rawForbiddenDetails.Remediation != authRemediation {
+		t.Fatalf("raw auth forbidden remediation = %#v, want %q", rawForbiddenDetails.Remediation, authRemediation)
+	}
+	if len(rawForbiddenNext) != 0 {
+		t.Fatalf("raw auth forbidden next = %#v, want none", rawForbiddenNext)
+	}
+
 	authDetails, authCode, authNext := buildErrorDetails(&client.APIError{
 		Code:    "AUTH_INVALID",
 		Message: "provided token is invalid",
