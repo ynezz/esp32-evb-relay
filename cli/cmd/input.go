@@ -183,7 +183,7 @@ func newInputWatchCommand() *cobra.Command {
 	}
 
 	robot.AnnotateCommand(command, robot.CommandCapability{
-		Flags: []string{"--host", "--api-token", "--timeout", "--robot"},
+		Flags: []string{"--host", "--api-token", "--format", "--timeout", "--robot"},
 		OutputFields: []string{
 			"stream",
 			"started_at",

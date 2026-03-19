@@ -122,7 +122,7 @@ read inputs, and perform OTA updates.
 
 ./bin/evb-relay -H esp32-evb-relay.local -k "$EVB_RELAY_API_TOKEN" input digital
 ./bin/evb-relay -H esp32-evb-relay.local -k "$EVB_RELAY_API_TOKEN" input analog 2
-./bin/evb-relay -H esp32-evb-relay.local -k "$EVB_RELAY_API_TOKEN" input watch
+./bin/evb-relay --robot --format json -H esp32-evb-relay.local -k "$EVB_RELAY_API_TOKEN" input watch
 
 ./bin/evb-relay -H esp32-evb-relay.local -k "$EVB_RELAY_API_TOKEN" config show
 ./bin/evb-relay -H esp32-evb-relay.local -k "$EVB_RELAY_API_TOKEN" config set hostname=lab-relay poll_interval_ms=250

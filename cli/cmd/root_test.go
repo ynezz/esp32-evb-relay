@@ -310,6 +310,41 @@ func TestRobotCapabilitiesExposeCommandAndContractMetadata(t *testing.T) {
 	}
 }
 
+func TestRobotCapabilitiesExposeInputWatchFormatFlag(t *testing.T) {
+	cmd := newRootCommand()
+	stdout := &bytes.Buffer{}
+	var payload struct {
+		Commands []struct {
+			Name  string   `json:"name"`
+			Flags []string `json:"flags"`
+		} `json:"commands"`
+	}
+
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"--robot-capabilities"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() returned error: %v", err)
+	}
+
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() returned error: %v", err)
+	}
+
+	for _, command := range payload.Commands {
+		if command.Name != "input watch" {
+			continue
+		}
+		if !containsString(command.Flags, "--format") {
+			t.Fatalf("input watch flags = %#v, want --format", command.Flags)
+		}
+		return
+	}
+
+	t.Fatal("input watch capabilities missing from payload")
+}
+
 func TestCompletionCommandGeneratesBashScript(t *testing.T) {
 	cmd := newRootCommand()
 	stdout := &bytes.Buffer{}
