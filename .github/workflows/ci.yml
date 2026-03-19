@@ -20,6 +20,7 @@ jobs:
       firmware: ${{ steps.filter.outputs.firmware }}
       cli: ${{ steps.filter.outputs.cli }}
       scripts: ${{ steps.filter.outputs.scripts }}
+      tools: ${{ steps.filter.outputs.tools }}
       shared: ${{ steps.filter.outputs.shared }}
     steps:
       - name: Checkout repository
@@ -36,6 +37,8 @@ jobs:
               - 'cli/**'
             scripts:
               - 'scripts/**'
+            tools:
+              - 'tools/**'
             shared:
               - '.github/workflows/**'
               - 'cli/.goreleaser.yaml'
@@ -95,7 +98,7 @@ jobs:
   firmware-test:
     name: firmware host test
     needs: changes
-    if: ${{ needs.changes.outputs.firmware == 'true' || needs.changes.outputs.scripts == 'true' || needs.changes.outputs.shared == 'true' }}
+    if: ${{ needs.changes.outputs.firmware == 'true' || needs.changes.outputs.scripts == 'true' || needs.changes.outputs.tools == 'true' || needs.changes.outputs.shared == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
