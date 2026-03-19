@@ -233,6 +233,13 @@ def test_test_device_recipe_wraps_pytest_in_whole_run_watchdog() -> None:
     assert "--timeout-seconds {{test_device_watchdog_seconds}} \\" in justfile_text
 
 
+def test_pre_commit_hook_exports_only_cli_snapshot_for_go_vet() -> None:
+    hook_text = _pre_commit_hook_path().read_text(encoding="utf-8")
+
+    assert 'git ls-files -z cli | git checkout-index --stdin -z --prefix="$INDEX_SNAPSHOT_DIR/"' in hook_text
+    assert "git checkout-index --all" not in hook_text
+
+
 def test_watchdog_wrapper_preserves_child_output_and_exit_code() -> None:
     result = subprocess.run(
         [

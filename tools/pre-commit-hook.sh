@@ -87,7 +87,7 @@ if [ "${#STAGED_GO_FILES[@]}" -gt 0 ]; then
 
     INDEX_SNAPSHOT_DIR="$TMPDIR/index"
     mkdir -p "$INDEX_SNAPSHOT_DIR"
-    git checkout-index --all --prefix="$INDEX_SNAPSHOT_DIR/"
+    git ls-files -z cli | git checkout-index --stdin -z --prefix="$INDEX_SNAPSHOT_DIR/"
 
     (
         # Vet the staged index snapshot so unstaged edits cannot hide
