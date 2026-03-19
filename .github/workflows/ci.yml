@@ -39,6 +39,26 @@ jobs:
               - 'cliff.toml'
               - 'Justfile'
 
+  firmware-format:
+    name: firmware format
+    needs: changes
+    if: ${{ needs.changes.outputs.firmware == 'true' || needs.changes.outputs.shared == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Install Python tooling
+        run: just setup
+
+      - name: Run firmware format check
+        run: just format-check
+
   firmware-build:
     name: firmware build
     needs: changes
@@ -93,6 +113,29 @@ jobs:
             python -m pytest -p no:cacheprovider
             test_integration/test_serial_bootloader_config.py
 
+  cli-format:
+    name: cli format
+    needs: changes
+    if: ${{ needs.changes.outputs.cli == 'true' || needs.changes.outputs.shared == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Set up just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Run CLI format check
+        run: just cli-fmt-check
+
   cli-lint:
     name: cli lint
     needs: changes
@@ -114,6 +157,29 @@ jobs:
           version: v2.10
           working-directory: cli
           args: --timeout=5m
+
+  cli-vet:
+    name: cli vet
+    needs: changes
+    if: ${{ needs.changes.outputs.cli == 'true' || needs.changes.outputs.shared == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Set up just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Run CLI vet
+        run: just cli-vet
 
   cli-test:
     name: cli test
