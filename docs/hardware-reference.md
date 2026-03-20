@@ -37,9 +37,8 @@
 
 ### Serial Device Naming
 
-- The runner passes the CH340 USB-serial adapter (`1a86:7523`) into the
-  guest via USB device passthrough. The guest sees a native USB-serial
-  port at `/dev/ttyUSB*` (ch341 driver).
+- The runner may present the ESP32-EVB serial adapter as a QEMU-injected
+  PCI 16550A serial adapter, typically `/dev/ttyS*` in guest passthrough.
 - Do not hardcode `/dev/ttyUSB0` or any other transient device path in
   repo defaults, CI, or runner notes.
 - Prefer the stable guest-side udev alias `/dev/esp32-evb` for the
@@ -48,8 +47,8 @@
   setups that really expose separate flash/control and live-UART paths.
 - An example guest-side rule file lives at
   [`tools/udev/99-esp32-evb-qemu-serial.rules.example`](../tools/udev/99-esp32-evb-qemu-serial.rules.example).
-- That example rule matches the CH340 USB VID/PID (`1a86:7523`) and
-  creates the single-port `/dev/esp32-evb` alias.
+- That example rule matches the QEMU PCI passthrough identity used by this runner
+  and creates the single-port `/dev/esp32-evb` alias.
 
 ### Flashing
 
@@ -88,17 +87,16 @@ python3 -m esptool --no-stub --chip esp32 --port /dev/esp32-evb \
 
 ### Current Runner Caveat
 
-- The self-hosted QEMU runner currently exposes the board as a single
-  guest-visible QEMU PCI 16550A adapter (`Red Hat, Inc. QEMU PCI 16550A
-  Adapter`) under PCI slot `0000:00:09.0`.
+- The self-hosted runners expose the board as a PCI 16550A adapter in this
+  QEMU passthrough setup.
 - The guest currently exposes no `/dev/serial/by-id` aliases, so the
-  repo-standard `/dev/esp32-evb` alias should be created with a guest
-  udev rule that matches the stable PCI parent slot.
-- On 2026-03-18 the guest tty node happened to enumerate as
-  `/dev/ttyS4`. Treat that only as historical diagnostics, not an
-  operational default.
-- `udevadm info -a -n /dev/ttyS4` was the command used to confirm the
-  correct parent match for the alias rule is `KERNELS=="0000:00:09.0"`.
+  repo-standard `/dev/esp32-evb` alias should be created with a guest-side
+  udev rule.
+- On 2026-03-18, one QEMU guest observation had the board appear as
+  `/dev/ttyS4`. Keep this as historical diagnostics, not an operational
+  default, and rely on `/dev/esp32-evb` whenever possible.
+- `udevadm info -a -n /dev/ttyS4` was used to validate that the PCI path
+  matcher works when that transport is in use.
 - Runnable commands in this repo should continue to use
   `/dev/esp32-evb`, not a transient `/dev/ttyS*` node.
 - The image flashed after restoring download-mode access reports

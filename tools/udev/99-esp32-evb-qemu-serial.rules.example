@@ -1,6 +1,7 @@
-# Stable alias for the ESP32-EVB serial adapter exposed in the guest as
-# a QEMU PCI 16550A UART at a fixed parent PCI slot.
+# Stable alias for the QEMU-injected ESP32-EVB serial adapter.
 # Copy to /etc/udev/rules.d/99-esp32-evb-qemu-serial.rules, then:
 #   sudo udevadm control --reload
 #   sudo udevadm trigger --subsystem-match=tty
-SUBSYSTEM=="tty", KERNELS=="0000:00:09.0", SYMLINK+="esp32-evb"
+
+# Match the QEMU passthrough serial adapter observed in this runner.
+SUBSYSTEM=="tty", SUBSYSTEMS=="pci", ATTRS{vendor}=="0x1b36", ATTRS{device}=="0x0002", ATTRS{subsystem_vendor}=="0x1af4", ATTRS{subsystem_device}=="0x1100", SYMLINK+="esp32-evb"

@@ -519,7 +519,11 @@ def test_qemu_udev_example_defines_stable_serial_aliases() -> None:
         encoding="utf-8"
     )
 
-    assert 'KERNELS=="0000:00:09.0"' in rule_text
+    assert 'ATTRS{vendor}=="0x1b36"' in rule_text
+    assert 'ATTRS{device}=="0x0002"' in rule_text
+    assert 'ATTRS{subsystem_vendor}=="0x1af4"' in rule_text
+    assert 'ATTRS{subsystem_device}=="0x1100"' in rule_text
+    assert 'SUBSYSTEMS=="pci"' in rule_text
     assert 'SYMLINK+="esp32-evb"' in rule_text
 
 
