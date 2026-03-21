@@ -235,7 +235,7 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 |-----|-----------------------------|---------|----------|--------|-------|
 | 11.1 | Build RC binary            | `just build` | Binary at `firmware/build/evb_relay_firmware.bin` | | |
 | 11.2 | OTA flash                  | `evb-relay ota flash firmware/build/evb_relay_firmware.bin --format json` | `uploaded_bytes` > 0, `reboot_in_seconds` present; exit 0 | | |
-| 11.3 | Wait for reboot            | `status_ok=0; sleep 10; for attempt in 1 2 3; do if evb-relay status --format json; then status_ok=1; break; fi; sleep 10; done; test "$status_ok" -eq 1` | Device responds and FW version matches RC; the command itself tolerates an initial post-reboot race with DHCP or service startup before failing | | |
+| 11.3 | Wait for reboot            | `rc_ver=$(evb-relay --version \| sed -n '1p'); fw_ver=""; status_ok=0; sleep 10; for attempt in 1 2 3; do fw_json=$(evb-relay status --format json 2>/dev/null) && fw_ver=$(printf '%s' "$fw_json" \| jq -r '.status.firmware_version') && if [ "$fw_ver" = "$rc_ver" ]; then status_ok=1; break; fi; sleep 10; done; printf 'expected=%s\nobserved=%s\n' "$rc_ver" "$fw_ver"; test "$status_ok" -eq 1` | Device responds and the printed `expected`/`observed` versions match the RC semver; the command itself tolerates an initial post-reboot race with DHCP or service startup before failing | | |
 | 11.4 | Post-OTA relay test        | `evb-relay relay list --format json` | Relays accessible; exit 0 | | |
 | 11.5 | Post-OTA config persisted  | `evb-relay config show --format json` | Config values match pre-OTA settings | | |
 
