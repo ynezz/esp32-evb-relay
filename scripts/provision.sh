@@ -150,6 +150,9 @@ key_types = {
     "poll_ms": ("data", "u32"),
     "hostname": ("data", "string"),
     "modio_policy": ("data", "u8"),
+    "wifi_ssid": ("data", "string"),
+    "wifi_pass": ("data", "string"),
+    "net_policy": ("data", "u8"),
 }
 
 values = {}
