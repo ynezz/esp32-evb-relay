@@ -26,6 +26,7 @@ static esp_event_base_t s_last_base;
 static int32_t s_last_id;
 static uint8_t s_last_data[ESP_EVENT_STUB_MAX_DATA_SIZE];
 static size_t s_last_data_size;
+static size_t s_post_count;
 static esp_event_stub_handler_t s_handlers[ESP_EVENT_STUB_MAX_HANDLERS];
 static size_t s_handler_register_count;
 static size_t s_handler_unregister_count;
@@ -37,6 +38,7 @@ void esp_event_stub_reset(void)
     s_last_base = NULL;
     s_last_id = 0;
     s_last_data_size = 0U;
+    s_post_count = 0U;
     memset(s_last_data, 0, sizeof(s_last_data));
     memset(s_handlers, 0, sizeof(s_handlers));
     s_handler_register_count = 0U;
@@ -72,6 +74,11 @@ size_t esp_event_stub_copy_last_data(void *buffer, size_t buffer_size)
     }
 
     return s_last_data_size;
+}
+
+size_t esp_event_stub_get_post_count(void)
+{
+    return s_post_count;
 }
 
 size_t esp_event_stub_get_handler_register_count(void)
@@ -110,6 +117,7 @@ esp_err_t esp_event_post(esp_event_base_t event_base,
     s_last_base = event_base;
     s_last_id = event_id;
     s_last_data_size = event_data_size;
+    ++s_post_count;
 
     bytes_to_copy = (event_data_size < sizeof(s_last_data)) ? event_data_size : sizeof(s_last_data);
     if ((event_data != NULL) && (bytes_to_copy > 0U)) {

@@ -293,46 +293,43 @@ static void input_monitor_collect_input_events_locked(
     size_t *analog_event_count)
 {
     bool had_snapshot = s_state.snapshot_valid && s_state.modio_present;
+    uint8_t changed_digital_mask =
+        had_snapshot ? (uint8_t)(s_state.digital_mask ^ digital_mask) : MOD_IO_DIGITAL_INPUT_MASK_ALL;
 
     *digital_event_count = 0U;
     *analog_event_count = 0U;
 
-    if (had_snapshot) {
-        uint8_t changed_digital_mask = (uint8_t)(s_state.digital_mask ^ digital_mask);
+    for (uint8_t input_id = 1U; input_id <= MOD_IO_DIGITAL_INPUT_COUNT; ++input_id) {
+        uint8_t input_bit = (uint8_t)(1U << (input_id - 1U));
 
-        for (uint8_t input_id = 1U; input_id <= MOD_IO_DIGITAL_INPUT_COUNT; ++input_id) {
-            uint8_t input_bit = (uint8_t)(1U << (input_id - 1U));
-
-            if ((changed_digital_mask & input_bit) == 0U) {
-                continue;
-            }
-
-            digital_events[*digital_event_count] = (evb_relay_digital_input_event_t) {
-                .id = input_id,
-                .state = (digital_mask & input_bit) != 0U,
-                .ts_ms = sample_ts_ms,
-            };
-            ++(*digital_event_count);
+        if ((changed_digital_mask & input_bit) == 0U) {
+            continue;
         }
 
-        for (uint8_t input_id = 1U; input_id <= MOD_IO_ANALOG_INPUT_COUNT; ++input_id) {
-            size_t index = input_id - 1U;
+        digital_events[*digital_event_count] = (evb_relay_digital_input_event_t) {
+            .id = input_id,
+            .state = (digital_mask & input_bit) != 0U,
+            .ts_ms = sample_ts_ms,
+        };
+        ++(*digital_event_count);
+    }
 
-            if (input_monitor_abs_diff_u16(analog_values[index], s_state.analog_event_baseline[index]) <
-                    INPUT_MONITOR_DEFAULT_ANALOG_CHANGE_THRESHOLD) {
-                continue;
-            }
+    for (uint8_t input_id = 1U; input_id <= MOD_IO_ANALOG_INPUT_COUNT; ++input_id) {
+        size_t index = input_id - 1U;
 
-            analog_events[*analog_event_count] = (evb_relay_analog_input_event_t) {
-                .id = input_id,
-                .value = analog_values[index],
-                .ts_ms = sample_ts_ms,
-            };
-            s_state.analog_event_baseline[index] = analog_values[index];
-            ++(*analog_event_count);
+        if (had_snapshot &&
+                (input_monitor_abs_diff_u16(analog_values[index], s_state.analog_event_baseline[index]) <
+                 INPUT_MONITOR_DEFAULT_ANALOG_CHANGE_THRESHOLD)) {
+            continue;
         }
-    } else {
-        memcpy(s_state.analog_event_baseline, analog_values, sizeof(s_state.analog_event_baseline));
+
+        analog_events[*analog_event_count] = (evb_relay_analog_input_event_t) {
+            .id = input_id,
+            .value = analog_values[index],
+            .ts_ms = sample_ts_ms,
+        };
+        s_state.analog_event_baseline[index] = analog_values[index];
+        ++(*analog_event_count);
     }
 
     input_monitor_record_snapshot_locked(digital_mask, analog_values, sample_ts_ms);

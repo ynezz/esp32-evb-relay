@@ -79,9 +79,10 @@ static void test_input_monitor_start_cleans_up_button_isr_when_task_creation_fai
     TEST_ASSERT_FALSE(gpio_stub_has_isr_handler(BOARD_BUTTON));
 }
 
-static void test_input_monitor_poll_once_caches_snapshot_without_startup_events(void)
+static void test_input_monitor_poll_once_publishes_initial_snapshot_events(void)
 {
     static const uint16_t analog_values[MOD_IO_ANALOG_INPUT_COUNT] = {10U, 20U, 30U, 40U};
+    evb_relay_analog_input_event_t analog_event = {0};
     input_monitor_snapshot_t snapshot = {0};
 
     init_present_mod_io(0x00U);
@@ -99,7 +100,14 @@ static void test_input_monitor_poll_once_caches_snapshot_without_startup_events(
     TEST_ASSERT_EQUAL_HEX8(0x03U, snapshot.digital_mask);
     TEST_ASSERT_EQUAL_UINT16_ARRAY(analog_values, snapshot.analog_values, MOD_IO_ANALOG_INPUT_COUNT);
     TEST_ASSERT_EQUAL_UINT64(1500ULL, snapshot.sample_ts_ms);
-    TEST_ASSERT_NULL(esp_event_stub_get_last_base());
+    TEST_ASSERT_EQUAL_UINT32(8U, esp_event_stub_get_post_count());
+    TEST_ASSERT_EQUAL(EVB_RELAY_EVENT, esp_event_stub_get_last_base());
+    TEST_ASSERT_EQUAL_INT(EVB_RELAY_EVENT_ANALOG_INPUT, esp_event_stub_get_last_id());
+    TEST_ASSERT_EQUAL_UINT32(sizeof(analog_event),
+                             esp_event_stub_copy_last_data(&analog_event, sizeof(analog_event)));
+    TEST_ASSERT_EQUAL_UINT8(4U, analog_event.id);
+    TEST_ASSERT_EQUAL_UINT16(40U, analog_event.value);
+    TEST_ASSERT_EQUAL_UINT64(1500ULL, analog_event.ts_ms);
 }
 
 static void test_input_monitor_publishes_digital_change_events(void)
@@ -259,7 +267,7 @@ static void test_input_monitor_button_debounce_resamples_gpio_before_publishing(
 static void test_input_monitor_recovers_after_modio_absence(void)
 {
     static const uint16_t analog_values[MOD_IO_ANALOG_INPUT_COUNT] = {1U, 2U, 3U, 4U};
-    evb_relay_modio_presence_event_t event = {0};
+    evb_relay_analog_input_event_t analog_event = {0};
     input_monitor_snapshot_t snapshot = {0};
 
     init_absent_mod_io();
@@ -279,11 +287,13 @@ static void test_input_monitor_recovers_after_modio_absence(void)
     esp_stub_set_time_us(2000000LL);
     TEST_ASSERT_EQUAL(ESP_OK, input_monitor_poll_once_for_testing());
     TEST_ASSERT_EQUAL(EVB_RELAY_EVENT, esp_event_stub_get_last_base());
-    TEST_ASSERT_EQUAL_INT(EVB_RELAY_EVENT_MODIO_PRESENCE, esp_event_stub_get_last_id());
-    TEST_ASSERT_EQUAL_UINT32(sizeof(event),
-                             esp_event_stub_copy_last_data(&event, sizeof(event)));
-    TEST_ASSERT_TRUE(event.present);
-    TEST_ASSERT_EQUAL_UINT64(2000ULL, event.ts_ms);
+    TEST_ASSERT_EQUAL_UINT32(9U, esp_event_stub_get_post_count());
+    TEST_ASSERT_EQUAL_INT(EVB_RELAY_EVENT_ANALOG_INPUT, esp_event_stub_get_last_id());
+    TEST_ASSERT_EQUAL_UINT32(sizeof(analog_event),
+                             esp_event_stub_copy_last_data(&analog_event, sizeof(analog_event)));
+    TEST_ASSERT_EQUAL_UINT8(4U, analog_event.id);
+    TEST_ASSERT_EQUAL_UINT16(4U, analog_event.value);
+    TEST_ASSERT_EQUAL_UINT64(2000ULL, analog_event.ts_ms);
     TEST_ASSERT_EQUAL(ESP_OK, input_monitor_get_snapshot(&snapshot));
     TEST_ASSERT_TRUE(snapshot.modio_present);
     TEST_ASSERT_TRUE(snapshot.sample_valid);
@@ -317,7 +327,7 @@ void test_input_monitor_suite(void)
 {
     RUN_TEST(test_input_monitor_start_configures_button_isr_and_task);
     RUN_TEST(test_input_monitor_start_cleans_up_button_isr_when_task_creation_fails);
-    RUN_TEST(test_input_monitor_poll_once_caches_snapshot_without_startup_events);
+    RUN_TEST(test_input_monitor_poll_once_publishes_initial_snapshot_events);
     RUN_TEST(test_input_monitor_publishes_digital_change_events);
     RUN_TEST(test_input_monitor_aggregates_analog_changes_against_threshold);
     RUN_TEST(test_input_monitor_button_edges_are_debounced);

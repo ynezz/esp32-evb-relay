@@ -29,6 +29,7 @@ void esp_event_stub_set_handler_register_result(esp_err_t result);
 esp_event_base_t esp_event_stub_get_last_base(void);
 int32_t esp_event_stub_get_last_id(void);
 size_t esp_event_stub_copy_last_data(void *buffer, size_t buffer_size);
+size_t esp_event_stub_get_post_count(void);
 size_t esp_event_stub_get_handler_register_count(void);
 size_t esp_event_stub_get_handler_unregister_count(void);
 size_t esp_event_stub_get_active_handler_count(void);
