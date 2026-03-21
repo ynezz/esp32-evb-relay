@@ -166,7 +166,7 @@ cache model consistently.
   only when the relay cache is already synchronized, 5 → invalid
 - `mod_io_read_analog_input`: 0 → invalid, 1–4 → valid, 5 → invalid
 - Public analog read APIs return correctly decoded samples for known
-  byte pairs (for example `{0x80, 0x00}` → 1, `{0x01, 0x00}` → 128,
+  byte pairs (for example `{0x01, 0x00}` → 1, `{0x80, 0x00}` → 128,
   `{0xFF, 0x03}` → 1023)
 - `mod_io_set_relay`: individual relay set modifies correct bit in mask
 - Reconciliation on transaction failure: stub returns error → probe
