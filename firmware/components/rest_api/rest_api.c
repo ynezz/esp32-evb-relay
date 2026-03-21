@@ -28,6 +28,7 @@
 #include "relay_events.h"
 #include "rest_api_request_recv.h"
 #include "rest_api_sse_lifetime.h"
+#include "rest_api_wifi_config_update.h"
 
 static const char *TAG = "rest_api";
 
@@ -91,15 +92,6 @@ typedef struct {
     bool modio_boot_policy_present;
     device_config_modio_boot_policy_t modio_boot_policy;
 } rest_api_config_update_request_t;
-
-typedef struct {
-    bool credentials_present;
-    bool credentials_clear;
-    char ssid[DEVICE_CONFIG_WIFI_SSID_MAX_LEN + 1U];
-    char passphrase[DEVICE_CONFIG_WIFI_PASSPHRASE_MAX_LEN + 1U];
-    bool network_policy_present;
-    device_config_network_policy_t network_policy;
-} rest_api_wifi_config_update_request_t;
 
 typedef struct {
     char event[REST_API_SSE_EVENT_NAME_MAX_LEN];
@@ -1851,74 +1843,72 @@ static esp_err_t rest_api_parse_wifi_config_update_request(const cJSON *root,
 
         if (strcmp(item->string, "ssid") == 0) {
             has_updates = true;
-            out_request->credentials_present = true;
             if (cJSON_IsNull(item)) {
-                out_request->credentials_clear = true;
-                out_request->ssid[0] = '\0';
-                out_request->passphrase[0] = '\0';
+                if (rest_api_wifi_config_update_set_ssid(out_request,
+                                                         NULL,
+                                                         true,
+                                                         out_error_code,
+                                                         out_error_message) != ESP_OK) {
+                    return ESP_ERR_INVALID_ARG;
+                }
                 continue;
             }
             if (!cJSON_IsString(item) || (item->valuestring == NULL)) {
-                rest_api_set_config_parse_error(out_error_code,
-                                                out_error_message,
-                                                "INVALID_CONFIG_VALUE",
-                                                "ssid must be a string or null");
+                if (rest_api_wifi_config_update_set_ssid(out_request,
+                                                         NULL,
+                                                         false,
+                                                         out_error_code,
+                                                         out_error_message) != ESP_OK) {
+                    return ESP_ERR_INVALID_ARG;
+                }
                 return ESP_ERR_INVALID_ARG;
             }
-            if (strlen(item->valuestring) > DEVICE_CONFIG_WIFI_SSID_MAX_LEN) {
-                rest_api_set_config_parse_error(out_error_code,
-                                                out_error_message,
-                                                "INVALID_CONFIG_VALUE",
-                                                "ssid exceeds the maximum length");
+            if (rest_api_wifi_config_update_set_ssid(out_request,
+                                                     item->valuestring,
+                                                     false,
+                                                     out_error_code,
+                                                     out_error_message) != ESP_OK) {
                 return ESP_ERR_INVALID_ARG;
             }
-            strncpy(out_request->ssid, item->valuestring, sizeof(out_request->ssid) - 1U);
             continue;
         }
 
         if (strcmp(item->string, "passphrase") == 0) {
-            if (out_request->credentials_clear) {
-                rest_api_set_config_parse_error(out_error_code,
-                                                out_error_message,
-                                                "INVALID_CONFIG_VALUE",
-                                                "passphrase cannot be combined with ssid=null");
-                return ESP_ERR_INVALID_ARG;
-            }
             if (!cJSON_IsString(item) || (item->valuestring == NULL)) {
-                rest_api_set_config_parse_error(out_error_code,
-                                                out_error_message,
-                                                "INVALID_CONFIG_VALUE",
-                                                "passphrase must be a string");
+                if (rest_api_wifi_config_update_set_passphrase(out_request,
+                                                               NULL,
+                                                               out_error_code,
+                                                               out_error_message) != ESP_OK) {
+                    return ESP_ERR_INVALID_ARG;
+                }
                 return ESP_ERR_INVALID_ARG;
             }
-            if (strlen(item->valuestring) > DEVICE_CONFIG_WIFI_PASSPHRASE_MAX_LEN) {
-                rest_api_set_config_parse_error(out_error_code,
-                                                out_error_message,
-                                                "INVALID_CONFIG_VALUE",
-                                                "passphrase exceeds the maximum length");
+            if (rest_api_wifi_config_update_set_passphrase(out_request,
+                                                           item->valuestring,
+                                                           out_error_code,
+                                                           out_error_message) != ESP_OK) {
                 return ESP_ERR_INVALID_ARG;
             }
-            strncpy(out_request->passphrase, item->valuestring, sizeof(out_request->passphrase) - 1U);
             continue;
         }
 
         if (strcmp(item->string, "network_policy") == 0) {
             has_updates = true;
             if (!cJSON_IsString(item) || (item->valuestring == NULL)) {
-                rest_api_set_config_parse_error(out_error_code,
-                                                out_error_message,
-                                                "INVALID_CONFIG_VALUE",
-                                                "network_policy must be a string");
+                if (rest_api_wifi_config_update_set_network_policy(out_request,
+                                                                   NULL,
+                                                                   out_error_code,
+                                                                   out_error_message) != ESP_OK) {
+                    return ESP_ERR_INVALID_ARG;
+                }
                 return ESP_ERR_INVALID_ARG;
             }
-            if (device_config_parse_network_policy(item->valuestring, &out_request->network_policy) != ESP_OK) {
-                rest_api_set_config_parse_error(out_error_code,
-                                                out_error_message,
-                                                "INVALID_CONFIG_VALUE",
-                                                "network_policy must be ethernet_only, wifi_only, or prefer_ethernet");
+            if (rest_api_wifi_config_update_set_network_policy(out_request,
+                                                               item->valuestring,
+                                                               out_error_code,
+                                                               out_error_message) != ESP_OK) {
                 return ESP_ERR_INVALID_ARG;
             }
-            out_request->network_policy_present = true;
             continue;
         }
 
@@ -1929,40 +1919,10 @@ static esp_err_t rest_api_parse_wifi_config_update_request(const cJSON *root,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (out_request->credentials_present && !out_request->credentials_clear && (out_request->ssid[0] == '\0')) {
-        rest_api_set_config_parse_error(out_error_code,
-                                        out_error_message,
-                                        "INVALID_CONFIG_VALUE",
-                                        "ssid must not be empty");
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    if ((out_request->passphrase[0] != '\0') && !out_request->credentials_present) {
-        rest_api_set_config_parse_error(out_error_code,
-                                        out_error_message,
-                                        "INVALID_CONFIG_VALUE",
-                                        "passphrase requires ssid");
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    if ((out_request->credentials_present && !out_request->credentials_clear) &&
-            !cJSON_HasObjectItem(root, "passphrase")) {
-        rest_api_set_config_parse_error(out_error_code,
-                                        out_error_message,
-                                        "INVALID_CONFIG_VALUE",
-                                        "passphrase is required when setting WiFi credentials");
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    if (!has_updates) {
-        rest_api_set_config_parse_error(out_error_code,
-                                        out_error_message,
-                                        "INVALID_CONFIG",
-                                        "Request body must update at least one supported key");
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    return ESP_OK;
+    return rest_api_wifi_config_update_validate(out_request,
+                                                has_updates,
+                                                out_error_code,
+                                                out_error_message);
 }
 
 static esp_err_t rest_api_config_handler(httpd_req_t *req)

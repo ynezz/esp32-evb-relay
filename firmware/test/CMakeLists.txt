@@ -51,6 +51,7 @@ add_executable(host_tests
     "${FIRMWARE_DIR}/components/ota/ota.c"
     "${FIRMWARE_DIR}/components/rest_api/rest_api_request_recv.c"
     "${FIRMWARE_DIR}/components/rest_api/rest_api_sse_lifetime.c"
+    "${FIRMWARE_DIR}/components/rest_api/rest_api_wifi_config_update.c"
 )
 
 target_include_directories(host_tests PRIVATE

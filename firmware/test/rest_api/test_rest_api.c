@@ -1,6 +1,7 @@
 #include "rest_api.h"
 #include "rest_api_request_recv.h"
 #include "rest_api_sse_lifetime.h"
+#include "rest_api_wifi_config_update.h"
 
 #include <string.h>
 
@@ -381,6 +382,47 @@ static void test_rest_api_request_recv_exact_returns_failure_for_socket_errors(v
     TEST_ASSERT_EQUAL_UINT32(1U, req.call_count);
 }
 
+static void test_rest_api_wifi_config_update_rejects_passphrase_with_cleared_ssid_in_any_order(void)
+{
+    rest_api_wifi_config_update_request_t request = {0};
+    const char *error_code = NULL;
+    const char *error_message = NULL;
+
+    TEST_ASSERT_EQUAL(ESP_OK,
+                      rest_api_wifi_config_update_set_passphrase(&request,
+                                                                 "secret123",
+                                                                 &error_code,
+                                                                 &error_message));
+    TEST_ASSERT_EQUAL(ESP_OK,
+                      rest_api_wifi_config_update_set_ssid(&request, NULL, true, &error_code, &error_message));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+                      rest_api_wifi_config_update_validate(&request,
+                                                           true,
+                                                           &error_code,
+                                                           &error_message));
+    TEST_ASSERT_EQUAL_STRING("INVALID_CONFIG_VALUE", error_code);
+    TEST_ASSERT_EQUAL_STRING("passphrase cannot be combined with ssid=null", error_message);
+
+    memset(&request, 0, sizeof(request));
+    error_code = NULL;
+    error_message = NULL;
+
+    TEST_ASSERT_EQUAL(ESP_OK,
+                      rest_api_wifi_config_update_set_ssid(&request, NULL, true, &error_code, &error_message));
+    TEST_ASSERT_EQUAL(ESP_OK,
+                      rest_api_wifi_config_update_set_passphrase(&request,
+                                                                 "secret123",
+                                                                 &error_code,
+                                                                 &error_message));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+                      rest_api_wifi_config_update_validate(&request,
+                                                           true,
+                                                           &error_code,
+                                                           &error_message));
+    TEST_ASSERT_EQUAL_STRING("INVALID_CONFIG_VALUE", error_code);
+    TEST_ASSERT_EQUAL_STRING("passphrase cannot be combined with ssid=null", error_message);
+}
+
 void test_rest_api_suite(void)
 {
     RUN_TEST(test_rest_api_sse_reset_client_uses_invalid_sockfd_sentinel);
@@ -398,4 +440,5 @@ void test_rest_api_suite(void)
     RUN_TEST(test_rest_api_request_recv_exact_times_out_after_three_consecutive_timeouts);
     RUN_TEST(test_rest_api_request_recv_exact_resets_timeout_budget_after_progress);
     RUN_TEST(test_rest_api_request_recv_exact_returns_failure_for_socket_errors);
+    RUN_TEST(test_rest_api_wifi_config_update_rejects_passphrase_with_cleared_ssid_in_any_order);
 }
