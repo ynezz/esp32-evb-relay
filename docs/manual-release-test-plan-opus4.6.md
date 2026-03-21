@@ -88,7 +88,7 @@ proceeding to manual tests.
 | 3.2 | Status JSON format          | `evb-relay status --format json` | Valid JSON with top-level `status`; fields live under `status.uptime_seconds`, `status.firmware_version`, `status.free_heap_bytes`, `status.network.*`, `status.modio.*` | | |
 | 3.3 | Status robot mode           | `evb-relay status --robot` | TOON envelope with `v`, `command`, `timestamp`, `elapsed_ms`, `exit_code`, `host`, `device_context`, `data.status` | | |
 | 3.4 | Status robot JSON           | `evb-relay status --robot --format json` | JSON envelope; same structure as 3.3, with the payload under `data.status` | | |
-| 3.5 | Status via REST             | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/status` | Valid JSON matching the CLI's inner `status` object; response headers include `X-FW-Version`, `X-ModIO-Present`, `X-ModIO-Sync` | | |
+| 3.5 | Status via REST             | `curl -sfS -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/status` | Valid JSON matching the CLI's inner `status` object; explicit header checks live in Section 10 | | |
 | 3.6 | Release version match       | Compare the semver from `evb-relay --version` with status `firmware_version` | Release version strings match; do not compare the CLI's extra commit/date text verbatim to the firmware field | | |
 
 ---
@@ -107,10 +107,10 @@ Start state: both onboard relays OFF after boot.
 | 4.6 | Relay 2 toggle OFF          | `evb-relay relay toggle onboard:2 --format json` | `state=false`; exit 0 | | |
 | 4.7 | Batch set both ON           | `evb-relay relay set onboard:1=on onboard:2=on --format json` | `all_ok=true`, both relays `state=true` | | |
 | 4.8 | Batch set both OFF          | `evb-relay relay set onboard:1=off onboard:2=off --format json` | `all_ok=true`, both relays `state=false` | | |
-| 4.9 | Relay ON via REST           | `curl -s -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d '{"state":true}' http://$EVB_RELAY_HOST/api/v1/relays/onboard/1` | JSON with `state=true`; HTTP 200 | | |
-| 4.10 | Relay toggle via REST      | `curl -s -X POST -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/relays/onboard/1/toggle` | State toggled; HTTP 200 | | |
-| 4.11 | Relay OFF via REST         | `curl -s -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d '{"state":false}' http://$EVB_RELAY_HOST/api/v1/relays/onboard/1` | `state=false`; HTTP 200 | | |
-| 4.12 | GET onboard relays (REST)  | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/relays/onboard` | JSON object with `relays[]`; two onboard relays with `id`, `state` | | |
+| 4.9 | Relay ON via REST           | `curl -sfS -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d '{"state":true}' http://$EVB_RELAY_HOST/api/v1/relays/onboard/1` | JSON with `relay.group=onboard`, `relay.id=1`, `relay.state=true` | | |
+| 4.10 | Relay toggle via REST      | `curl -sfS -X POST -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/relays/onboard/1/toggle` | JSON with `relay.group=onboard`, `relay.id=1`; state flipped from the prior step | | |
+| 4.11 | Relay OFF via REST         | `curl -sfS -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d '{"state":false}' http://$EVB_RELAY_HOST/api/v1/relays/onboard/1` | JSON with `relay.group=onboard`, `relay.id=1`, `relay.state=false` | | |
+| 4.12 | GET onboard relays (REST)  | `curl -sfS -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/relays/onboard` | JSON object with `relays[]`; two onboard relays with `id`, `state` | | |
 | 4.13 | Cleanup: both OFF          | `evb-relay relay set onboard:1=off onboard:2=off` | Both OFF | | |
 
 ---
@@ -128,11 +128,11 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | 5.5 | Single relay OFF            | `evb-relay relay off modio:2 --format json` | `id=2`, `state=false`; exit 0 | | |
 | 5.6 | Single relay ON             | `evb-relay relay on modio:2 --format json` | `id=2`, `state=true`; exit 0 | | |
 | 5.7 | Toggle relay                | `evb-relay relay toggle modio:3 --format json` | State flipped; exit 0 | | |
-| 5.8 | Batch set via REST          | `curl -s -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d '{"states":[false,true,false,true]}' http://$EVB_RELAY_HOST/api/v1/relays/modio` | HTTP 200; states match request | | |
-| 5.9 | Single relay via REST       | `curl -s -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d '{"state":true}' http://$EVB_RELAY_HOST/api/v1/relays/modio/1` | HTTP 200; `state=true` | | |
-| 5.10 | Toggle relay via REST      | `curl -s -X POST -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/relays/modio/1/toggle` | State toggled; HTTP 200 | | |
-| 5.11 | GET modio relays (REST)    | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/relays/modio` | JSON object with `relays[]`; four MOD-IO relays | | |
-| 5.12 | GET all relays (REST)      | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/relays` | JSON with both onboard (2) and modio (4) relays | | |
+| 5.8 | Batch set via REST          | `curl -sfS -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d '{"states":[false,true,false,true]}' http://$EVB_RELAY_HOST/api/v1/relays/modio` | JSON object with `relays[]`; states match the requested mask | | |
+| 5.9 | Single relay via REST       | `curl -sfS -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d '{"state":true}' http://$EVB_RELAY_HOST/api/v1/relays/modio/1` | JSON with `relay.group=modio`, `relay.id=1`, `relay.state=true` | | |
+| 5.10 | Toggle relay via REST      | `curl -sfS -X POST -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/relays/modio/1/toggle` | JSON with `relay.group=modio`, `relay.id=1`; state toggled from the prior step | | |
+| 5.11 | GET modio relays (REST)    | `curl -sfS -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/relays/modio` | JSON object with `relays[]`; four MOD-IO relays | | |
+| 5.12 | GET all relays (REST)      | `curl -sfS -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/relays` | JSON with both onboard (2) and modio (4) relays | | |
 | 5.13 | Relay list shows all       | `evb-relay relay list --format json` | 6 total relays (2 onboard + 4 modio); `modio_present=true`, `modio_sync=synchronized` | | |
 | 5.14 | Cleanup: all MOD-IO OFF    | `evb-relay relay set modio:1=off modio:2=off modio:3=off modio:4=off` | All OFF | | |
 
@@ -146,10 +146,10 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | 6.2 | Single digital input        | `evb-relay input digital 1 --format json` | Single input with `id=1`, `state` (boolean) | | |
 | 6.3 | All analog inputs           | `evb-relay input analog --format json` | JSON with 4 inputs; each has `id`, `value` (0-1023); timestamp metadata present | | |
 | 6.4 | Single analog input         | `evb-relay input analog 3 --format json` | Single input with `id=3`, `value` in 0-1023 range | | |
-| 6.5 | Digital inputs via REST     | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/inputs/digital` | JSON object with `sample_ts_ms`, `staleness_ms`, `poll_interval_ms`, and `inputs[]` of 4 digital inputs | | |
-| 6.6 | Single digital via REST     | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/inputs/digital/2` | JSON object with metadata plus `input.id=2` and boolean `input.state` | | |
-| 6.7 | Analog inputs via REST      | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/inputs/analog` | JSON object with metadata plus `inputs[]` of 4 analog inputs, values 0-1023 | | |
-| 6.8 | Single analog via REST      | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/inputs/analog/4` | JSON object with metadata plus `input.id=4`; `input.value` in 0-1023 range | | |
+| 6.5 | Digital inputs via REST     | `curl -sfS -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/inputs/digital` | JSON object with `sample_ts_ms`, `staleness_ms`, `poll_interval_ms`, and `inputs[]` of 4 digital inputs | | |
+| 6.6 | Single digital via REST     | `curl -sfS -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/inputs/digital/2` | JSON object with metadata plus `input.id=2` and boolean `input.state` | | |
+| 6.7 | Analog inputs via REST      | `curl -sfS -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/inputs/analog` | JSON object with metadata plus `inputs[]` of 4 analog inputs, values 0-1023 | | |
+| 6.8 | Single analog via REST      | `curl -sfS -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/inputs/analog/4` | JSON object with metadata plus `input.id=4`; `input.value` in 0-1023 range | | |
 | 6.9 | Digital plain format        | `evb-relay input digital --format plain` | Plain text output; exit 0 | | |
 | 6.10 | Analog table format        | `evb-relay input analog` | Human-readable table; exit 0 | | |
 
@@ -162,7 +162,7 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | 7.1 | Input watch starts          | `timeout 10 evb-relay input watch --robot 2>/dev/null \| head -3` | NDJSON lines; first line is the stream header with `stream="events"` and `device_context`; exit 0 or 124 (timeout) | | |
 | 7.2 | Relay event in stream       | Start `evb-relay input watch --robot` in background, toggle a relay, capture output | `relay_changed` event appears with relay group, id, state | | |
 | 7.3 | Idle stream survives heartbeat window | `timeout 35 evb-relay input watch --robot 2>/dev/null` | Stream stays connected until timeout without a fatal CLI error; the CLI may emit only the header because SSE heartbeat comments are not surfaced as NDJSON events | | |
-| 7.4 | SSE via REST                | `timeout 5 curl -s -N -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/events \| head -5` | SSE framing is visible; expect at least the initial `:connected` comment, and `event:` / `data:` pairs if a device event occurs during capture | | |
+| 7.4 | SSE via REST                | `timeout 5 curl -sfS -N -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/events \| head -5` | SSE framing is visible; expect at least the initial `:connected` comment, and `event:` / `data:` pairs if a device event occurs during capture | | |
 | 7.5 | Multiple SSE clients        | Open 2 concurrent curl SSE connections, toggle relay | Both clients receive the event | | |
 
 ---
@@ -173,7 +173,7 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 |-----|-----------------------------|---------|----------|--------|-------|
 | 8.1 | Config show (CLI)           | `evb-relay config show --format json` | JSON with top-level `config`; fields under `config.poll_interval_ms`, `config.hostname`, `config.modio_boot_policy`, `config.api_token_set`, `config.wifi.*` | | |
 | 8.2 | Config show (table)         | `evb-relay config show` | Human-readable table; exit 0 | | |
-| 8.3 | Config show (REST)          | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/config` | JSON matching CLI output; secrets shown as `_set` booleans only | | |
+| 8.3 | Config show (REST)          | `curl -sfS -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/config` | JSON matching CLI output; secrets shown as `_set` booleans only | | |
 | 8.4 | Set hostname                | `evb-relay config set hostname=test-relay --format json` | Accepted; exit 0 | | |
 | 8.5 | Verify hostname             | `evb-relay config show --format json \| jq -r '.config.hostname'` | `test-relay` | | |
 | 8.6 | Set poll_interval_ms        | `evb-relay config set poll_interval_ms=200 --format json` | Accepted; exit 0 | | |
@@ -185,7 +185,7 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | 8.12 | Invalid: hostname too long | `evb-relay config set hostname=a234567890123456789012345678901234567890123456789012345678901234` | Rejected by the device (64 chars > max 63); CLI exits non-zero and is typically `1`, not `5` | | |
 | 8.13 | Invalid: hostname leading hyphen | `evb-relay config set hostname=-bad` | Rejected by the device; CLI exits non-zero and is typically `1` | | |
 | 8.14 | Invalid: hostname special chars | `evb-relay config set hostname=host.name` | Rejected by the device; CLI exits non-zero and is typically `1` | | |
-| 8.15 | Config via REST             | `curl -s -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d '{"poll_interval_ms":100}' http://$EVB_RELAY_HOST/api/v1/config` | HTTP 200; accepted | | |
+| 8.15 | Config via REST             | `curl -sfS -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d '{"poll_interval_ms":100}' http://$EVB_RELAY_HOST/api/v1/config` | JSON `changes[]` includes `poll_interval_ms -> 100`; `restart_required=false` | | |
 | 8.16 | Restore defaults            | `evb-relay config set hostname=esp32-evb-relay poll_interval_ms=100 modio_boot_policy=leave_unchanged` | All accepted | | |
 
 ---
@@ -199,7 +199,7 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | 9.3 | Verify passphrase_set       | `evb-relay config show --format json \| jq '.config.wifi.passphrase_set'` | `true` | | |
 | 9.4 | Set network_policy          | `evb-relay config wifi network_policy=prefer_ethernet --format json` | Accepted; exit 0 | | |
 | 9.5 | Verify network_policy       | `evb-relay config show --format json \| jq -r '.config.wifi.network_policy'` | `prefer_ethernet` | | |
-| 9.6 | WiFi via REST               | `curl -s -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d '{"network_policy":"ethernet_only"}' http://$EVB_RELAY_HOST/api/v1/config/wifi` | HTTP 200; accepted | | |
+| 9.6 | WiFi via REST               | `curl -sfS -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d '{"network_policy":"ethernet_only"}' http://$EVB_RELAY_HOST/api/v1/config/wifi` | JSON `changes[]` includes `network_policy -> ethernet_only`; `restart_required=true` | | |
 | 9.7 | Clear WiFi credentials      | `evb-relay config wifi clear=true --format json` | Accepted; exit 0 | | |
 | 9.8 | Verify cleared              | `evb-relay config show --format json \| jq '{ssid_set: .config.wifi.ssid_set, passphrase_set: .config.wifi.passphrase_set}'` | Both booleans are `false` | | |
 | 9.9 | Invalid: passphrase without ssid | `evb-relay config wifi passphrase=secret` | Rejected; exit code 5 | | |
@@ -213,7 +213,7 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 |-----|-----------------------------|---------|----------|--------|-------|
 | 10.1 | No token → 401             | `curl -s -o /dev/null -w '%{http_code}' http://$EVB_RELAY_HOST/api/v1/status` | `401` | | |
 | 10.2 | No token: no device headers | `curl -s -D- http://$EVB_RELAY_HOST/api/v1/status 2>/dev/null \| grep -ci 'X-FW-Version'` | `0` (header absent) | | |
-| 10.3 | Wrong token → 401/403      | `curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer WRONGTOKEN" http://$EVB_RELAY_HOST/api/v1/status` | `401` or `403` | | |
+| 10.3 | Wrong token → 403          | `curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer WRONGTOKEN" http://$EVB_RELAY_HOST/api/v1/status` | `403` | | |
 | 10.4 | Wrong token: no device headers | `curl -s -D- -H "Authorization: Bearer WRONGTOKEN" http://$EVB_RELAY_HOST/api/v1/status 2>/dev/null \| grep -ci 'X-FW-Version'` | `0` (header absent) | | |
 | 10.5 | Valid token → 200          | `curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/status` | `200` | | |
 | 10.6 | Valid token: device headers | `curl -s -D- -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/status 2>/dev/null \| grep -c 'X-FW-Version'` | `1` (header present) | | |
@@ -221,7 +221,7 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | 10.8 | X-ModIO-Sync header        | `curl -s -D- -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/status 2>/dev/null \| grep -i 'X-ModIO-Sync'` | Header present with value `absent`, `unknown`, or `synchronized` | | |
 | 10.9 | CLI without token          | `EVB_RELAY_API_TOKEN="" evb-relay status 2>&1; echo "exit:$?"` | Auth error; exit code 3 | | |
 | 10.10 | CLI with wrong token      | `EVB_RELAY_API_TOKEN="WRONG" evb-relay status 2>&1; echo "exit:$?"` | Auth error; exit code 3 | | |
-| 10.11 | Auth error JSON body      | `curl -s -H "Authorization: Bearer WRONGTOKEN" http://$EVB_RELAY_HOST/api/v1/status` | JSON with error code (`AUTH_REQUIRED` or `AUTH_FORBIDDEN`) | | |
+| 10.11 | Auth error JSON body      | `curl -s -H "Authorization: Bearer WRONGTOKEN" http://$EVB_RELAY_HOST/api/v1/status` | JSON with error code `AUTH_FORBIDDEN` | | |
 
 ---
 
@@ -251,8 +251,8 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | 12.4 | Invalid input ID           | `evb-relay input digital 5 2>&1; echo "exit:$?"` | Error; exit code 5 | | |
 | 12.5 | Invalid input ID 0         | `evb-relay input analog 0 2>&1; echo "exit:$?"` | Error; exit code 5 | | |
 | 12.6 | Invalid group name         | `evb-relay relay on bogus:1 2>&1; echo "exit:$?"` | Error; exit code 5 | | |
-| 12.7 | Invalid relay via REST     | `curl -s -o /dev/null -w '%{http_code}' -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d '{"state":true}' http://$EVB_RELAY_HOST/api/v1/relays/onboard/9` | HTTP 404 with `RELAY_NOT_FOUND` | | |
-| 12.8 | Invalid input via REST     | `curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/inputs/digital/9` | HTTP 404 with `INPUT_NOT_FOUND` | | |
+| 12.7 | Invalid relay via REST     | `curl -s -i -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d '{"state":true}' http://$EVB_RELAY_HOST/api/v1/relays/onboard/9` | HTTP 404 plus JSON error code `RELAY_NOT_FOUND` | | |
+| 12.8 | Invalid input via REST     | `curl -s -i -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/inputs/digital/9` | HTTP 404 plus JSON error code `INPUT_NOT_FOUND` | | |
 | 12.9 | Missing JSON body (relay)  | `curl -s -o /dev/null -w '%{http_code}' -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/relays/onboard/1` | HTTP 400 | | |
 | 12.10 | Invalid JSON body         | `curl -s -o /dev/null -w '%{http_code}' -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d 'not-json' http://$EVB_RELAY_HOST/api/v1/relays/onboard/1` | HTTP 400 | | |
 | 12.11 | Unknown endpoint          | `curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/nonexistent` | HTTP 404 | | |
