@@ -159,10 +159,10 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 
 | #   | Test                        | Command | Expected | Result | Notes |
 |-----|-----------------------------|---------|----------|--------|-------|
-| 7.1 | Input watch starts          | `timeout 10 evb-relay input watch --robot 2>/dev/null \| head -3` | NDJSON lines; first line is stream header with `stream=start`, `device_context`; exit 0 or 124 (timeout) | | |
+| 7.1 | Input watch starts          | `timeout 10 evb-relay input watch --robot 2>/dev/null \| head -3` | NDJSON lines; first line is the stream header with `stream="events"` and `device_context`; exit 0 or 124 (timeout) | | |
 | 7.2 | Relay event in stream       | Start `evb-relay input watch --robot` in background, toggle a relay, capture output | `relay_changed` event appears with relay group, id, state | | |
-| 7.3 | Heartbeat received          | `timeout 35 evb-relay input watch --robot 2>/dev/null` | At least one heartbeat line within 30s | | |
-| 7.4 | SSE via REST                | `timeout 5 curl -s -N -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/events \| head -5` | SSE format: lines starting with `event:` and `data:` | | |
+| 7.3 | Idle stream survives heartbeat window | `timeout 35 evb-relay input watch --robot 2>/dev/null` | Stream stays connected until timeout without a fatal CLI error; the CLI may emit only the header because SSE heartbeat comments are not surfaced as NDJSON events | | |
+| 7.4 | SSE via REST                | `timeout 5 curl -s -N -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/events \| head -5` | SSE framing is visible; expect at least the initial `:connected` comment, and `event:` / `data:` pairs if a device event occurs during capture | | |
 | 7.5 | Multiple SSE clients        | Open 2 concurrent curl SSE connections, toggle relay | Both clients receive the event | | |
 
 ---
@@ -339,8 +339,8 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 
 | #   | Test                        | Command | Expected | Result | Notes |
 |-----|-----------------------------|---------|----------|--------|-------|
-| 17.1 | Start event stream         | `timeout 15 evb-relay input watch --robot 2>/dev/null` | Stream starts | | |
-| 17.2 | Press button               | Physically press button on ESP32-EVB | `button` event appears in stream | | |
+| 17.1 | Start event stream         | `timeout 15 evb-relay input watch --robot 2>/dev/null` | Stream starts and emits the initial NDJSON header | | |
+| 17.2 | Press button               | Physically press button on ESP32-EVB | `button` event appears in the stream with a `pressed` boolean and `ts_ms` | | |
 
 ---
 
