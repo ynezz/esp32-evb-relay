@@ -87,14 +87,25 @@ class _FakeSerialManager:
         return self._DisableRedirectThread()
 
 
-class _UnexpectedProcUse:
-    def __getattr__(self, name: str):
-        raise AssertionError(f"runner unexpectedly used dut.serial.proc.{name}")
+class _FakeSharedSerialProc:
+    def __init__(self) -> None:
+        self.is_open = True
+        self.close_calls = 0
+        self.open_calls = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
+        self.is_open = False
+
+    def open(self) -> None:
+        self.open_calls += 1
+        self.is_open = True
 
 
 class _FakeRunnerDut:
     def __init__(self) -> None:
-        self.serial = _FakeSerialManager(_UnexpectedProcUse())
+        self.shared_serial = _FakeSharedSerialProc()
+        self.serial = _FakeSerialManager(self.shared_serial)
         self.test_menu = [SimpleNamespace(index=1, name="foo")]
         self.recorded_cases: list[dict[str, object]] = []
         self.app = SimpleNamespace(app_path="/tmp/fake-app")
@@ -178,6 +189,9 @@ def test_run_all_cases_via_serial_uses_owned_serial_port() -> None:
     assert dut.recorded_cases[0]["name"] == "foo"
     assert dut.recorded_cases[0]["result"] == "PASS"
     assert owned_serial.writes == [b"\n", b"1\n"]
+    assert dut.shared_serial.close_calls == 1
+    assert dut.shared_serial.open_calls == 1
+    assert dut.shared_serial.is_open is True
 
 
 def test_recover_case_input_prompt_reopens_menu_after_boot_prompt() -> None:

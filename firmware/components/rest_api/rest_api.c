@@ -111,7 +111,6 @@ typedef struct {
     SemaphoreHandle_t lock;
     TaskHandle_t dispatch_task;
     esp_event_handler_instance_t event_handler;
-    size_t pending_async_completions;
     rest_api_sse_client_t clients[REST_API_SSE_MAX_CLIENTS];
 } rest_api_sse_state_t;
 
@@ -892,45 +891,9 @@ static void rest_api_sse_release_client_slot(rest_api_sse_client_t *client)
 
 static void rest_api_sse_release_disconnected_client_slot(rest_api_sse_client_t *client)
 {
-    QueueHandle_t queue = NULL;
-    httpd_req_t *req = NULL;
-
-    if (client == NULL) {
-        return;
-    }
-
-    if (!rest_api_sse_lock()) {
-        rest_api_sse_release_client_slot(client);
-        return;
-    }
-
-    if (!client->active) {
-        rest_api_sse_unlock();
-        return;
-    }
-
-    queue = client->queue;
-    req = client->req;
-    if (req != NULL) {
-        ++s_sse_state.pending_async_completions;
-    }
-    rest_api_sse_reset_client(client);
-    rest_api_sse_unlock();
-
-    if (queue != NULL) {
-        vQueueDelete(queue);
-    }
-
-    if (req != NULL) {
-        rest_api_sse_complete_async_request(req);
-
-        if (rest_api_sse_lock()) {
-            if (s_sse_state.pending_async_completions > 0U) {
-                --s_sse_state.pending_async_completions;
-            }
-            rest_api_sse_unlock();
-        }
-    }
+    /* Keep the client visible until async completion returns so shutdown can
+     * still force-release the task if completion stalls. */
+    rest_api_sse_release_client_slot(client);
 }
 
 static void rest_api_sse_force_release_client_slot(rest_api_sse_client_t *client)
@@ -1388,7 +1351,6 @@ static void rest_api_sse_stop(void)
 
     for (uint8_t attempt = 0U; attempt < 15U; ++attempt) {
         bool any_active = false;
-        bool completion_pending = false;
 
         if (rest_api_sse_lock()) {
             for (size_t index = 0; index < REST_API_SSE_MAX_CLIENTS; ++index) {
@@ -1397,11 +1359,10 @@ static void rest_api_sse_stop(void)
                     break;
                 }
             }
-            completion_pending = s_sse_state.pending_async_completions > 0U;
             rest_api_sse_unlock();
         }
 
-        if (!any_active && !completion_pending) {
+        if (!any_active) {
             break;
         }
 
