@@ -158,6 +158,61 @@ static void test_rest_api_sse_release_client_lifetime_keeps_slot_active_until_co
     TEST_ASSERT_EQUAL_INT(REST_API_SSE_INVALID_SOCKFD, client.sockfd);
 }
 
+static void test_rest_api_sse_release_startup_lifetime_keeps_slot_active_until_completion(void)
+{
+    static const rest_api_sse_lifetime_hooks_t hooks = {
+        .lock = rest_api_sse_lifetime_test_lock,
+        .unlock = rest_api_sse_lifetime_test_unlock,
+        .delete_queue = rest_api_sse_lifetime_test_delete_queue,
+        .complete_async_request = rest_api_sse_lifetime_test_complete_async_request,
+    };
+    rest_api_sse_client_t client = {
+        .active = true,
+        .queue = (QueueHandle_t)0x11,
+        .req = (httpd_req_t *)0x22,
+        .sockfd = 5,
+    };
+
+    rest_api_sse_lifetime_test_reset(&client);
+    rest_api_sse_release_startup_client_lifetime(&client, NULL, &hooks);
+
+    TEST_ASSERT_EQUAL_UINT32(2U, s_sse_lifetime_test_ctx.event_count);
+    TEST_ASSERT_EQUAL_INT(SSE_LIFETIME_EVENT_DELETE_QUEUE, s_sse_lifetime_test_ctx.events[0]);
+    TEST_ASSERT_EQUAL_INT(SSE_LIFETIME_EVENT_COMPLETE_ASYNC_REQUEST, s_sse_lifetime_test_ctx.events[1]);
+    TEST_ASSERT_EQUAL_UINT32(2U, s_sse_lifetime_test_ctx.lock_count);
+    TEST_ASSERT_EQUAL_UINT32(2U, s_sse_lifetime_test_ctx.unlock_count);
+    TEST_ASSERT_FALSE(client.active);
+    TEST_ASSERT_NULL(client.queue);
+    TEST_ASSERT_NULL(client.req);
+    TEST_ASSERT_EQUAL_INT(REST_API_SSE_INVALID_SOCKFD, client.sockfd);
+}
+
+static void test_rest_api_sse_release_startup_lifetime_uses_fallback_async_request(void)
+{
+    static const rest_api_sse_lifetime_hooks_t hooks = {
+        .lock = rest_api_sse_lifetime_test_lock,
+        .unlock = rest_api_sse_lifetime_test_unlock,
+        .complete_async_request = rest_api_sse_lifetime_test_complete_async_request,
+    };
+    httpd_req_t *fallback_req = (httpd_req_t *)0x44;
+    rest_api_sse_client_t client = {
+        .active = true,
+        .sockfd = 6,
+    };
+
+    rest_api_sse_lifetime_test_reset(&client);
+    rest_api_sse_release_startup_client_lifetime(&client, fallback_req, &hooks);
+
+    TEST_ASSERT_EQUAL_UINT32(1U, s_sse_lifetime_test_ctx.event_count);
+    TEST_ASSERT_EQUAL_INT(SSE_LIFETIME_EVENT_COMPLETE_ASYNC_REQUEST, s_sse_lifetime_test_ctx.events[0]);
+    TEST_ASSERT_EQUAL_UINT32(2U, s_sse_lifetime_test_ctx.lock_count);
+    TEST_ASSERT_EQUAL_UINT32(2U, s_sse_lifetime_test_ctx.unlock_count);
+    TEST_ASSERT_FALSE(client.active);
+    TEST_ASSERT_NULL(client.queue);
+    TEST_ASSERT_NULL(client.req);
+    TEST_ASSERT_EQUAL_INT(REST_API_SSE_INVALID_SOCKFD, client.sockfd);
+}
+
 static void test_rest_api_sse_force_release_deletes_foreign_task_before_completion(void)
 {
     static const rest_api_sse_lifetime_hooks_t hooks = {
@@ -330,6 +385,8 @@ void test_rest_api_suite(void)
 {
     RUN_TEST(test_rest_api_sse_reset_client_uses_invalid_sockfd_sentinel);
     RUN_TEST(test_rest_api_sse_release_client_lifetime_keeps_slot_active_until_completion);
+    RUN_TEST(test_rest_api_sse_release_startup_lifetime_keeps_slot_active_until_completion);
+    RUN_TEST(test_rest_api_sse_release_startup_lifetime_uses_fallback_async_request);
     RUN_TEST(test_rest_api_sse_force_release_deletes_foreign_task_before_completion);
     RUN_TEST(test_rest_api_sse_force_release_skips_delete_for_current_task);
     RUN_TEST(test_rest_api_modio_sync_from_driver_maps_absent);

@@ -30,6 +30,9 @@ typedef struct {
 } rest_api_sse_lifetime_hooks_t;
 
 void rest_api_sse_reset_client(rest_api_sse_client_t *client);
+void rest_api_sse_release_startup_client_lifetime(rest_api_sse_client_t *client,
+                                                  httpd_req_t *req,
+                                                  const rest_api_sse_lifetime_hooks_t *hooks);
 void rest_api_sse_release_client_lifetime(rest_api_sse_client_t *client,
                                           const rest_api_sse_lifetime_hooks_t *hooks);
 void rest_api_sse_force_release_client_lifetime(rest_api_sse_client_t *client,

@@ -868,28 +868,6 @@ static void rest_api_sse_force_release_client_slot(rest_api_sse_client_t *client
     rest_api_sse_force_release_client_lifetime(client, &hooks);
 }
 
-static void rest_api_sse_clear_client_slot(rest_api_sse_client_t *client)
-{
-    QueueHandle_t queue = NULL;
-
-    if (client == NULL) {
-        return;
-    }
-
-    if (rest_api_sse_lock()) {
-        queue = client->queue;
-        rest_api_sse_reset_client(client);
-        rest_api_sse_unlock();
-    } else {
-        queue = client->queue;
-        rest_api_sse_reset_client(client);
-    }
-
-    if (queue != NULL) {
-        vQueueDelete(queue);
-    }
-}
-
 static void rest_api_sse_send_terminal_chunk(httpd_req_t *req)
 {
     if (req != NULL) {
@@ -902,6 +880,18 @@ static void rest_api_sse_complete_async_request(httpd_req_t *req)
     if (req != NULL) {
         (void)httpd_req_async_handler_complete(req);
     }
+}
+
+static void rest_api_sse_release_startup_client_slot(rest_api_sse_client_t *client, httpd_req_t *req)
+{
+    static const rest_api_sse_lifetime_hooks_t hooks = {
+        .lock = rest_api_sse_lock,
+        .unlock = rest_api_sse_unlock,
+        .delete_queue = vQueueDelete,
+        .complete_async_request = rest_api_sse_complete_async_request,
+    };
+
+    rest_api_sse_release_startup_client_lifetime(client, req, &hooks);
 }
 
 static esp_err_t rest_api_sse_send_async_error_and_complete(httpd_req_t *async_req,
@@ -1119,11 +1109,13 @@ static esp_err_t rest_api_events_handler(httpd_req_t *req)
 
     client->queue = xQueueCreate(REST_API_SSE_CLIENT_QUEUE_LENGTH, sizeof(rest_api_sse_message_t));
     if (client->queue == NULL) {
-        rest_api_sse_clear_client_slot(client);
-        return rest_api_sse_send_async_error_and_complete(async_req,
-                                                          503,
-                                                          "SSE_UNAVAILABLE",
-                                                          "Failed to allocate event stream buffers");
+        err = rest_api_send_error(async_req,
+                                  503,
+                                  "SSE_UNAVAILABLE",
+                                  "Failed to allocate event stream buffers",
+                                  true);
+        rest_api_sse_release_startup_client_slot(client, async_req);
+        return err;
     }
 
     client->req = async_req;
@@ -1145,11 +1137,13 @@ static esp_err_t rest_api_events_handler(httpd_req_t *req)
     }
 
     if (task_result != pdPASS) {
-        rest_api_sse_clear_client_slot(client);
-        return rest_api_sse_send_async_error_and_complete(async_req,
-                                                          503,
-                                                          "SSE_UNAVAILABLE",
-                                                          "Failed to start event stream task");
+        err = rest_api_send_error(async_req,
+                                  503,
+                                  "SSE_UNAVAILABLE",
+                                  "Failed to start event stream task",
+                                  true);
+        rest_api_sse_release_startup_client_slot(client, async_req);
+        return err;
     }
 
     return ESP_OK;

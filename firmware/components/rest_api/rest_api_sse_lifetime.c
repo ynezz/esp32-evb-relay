@@ -38,6 +38,39 @@ static void rest_api_sse_lifetime_clear_client(rest_api_sse_client_t *client,
     rest_api_sse_lifetime_unlock(hooks, locked);
 }
 
+void rest_api_sse_release_startup_client_lifetime(rest_api_sse_client_t *client,
+                                                  httpd_req_t *req,
+                                                  const rest_api_sse_lifetime_hooks_t *hooks)
+{
+    QueueHandle_t queue = NULL;
+    httpd_req_t *owned_req = NULL;
+    bool locked;
+
+    if ((client == NULL) || (hooks == NULL)) {
+        return;
+    }
+
+    locked = rest_api_sse_lifetime_lock(hooks);
+    queue = client->queue;
+    owned_req = (client->req != NULL) ? client->req : req;
+    client->queue = NULL;
+    client->req = NULL;
+    rest_api_sse_lifetime_unlock(hooks, locked);
+
+    if ((queue != NULL) && (hooks->delete_queue != NULL)) {
+        hooks->delete_queue(queue);
+    }
+
+    /* Startup failures never hand ownership to a client task, but the slot
+     * must stay active until async completion returns so stop-side polling
+     * cannot observe a cleared slot while ESP-IDF still owns the request. */
+    if ((owned_req != NULL) && (hooks->complete_async_request != NULL)) {
+        hooks->complete_async_request(owned_req);
+    }
+
+    rest_api_sse_lifetime_clear_client(client, hooks);
+}
+
 void rest_api_sse_release_client_lifetime(rest_api_sse_client_t *client,
                                           const rest_api_sse_lifetime_hooks_t *hooks)
 {
