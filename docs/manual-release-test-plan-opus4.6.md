@@ -219,8 +219,8 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | 10.6 | Valid token: device headers | `curl -s -D- -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/status 2>/dev/null \| grep -c 'X-FW-Version'` | `1` (header present) | | |
 | 10.7 | X-ModIO-Present header     | `curl -s -D- -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/status 2>/dev/null \| grep -i 'X-ModIO-Present'` | Header present with value `true` or `false` | | |
 | 10.8 | X-ModIO-Sync header        | `curl -s -D- -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/status 2>/dev/null \| grep -i 'X-ModIO-Sync'` | Header present with value `absent`, `unknown`, or `synchronized` | | |
-| 10.9 | CLI without token          | `evb-relay --api-token "" status 2>&1; echo "exit:$?"` | Auth error; exit code 3 | | |
-| 10.10 | CLI with wrong token      | `EVB_RELAY_API_TOKEN="WRONG" evb-relay status 2>&1; echo "exit:$?"` | Auth error; exit code 3 | | |
+| 10.9 | CLI without token          | `status=0; output=$(evb-relay --api-token "" status 2>&1) || status=$?; printf '%s\nexit:%s\n' "$output" "$status"; test "$status" -eq 3` | Auth error; printed `exit:3`; overall shell exits 0 only if the CLI returned auth exit code 3 | | |
+| 10.10 | CLI with wrong token      | `status=0; output=$(EVB_RELAY_API_TOKEN="WRONG" evb-relay status 2>&1) || status=$?; printf '%s\nexit:%s\n' "$output" "$status"; test "$status" -eq 3` | Auth error; printed `exit:3`; overall shell exits 0 only if the CLI returned auth exit code 3 | | |
 | 10.11 | Auth error JSON body      | `curl -s -H "Authorization: Bearer WRONGTOKEN" http://$EVB_RELAY_HOST/api/v1/status` | JSON with error code `AUTH_FORBIDDEN` | | |
 
 ---
@@ -245,20 +245,20 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 
 | #   | Test                        | Command | Expected | Result | Notes |
 |-----|-----------------------------|---------|----------|--------|-------|
-| 12.1 | Invalid onboard relay ID   | `evb-relay relay on onboard:5 2>&1; echo "exit:$?"` | Error; exit code 5 (bad argument) | | |
-| 12.2 | Invalid onboard relay ID 0 | `evb-relay relay on onboard:0 2>&1; echo "exit:$?"` | Error; exit code 5 | | |
-| 12.3 | Invalid modio relay ID     | `evb-relay relay on modio:5 2>&1; echo "exit:$?"` | Error; exit code 5 | | |
-| 12.4 | Invalid input ID           | `evb-relay input digital 5 2>&1; echo "exit:$?"` | Error; exit code 5 | | |
-| 12.5 | Invalid input ID 0         | `evb-relay input analog 0 2>&1; echo "exit:$?"` | Error; exit code 5 | | |
-| 12.6 | Invalid group name         | `evb-relay relay on bogus:1 2>&1; echo "exit:$?"` | Error; exit code 5 | | |
+| 12.1 | Invalid onboard relay ID   | `status=0; evb-relay relay on onboard:5 >/dev/null 2>&1 || status=$?; printf 'exit:%s\n' "$status"; test "$status" -eq 5` | Printed `exit:5`; overall shell exits 0 only if the CLI returned bad-argument code 5 | | |
+| 12.2 | Invalid onboard relay ID 0 | `status=0; evb-relay relay on onboard:0 >/dev/null 2>&1 || status=$?; printf 'exit:%s\n' "$status"; test "$status" -eq 5` | Printed `exit:5`; overall shell exits 0 only if the CLI returned bad-argument code 5 | | |
+| 12.3 | Invalid modio relay ID     | `status=0; evb-relay relay on modio:5 >/dev/null 2>&1 || status=$?; printf 'exit:%s\n' "$status"; test "$status" -eq 5` | Printed `exit:5`; overall shell exits 0 only if the CLI returned bad-argument code 5 | | |
+| 12.4 | Invalid input ID           | `status=0; evb-relay input digital 5 >/dev/null 2>&1 || status=$?; printf 'exit:%s\n' "$status"; test "$status" -eq 5` | Printed `exit:5`; overall shell exits 0 only if the CLI returned bad-argument code 5 | | |
+| 12.5 | Invalid input ID 0         | `status=0; evb-relay input analog 0 >/dev/null 2>&1 || status=$?; printf 'exit:%s\n' "$status"; test "$status" -eq 5` | Printed `exit:5`; overall shell exits 0 only if the CLI returned bad-argument code 5 | | |
+| 12.6 | Invalid group name         | `status=0; evb-relay relay on bogus:1 >/dev/null 2>&1 || status=$?; printf 'exit:%s\n' "$status"; test "$status" -eq 5` | Printed `exit:5`; overall shell exits 0 only if the CLI returned bad-argument code 5 | | |
 | 12.7 | Invalid relay via REST     | `curl -s -i -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d '{"state":true}' http://$EVB_RELAY_HOST/api/v1/relays/onboard/9` | HTTP 404 plus JSON error code `RELAY_NOT_FOUND` | | |
 | 12.8 | Invalid input via REST     | `curl -s -i -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/inputs/digital/9` | HTTP 404 plus JSON error code `INPUT_NOT_FOUND` | | |
 | 12.9 | Missing JSON body (relay)  | `curl -s -o /dev/null -w '%{http_code}' -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/relays/onboard/1` | HTTP 400 | | |
 | 12.10 | Invalid JSON body         | `curl -s -o /dev/null -w '%{http_code}' -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d 'not-json' http://$EVB_RELAY_HOST/api/v1/relays/onboard/1` | HTTP 400 | | |
 | 12.11 | Unknown endpoint          | `curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/nonexistent` | HTTP 404 | | |
-| 12.12 | Network error (CLI)       | `EVB_RELAY_HOST=192.0.2.1 evb-relay status --timeout 2s 2>&1; echo "exit:$?"` | Network error; exit code 2 | | |
-| 12.13 | Mixed good/bad relay targets | `evb-relay relay set onboard:1=on bogus:1=on --format json 2>&1; echo "exit:$?"` | Rejected locally before any HTTP request; exit code 5, no device-side partial failure record is expected | | |
-| 12.14 | OTA with bad file         | `echo "garbage" > /tmp/bad-fw.bin && evb-relay ota flash /tmp/bad-fw.bin 2>&1; echo "exit:$?"` | Upload fails with a non-zero exit; verify the next `evb-relay status` still succeeds before continuing instead of assuming a reboot path | | |
+| 12.12 | Network error (CLI)       | `status=0; EVB_RELAY_HOST=192.0.2.1 evb-relay status --timeout 2s >/dev/null 2>&1 || status=$?; printf 'exit:%s\n' "$status"; test "$status" -eq 2` | Printed `exit:2`; overall shell exits 0 only if the CLI returned network-error code 2 | | |
+| 12.13 | Mixed good/bad relay targets | `status=0; evb-relay relay set onboard:1=on bogus:1=on --format json >/dev/null 2>&1 || status=$?; printf 'exit:%s\n' "$status"; test "$status" -eq 5` | Rejected locally before any HTTP request; printed `exit:5`; overall shell exits 0 only if the CLI returned bad-argument code 5 | | |
+| 12.14 | OTA with bad file         | `printf 'garbage\n' >/tmp/bad-fw.bin; ota_status=0; ota_output=$(evb-relay ota flash /tmp/bad-fw.bin 2>&1) || ota_status=$?; printf '%s\nexit:%s\n' "$ota_output" "$ota_status"; printf '%s' "$ota_output" \| grep -q 'INVALID_FIRMWARE_IMAGE'; test "$ota_status" -ne 0; evb-relay status --format json >/dev/null` | Output includes `INVALID_FIRMWARE_IMAGE`; OTA exits non-zero; the follow-up `status` still succeeds before the row passes | | |
 
 ---
 
@@ -272,8 +272,8 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 |-----|-----------------------------|---------|----------|--------|-------|
 | 13.1 | Disconnect MOD-IO          | Physically disconnect MOD-IO from UEXT | Device continues running | | |
 | 13.2 | Status shows absent        | `evb-relay status --format json \| jq '.status.modio'` | `present=false`, `sync=absent` | | |
-| 13.3 | MOD-IO relay → absent error | `evb-relay relay on modio:1 2>&1; echo "exit:$?"` | Error; expected `MODIO_NOT_PRESENT` / exit code 7, not state-error 6 | | |
-| 13.4 | MOD-IO input → absent error | `evb-relay input digital 2>&1; echo "exit:$?"` | Error; expected `MODIO_NOT_PRESENT` / exit code 7 rather than empty or stale cached data | | |
+| 13.3 | MOD-IO relay → absent error | `status=0; output=$(evb-relay relay on modio:1 2>&1) || status=$?; printf '%s\nexit:%s\n' "$output" "$status"; printf '%s' "$output" \| grep -q 'MODIO_NOT_PRESENT'; test "$status" -eq 7` | Output includes `MODIO_NOT_PRESENT`; printed `exit:7`; overall shell exits 0 only if the CLI returned hardware-unavailable code 7 rather than state-error 6 | | |
+| 13.4 | MOD-IO input → absent error | `status=0; output=$(evb-relay input digital 2>&1) || status=$?; printf '%s\nexit:%s\n' "$output" "$status"; printf '%s' "$output" \| grep -q 'MODIO_NOT_PRESENT'; test "$status" -eq 7` | Output includes `MODIO_NOT_PRESENT`; printed `exit:7`; overall shell exits 0 only if the CLI returned hardware-unavailable code 7 rather than empty or stale cached data | | |
 | 13.5 | Onboard relays still work  | `evb-relay relay toggle onboard:1 --format json` | Works normally; exit 0 | | |
 | 13.6 | REST modio → 503           | `curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -X PUT -H "Content-Type: application/json" -d '{"state":true}' http://$EVB_RELAY_HOST/api/v1/relays/modio/1` | HTTP 503 (service unavailable) | | |
 | 13.7 | Relay list (degraded)      | `evb-relay relay list --format json` | `modio_present=false`; only onboard relays are listed because the combined relay API omits absent MOD-IO relays | | |
@@ -298,7 +298,7 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | 14.6 | Set MOD-IO relays ON       | `evb-relay relay set modio:1=on modio:2=on modio:3=on modio:4=on` | All ON; exit 0 | | |
 | 14.7 | Reboot device              | Power cycle or OTA reboot | Device comes back online | | |
 | 14.8 | Verify leave_unchanged     | `evb-relay relay list --format json` | `modio_sync=unknown` after reboot; do not require the API to report the pre-reboot ON mask, because firmware intentionally discards MOD-IO relay cache until a new full-mask write re-establishes synchronization | | |
-| 14.9 | Single relay blocked while sync is unknown | `evb-relay relay on modio:1 2>&1; echo "exit:$?"` | Error; expected `MODIO_STATE_UNKNOWN` / exit code 6 until a full-mask write succeeds | | |
+| 14.9 | Single relay blocked while sync is unknown | `status=0; output=$(evb-relay relay on modio:1 2>&1) || status=$?; printf '%s\nexit:%s\n' "$output" "$status"; printf '%s' "$output" \| grep -q 'MODIO_STATE_UNKNOWN'; test "$status" -eq 6` | Output includes `MODIO_STATE_UNKNOWN`; printed `exit:6`; overall shell exits 0 only if the CLI returned state-error code 6 until a full-mask write succeeds | | |
 | 14.10 | Cleanup and re-synchronize | `evb-relay relay set modio:1=off modio:2=off modio:3=off modio:4=off --format json` | All OFF; `all_ok=true`; each MOD-IO result reports `sync=synchronized` | | |
 | 14.11 | Restore default policy    | `evb-relay config set modio_boot_policy=leave_unchanged` | Accepted | | |
 
