@@ -110,6 +110,21 @@ static TaskHandle_t rest_api_sse_lifetime_test_current_task_handle(void)
     return s_sse_lifetime_test_ctx.current_task;
 }
 
+static void test_rest_api_sse_reset_client_uses_invalid_sockfd_sentinel(void)
+{
+    rest_api_sse_client_t client;
+
+    memset(&client, 0xA5, sizeof(client));
+    rest_api_sse_reset_client(&client);
+
+    TEST_ASSERT_FALSE(client.active);
+    TEST_ASSERT_FALSE(client.close_requested);
+    TEST_ASSERT_NULL(client.queue);
+    TEST_ASSERT_NULL(client.task_handle);
+    TEST_ASSERT_NULL(client.req);
+    TEST_ASSERT_EQUAL_INT(REST_API_SSE_INVALID_SOCKFD, client.sockfd);
+}
+
 static void test_rest_api_sse_release_client_lifetime_keeps_slot_active_until_completion(void)
 {
     static const rest_api_sse_lifetime_hooks_t hooks = {
@@ -140,7 +155,7 @@ static void test_rest_api_sse_release_client_lifetime_keeps_slot_active_until_co
     TEST_ASSERT_NULL(client.queue);
     TEST_ASSERT_NULL(client.req);
     TEST_ASSERT_NULL(client.task_handle);
-    TEST_ASSERT_EQUAL_INT(0, client.sockfd);
+    TEST_ASSERT_EQUAL_INT(REST_API_SSE_INVALID_SOCKFD, client.sockfd);
 }
 
 static void test_rest_api_sse_force_release_deletes_foreign_task_before_completion(void)
@@ -174,7 +189,7 @@ static void test_rest_api_sse_force_release_deletes_foreign_task_before_completi
     TEST_ASSERT_NULL(client.queue);
     TEST_ASSERT_NULL(client.req);
     TEST_ASSERT_NULL(client.task_handle);
-    TEST_ASSERT_EQUAL_INT(0, client.sockfd);
+    TEST_ASSERT_EQUAL_INT(REST_API_SSE_INVALID_SOCKFD, client.sockfd);
 }
 
 static void test_rest_api_sse_force_release_skips_delete_for_current_task(void)
@@ -208,7 +223,7 @@ static void test_rest_api_sse_force_release_skips_delete_for_current_task(void)
     TEST_ASSERT_NULL(client.queue);
     TEST_ASSERT_NULL(client.req);
     TEST_ASSERT_NULL(client.task_handle);
-    TEST_ASSERT_EQUAL_INT(0, client.sockfd);
+    TEST_ASSERT_EQUAL_INT(REST_API_SSE_INVALID_SOCKFD, client.sockfd);
 }
 
 static void test_rest_api_modio_sync_from_driver_maps_absent(void)
@@ -313,6 +328,7 @@ static void test_rest_api_request_recv_exact_returns_failure_for_socket_errors(v
 
 void test_rest_api_suite(void)
 {
+    RUN_TEST(test_rest_api_sse_reset_client_uses_invalid_sockfd_sentinel);
     RUN_TEST(test_rest_api_sse_release_client_lifetime_keeps_slot_active_until_completion);
     RUN_TEST(test_rest_api_sse_force_release_deletes_foreign_task_before_completion);
     RUN_TEST(test_rest_api_sse_force_release_skips_delete_for_current_task);

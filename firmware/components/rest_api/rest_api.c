@@ -878,12 +878,11 @@ static void rest_api_sse_clear_client_slot(rest_api_sse_client_t *client)
 
     if (rest_api_sse_lock()) {
         queue = client->queue;
-        memset(client, 0, sizeof(*client));
-        client->sockfd = 0;
+        rest_api_sse_reset_client(client);
         rest_api_sse_unlock();
     } else {
         queue = client->queue;
-        memset(client, 0, sizeof(*client));
+        rest_api_sse_reset_client(client);
     }
 
     if (queue != NULL) {
@@ -1103,7 +1102,7 @@ static esp_err_t rest_api_events_handler(httpd_req_t *req)
     for (size_t index = 0; index < REST_API_SSE_MAX_CLIENTS; ++index) {
         if (!s_sse_state.clients[index].active) {
             client = &s_sse_state.clients[index];
-            memset(client, 0, sizeof(*client));
+            rest_api_sse_reset_client(client);
             client->active = true;
             client->status = status;
             break;

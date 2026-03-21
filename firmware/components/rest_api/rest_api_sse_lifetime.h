@@ -7,6 +7,8 @@
 #include "freertos/task.h"
 #include "rest_api.h"
 
+#define REST_API_SSE_INVALID_SOCKFD (-1)
+
 typedef struct {
     bool active;
     bool close_requested;
@@ -27,6 +29,7 @@ typedef struct {
     TaskHandle_t (*current_task_handle)(void);
 } rest_api_sse_lifetime_hooks_t;
 
+void rest_api_sse_reset_client(rest_api_sse_client_t *client);
 void rest_api_sse_release_client_lifetime(rest_api_sse_client_t *client,
                                           const rest_api_sse_lifetime_hooks_t *hooks);
 void rest_api_sse_force_release_client_lifetime(rest_api_sse_client_t *client,

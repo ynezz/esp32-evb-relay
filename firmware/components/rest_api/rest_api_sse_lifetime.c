@@ -2,6 +2,16 @@
 
 #include <string.h>
 
+void rest_api_sse_reset_client(rest_api_sse_client_t *client)
+{
+    if (client == NULL) {
+        return;
+    }
+
+    memset(client, 0, sizeof(*client));
+    client->sockfd = REST_API_SSE_INVALID_SOCKFD;
+}
+
 static bool rest_api_sse_lifetime_lock(const rest_api_sse_lifetime_hooks_t *hooks)
 {
     return (hooks != NULL) && (hooks->lock != NULL) && hooks->lock();
@@ -24,8 +34,7 @@ static void rest_api_sse_lifetime_clear_client(rest_api_sse_client_t *client,
     }
 
     locked = rest_api_sse_lifetime_lock(hooks);
-    memset(client, 0, sizeof(*client));
-    client->sockfd = 0;
+    rest_api_sse_reset_client(client);
     rest_api_sse_lifetime_unlock(hooks, locked);
 }
 
