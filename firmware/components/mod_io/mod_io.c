@@ -147,18 +147,6 @@ static void mod_io_publish_change_events(uint8_t changed_mask, uint8_t relay_mas
     }
 }
 
-static bool mod_io_probe_error_is_absent(esp_err_t err)
-{
-    switch (err) {
-    case ESP_ERR_NOT_FOUND:
-    case ESP_ERR_TIMEOUT:
-    case ESP_ERR_INVALID_STATE:
-        return true;
-    default:
-        return false;
-    }
-}
-
 static bool mod_io_probe_error_needs_backoff(esp_err_t err)
 {
     switch (err) {
@@ -273,7 +261,7 @@ static esp_err_t mod_io_probe_locked(void)
     }
 
     err = mod_io_probe_hardware_locked();
-    if (mod_io_probe_error_is_absent(err)) {
+    if ((err == ESP_ERR_NOT_FOUND) || (err == ESP_ERR_TIMEOUT) || (err == ESP_ERR_INVALID_STATE)) {
         return ESP_ERR_NOT_FOUND;
     }
 
@@ -413,8 +401,18 @@ esp_err_t mod_io_probe(void)
     esp_err_t err;
 
     ESP_RETURN_ON_ERROR(mod_io_lock(), TAG, "Failed to lock MOD-IO state");
-    err = mod_io_probe_locked();
+    if (!s_state.initialized) {
+        mod_io_unlock();
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    err = mod_io_probe_hardware_locked();
     mod_io_unlock();
+
+    if ((err == ESP_ERR_NOT_FOUND) || (err == ESP_ERR_TIMEOUT) || (err == ESP_ERR_INVALID_STATE)) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
     return err;
 }
 

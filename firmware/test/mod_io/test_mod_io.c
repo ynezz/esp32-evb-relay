@@ -138,7 +138,7 @@ static void test_mod_io_init_treats_probe_timeouts_as_absent(void)
     assert_status(false, MOD_IO_RELAY_SYNC_ABSENT, 0x00U);
 }
 
-static void test_mod_io_probe_retries_after_backoff_window(void)
+static void test_mod_io_probe_bypasses_internal_backoff_window(void)
 {
     esp_stub_set_time_us(0);
     i2c_stub_set_transmit_receive_result(ESP_ERR_TIMEOUT);
@@ -148,12 +148,43 @@ static void test_mod_io_probe_retries_after_backoff_window(void)
 
     i2c_stub_set_transmit_receive_result(ESP_OK);
     set_read_data_u8(0x03U);
-    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, mod_io_probe());
+    TEST_ASSERT_EQUAL(ESP_OK, mod_io_probe());
+    assert_status(true, MOD_IO_RELAY_SYNC_SYNCHRONIZED, 0x03U);
+}
+
+static void test_mod_io_set_relays_waits_for_internal_backoff_window(void)
+{
+    const uint8_t expected_write[] = {0x10U, 0x01U};
+
+    esp_stub_set_time_us(0);
+    i2c_stub_set_transmit_receive_result(ESP_ERR_TIMEOUT);
+
+    TEST_ASSERT_EQUAL(ESP_OK, mod_io_init(test_bus_handle()));
+    assert_status(false, MOD_IO_RELAY_SYNC_ABSENT, 0x00U);
+
+    i2c_stub_set_transmit_receive_result(ESP_OK);
+    set_read_data_u8(0x03U);
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, mod_io_set_relays(0x01U));
     assert_status(false, MOD_IO_RELAY_SYNC_ABSENT, 0x00U);
 
     esp_stub_advance_time_us(5000000LL);
-    TEST_ASSERT_EQUAL(ESP_OK, mod_io_probe());
-    assert_status(true, MOD_IO_RELAY_SYNC_SYNCHRONIZED, 0x03U);
+    set_read_data_u8(0x03U);
+    TEST_ASSERT_EQUAL(ESP_OK, mod_io_set_relays(0x01U));
+    assert_last_transaction_equals(expected_write, sizeof(expected_write));
+    assert_status(true, MOD_IO_RELAY_SYNC_SYNCHRONIZED, 0x01U);
+}
+
+static void test_mod_io_set_relays_maps_internal_invalid_state_probe_to_absent(void)
+{
+    esp_stub_set_time_us(0);
+    i2c_stub_set_transmit_receive_result(ESP_ERR_INVALID_STATE);
+
+    TEST_ASSERT_EQUAL(ESP_OK, mod_io_init(test_bus_handle()));
+    assert_status(false, MOD_IO_RELAY_SYNC_ABSENT, 0x00U);
+
+    esp_stub_advance_time_us(5000000LL);
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, mod_io_set_relays(0x01U));
+    assert_status(false, MOD_IO_RELAY_SYNC_ABSENT, 0x00U);
 }
 
 static void test_mod_io_set_relays_validates_mask_and_round_trips_via_readback(void)
@@ -355,7 +386,9 @@ void test_mod_io_suite(void)
     RUN_TEST(test_mod_io_probe_keeps_absent_state_when_board_is_missing);
     RUN_TEST(test_mod_io_probe_keeps_absent_state_when_command_transmit_fails);
     RUN_TEST(test_mod_io_init_treats_probe_timeouts_as_absent);
-    RUN_TEST(test_mod_io_probe_retries_after_backoff_window);
+    RUN_TEST(test_mod_io_probe_bypasses_internal_backoff_window);
+    RUN_TEST(test_mod_io_set_relays_waits_for_internal_backoff_window);
+    RUN_TEST(test_mod_io_set_relays_maps_internal_invalid_state_probe_to_absent);
     RUN_TEST(test_mod_io_set_relays_validates_mask_and_round_trips_via_readback);
     RUN_TEST(test_mod_io_set_relays_publishes_event_for_changed_bit);
     RUN_TEST(test_mod_io_set_relay_validates_ids_and_uses_read_modify_write);
