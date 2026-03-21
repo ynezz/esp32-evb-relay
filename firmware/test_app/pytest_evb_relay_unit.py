@@ -75,6 +75,7 @@ class _FakeSerialManager:
         self.proc = proc
         self.port = "/dev/fake-esp32"
         self.baud = 115200
+        self.close_calls = 0
 
     class _DisableRedirectThread:
         def __enter__(self):
@@ -86,26 +87,13 @@ class _FakeSerialManager:
     def disable_redirect_thread(self):
         return self._DisableRedirectThread()
 
-
-class _FakeSharedSerialProc:
-    def __init__(self) -> None:
-        self.is_open = True
-        self.close_calls = 0
-        self.open_calls = 0
-
     def close(self) -> None:
         self.close_calls += 1
-        self.is_open = False
-
-    def open(self) -> None:
-        self.open_calls += 1
-        self.is_open = True
 
 
 class _FakeRunnerDut:
     def __init__(self) -> None:
-        self.shared_serial = _FakeSharedSerialProc()
-        self.serial = _FakeSerialManager(self.shared_serial)
+        self.serial = _FakeSerialManager(object())
         self.test_menu = [SimpleNamespace(index=1, name="foo")]
         self.recorded_cases: list[dict[str, object]] = []
         self.app = SimpleNamespace(app_path="/tmp/fake-app")
@@ -189,9 +177,7 @@ def test_run_all_cases_via_serial_uses_owned_serial_port() -> None:
     assert dut.recorded_cases[0]["name"] == "foo"
     assert dut.recorded_cases[0]["result"] == "PASS"
     assert owned_serial.writes == [b"\n", b"1\n"]
-    assert dut.shared_serial.close_calls == 1
-    assert dut.shared_serial.open_calls == 1
-    assert dut.shared_serial.is_open is True
+    assert dut.serial.close_calls == 1
 
 
 def test_recover_case_input_prompt_reopens_menu_after_boot_prompt() -> None:

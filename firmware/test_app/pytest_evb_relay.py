@@ -269,64 +269,57 @@ def _open_case_runner_serial(dut: Dut):
 
 
 def _run_all_cases_via_serial(dut: Dut, *, timeout: float, open_serial_port=_open_case_runner_serial) -> None:
-    with dut.serial.disable_redirect_thread():
-        shared_serial = dut.serial.proc
-        reopen_shared_serial = getattr(shared_serial, "is_open", True)
+    # Fully detach pytest-embedded from the UART before the owned runner
+    # takes over so late-suite reads cannot race against the shared serial.
+    dut.serial.close()
 
-        if reopen_shared_serial:
-            shared_serial.close()
+    with open_serial_port(dut) as ser:
 
-        try:
-            with open_serial_port(dut) as ser:
+        _serial_hard_reset(ser)
+        _serial_read_until(ser, timeout=20, predicate=lambda buffer: READY_PATTERN_BYTES[0] in buffer)
+        ser.write(b"\n")
+        _serial_read_until(ser, timeout=10, predicate=lambda buffer: MENU_END in buffer)
 
-                _serial_hard_reset(ser)
-                _serial_read_until(ser, timeout=20, predicate=lambda buffer: READY_PATTERN_BYTES[0] in buffer)
-                ser.write(b"\n")
-                _serial_read_until(ser, timeout=10, predicate=lambda buffer: MENU_END in buffer)
+        for case in dut.test_menu:
+            start_time = time.perf_counter()
+            print(f"START {case.index}: {case.name}", flush=True)
+            ser.reset_input_buffer()
+            ser.write(f"{case.index}\n".encode("utf-8"))
+            start_marker = f"Running {case.name}...".encode("utf-8")
 
-                for case in dut.test_menu:
-                    start_time = time.perf_counter()
-                    print(f"START {case.index}: {case.name}", flush=True)
-                    ser.reset_input_buffer()
-                    ser.write(f"{case.index}\n".encode("utf-8"))
-                    start_marker = f"Running {case.name}...".encode("utf-8")
+            try:
+                started = _serial_read_until(
+                    ser,
+                    timeout=10.0,
+                    predicate=lambda buffer, marker=start_marker: marker in buffer,
+                )
+                started = started[started.find(start_marker):]
+                raw = _serial_read_until(
+                    ser,
+                    timeout=timeout + 10.0,
+                    predicate=lambda buffer, case_name=case.name: _case_complete(buffer, case_name),
+                    initial_buffer=started,
+                )
+            except _SerialCaseTimeout as exc:
+                raw = exc.buffer
 
-                    try:
-                        started = _serial_read_until(
-                            ser,
-                            timeout=10.0,
-                            predicate=lambda buffer, marker=start_marker: marker in buffer,
-                        )
-                        started = started[started.find(start_marker):]
-                        raw = _serial_read_until(
-                            ser,
-                            timeout=timeout + 10.0,
-                            predicate=lambda buffer, case_name=case.name: _case_complete(buffer, case_name),
-                            initial_buffer=started,
-                        )
-                    except _SerialCaseTimeout as exc:
-                        raw = exc.buffer
-
-                    raw = _collect_case_result_after_prompt(ser, case_name=case.name, initial_buffer=raw)
-                    log = remove_asci_color_code(raw)
-                    attrs = _extract_case_attrs(log, case.name)
-                    if attrs is None:
-                        attrs = _parse_unity_test_output(log, case.name, log[-2000:])
-                    attrs.update(
-                        {
-                            "app_path": dut.app.app_path,
-                            "time": round(time.perf_counter() - start_time, 3),
-                        }
-                    )
-                    dut._add_test_case_to_suite(attrs)
-                    try:
-                        _recover_case_input_prompt(ser, timeout=20.0, initial_buffer=raw)
-                    except _SerialCaseTimeout:
-                        pass
-                    print(f"END {case.index}: {case.name} -> {attrs.get('result', 'UNKNOWN')}", flush=True)
-        finally:
-            if reopen_shared_serial and not getattr(shared_serial, "is_open", False):
-                shared_serial.open()
+            raw = _collect_case_result_after_prompt(ser, case_name=case.name, initial_buffer=raw)
+            log = remove_asci_color_code(raw)
+            attrs = _extract_case_attrs(log, case.name)
+            if attrs is None:
+                attrs = _parse_unity_test_output(log, case.name, log[-2000:])
+            attrs.update(
+                {
+                    "app_path": dut.app.app_path,
+                    "time": round(time.perf_counter() - start_time, 3),
+                }
+            )
+            dut._add_test_case_to_suite(attrs)
+            try:
+                _recover_case_input_prompt(ser, timeout=20.0, initial_buffer=raw)
+            except _SerialCaseTimeout:
+                pass
+            print(f"END {case.index}: {case.name} -> {attrs.get('result', 'UNKNOWN')}", flush=True)
 
 
 @pytest.mark.esp32
