@@ -909,6 +909,11 @@ static void rest_api_sse_force_release_client_slot(rest_api_sse_client_t *client
         queue = client->queue;
         req = client->req;
         task_handle = client->task_handle;
+
+        if ((task_handle != NULL) && (task_handle != xTaskGetCurrentTaskHandle())) {
+            vTaskDelete(task_handle);
+        }
+
         client->queue = NULL;
         client->req = NULL;
         client->task_handle = NULL;
@@ -921,13 +926,14 @@ static void rest_api_sse_force_release_client_slot(rest_api_sse_client_t *client
         queue = client->queue;
         req = client->req;
         task_handle = client->task_handle;
+
+        if ((task_handle != NULL) && (task_handle != xTaskGetCurrentTaskHandle())) {
+            vTaskDelete(task_handle);
+        }
+
         client->queue = NULL;
         client->req = NULL;
         client->task_handle = NULL;
-    }
-
-    if ((task_handle != NULL) && (task_handle != xTaskGetCurrentTaskHandle())) {
-        vTaskDelete(task_handle);
     }
 
     if (queue != NULL) {
