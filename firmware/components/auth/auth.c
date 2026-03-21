@@ -28,22 +28,44 @@ static void auth_generate_token(char *buffer)
     buffer[sizeof(random_bytes) * 2U] = '\0';
 }
 
-static bool auth_constant_time_equals(const char *lhs, const char *rhs)
+static bool auth_constant_time_equals_with_iterations(const char *lhs,
+                                                      const char *rhs,
+                                                      size_t *out_iterations)
 {
     size_t lhs_len = strnlen(lhs, DEVICE_CONFIG_API_TOKEN_MAX_LEN + 1U);
     size_t rhs_len = strnlen(rhs, DEVICE_CONFIG_API_TOKEN_MAX_LEN + 1U);
-    size_t max_len = (lhs_len > rhs_len) ? lhs_len : rhs_len;
     unsigned diff = (unsigned)(lhs_len ^ rhs_len);
+    size_t iterations = 0U;
 
-    for (size_t i = 0; i < max_len; ++i) {
+    for (size_t i = 0; i < DEVICE_CONFIG_API_TOKEN_MAX_LEN; ++i) {
         unsigned char lhs_ch = (i < lhs_len) ? (unsigned char)lhs[i] : 0U;
         unsigned char rhs_ch = (i < rhs_len) ? (unsigned char)rhs[i] : 0U;
 
         diff |= (unsigned)(lhs_ch ^ rhs_ch);
+        ++iterations;
+    }
+
+    if (out_iterations != NULL) {
+        *out_iterations = iterations;
     }
 
     return diff == 0U;
 }
+
+static bool auth_constant_time_equals(const char *lhs, const char *rhs)
+{
+    return auth_constant_time_equals_with_iterations(lhs, rhs, NULL);
+}
+
+#if defined(UNIT_TEST) || defined(AUTH_ENABLE_TESTING_API)
+size_t auth_constant_time_compare_iterations_for_testing(const char *lhs, const char *rhs)
+{
+    size_t iterations = 0U;
+
+    (void)auth_constant_time_equals_with_iterations(lhs, rhs, &iterations);
+    return iterations;
+}
+#endif
 
 static const char *auth_extract_bearer_token(const char *header_value)
 {

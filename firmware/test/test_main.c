@@ -1,4 +1,5 @@
 #include "device_config.h"
+#include "auth.h"
 #include "board.h"
 #include "esp_event_stubs.h"
 #include "esp_idf_stubs.h"
@@ -21,6 +22,7 @@ void test_mod_io_suite(void);
 void test_ota_suite(void);
 void test_rest_api_suite(void);
 void test_relay_suite(void);
+void test_auth_suite(void);
 
 void setUp(void)
 {
@@ -50,6 +52,7 @@ int main(void)
     UNITY_BEGIN();
     test_board_suite();
     test_device_config_suite();
+    test_auth_suite();
     test_input_monitor_suite();
     test_mod_io_suite();
     test_ota_suite();

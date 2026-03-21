@@ -26,6 +26,7 @@ static const char *esp_stub_log_level_name(esp_log_level_t level)
 static bool s_time_override_enabled;
 static int64_t s_time_override_us;
 static size_t s_restart_count;
+static uint8_t s_next_random_byte;
 
 const char *esp_err_to_name(esp_err_t err)
 {
@@ -128,11 +129,21 @@ void esp_stub_advance_time_us(int64_t delta_us)
 void esp_stub_reset_restart_count(void)
 {
     s_restart_count = 0U;
+    s_next_random_byte = 0U;
 }
 
 size_t esp_stub_get_restart_count(void)
 {
     return s_restart_count;
+}
+
+void esp_fill_random(void *buffer, size_t length)
+{
+    uint8_t *bytes = buffer;
+
+    for (size_t i = 0; i < length; ++i) {
+        bytes[i] = s_next_random_byte++;
+    }
 }
 
 void esp_restart(void)

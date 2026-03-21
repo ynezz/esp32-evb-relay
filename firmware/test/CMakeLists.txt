@@ -28,6 +28,7 @@ target_include_directories(unity_host PUBLIC "${UNITY_DIR}/src")
 
 add_executable(host_tests
     "${TEST_DIR}/test_main.c"
+    "${TEST_DIR}/auth/test_auth.c"
     "${TEST_DIR}/board/test_board.c"
     "${TEST_DIR}/device_config/test_device_config.c"
     "${TEST_DIR}/input_monitor/test_input_monitor.c"
@@ -44,6 +45,7 @@ add_executable(host_tests
     "${TEST_DIR}/stubs/nvs_stubs.c"
     "${TEST_DIR}/stubs/esp_event_stubs.c"
     "${FIRMWARE_DIR}/components/board/board.c"
+    "${FIRMWARE_DIR}/components/auth/auth.c"
     "${FIRMWARE_DIR}/components/relay/relay.c"
     "${FIRMWARE_DIR}/components/mod_io/mod_io.c"
     "${FIRMWARE_DIR}/components/input_monitor/input_monitor.c"
@@ -56,6 +58,7 @@ add_executable(host_tests
 
 target_include_directories(host_tests PRIVATE
     "${STUBS_DIR}"
+    "${FIRMWARE_DIR}/components/auth/include"
     "${FIRMWARE_DIR}/components/board/include"
     "${FIRMWARE_DIR}/components/relay/include"
     "${FIRMWARE_DIR}/components/mod_io/include"
