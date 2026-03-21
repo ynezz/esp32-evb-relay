@@ -3,8 +3,10 @@ from types import SimpleNamespace
 from pytest_evb_relay import (
     CRASH_RECOVERY_TIMEOUT,
     _case_complete,
+    _collect_case_result_after_prompt,
     _install_fail_fast_case_analyzer,
     _recover_case_input_prompt,
+    _run_all_cases_via_serial,
     _serial_read_until,
 )
 
@@ -40,6 +42,9 @@ class _FakeSerial:
     def __init__(self, chunks: list[bytes] | None = None) -> None:
         self._chunks = list(chunks or [])
         self.writes: list[bytes] = []
+        self.dtr_values: list[bool] = []
+        self.rts_values: list[bool] = []
+        self.reset_input_buffer_calls = 0
 
     def read_all(self) -> bytes:
         if self._chunks:
@@ -48,6 +53,54 @@ class _FakeSerial:
 
     def write(self, data: bytes) -> None:
         self.writes.append(data)
+
+    def setDTR(self, value: bool) -> None:
+        self.dtr_values.append(value)
+
+    def setRTS(self, value: bool) -> None:
+        self.rts_values.append(value)
+
+    def reset_input_buffer(self) -> None:
+        self.reset_input_buffer_calls += 1
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
+
+class _FakeSerialManager:
+    def __init__(self, proc: object) -> None:
+        self.proc = proc
+        self.port = "/dev/fake-esp32"
+        self.baud = 115200
+
+    class _DisableRedirectThread:
+        def __enter__(self):
+            return True
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    def disable_redirect_thread(self):
+        return self._DisableRedirectThread()
+
+
+class _UnexpectedProcUse:
+    def __getattr__(self, name: str):
+        raise AssertionError(f"runner unexpectedly used dut.serial.proc.{name}")
+
+
+class _FakeRunnerDut:
+    def __init__(self) -> None:
+        self.serial = _FakeSerialManager(_UnexpectedProcUse())
+        self.test_menu = [SimpleNamespace(index=1, name="foo")]
+        self.recorded_cases: list[dict[str, object]] = []
+        self.app = SimpleNamespace(app_path="/tmp/fake-app")
+
+    def _add_test_case_to_suite(self, attrs: dict[str, object]) -> None:
+        self.recorded_cases.append(attrs)
 
 
 def test_serial_read_until_accepts_complete_initial_buffer() -> None:
@@ -68,6 +121,63 @@ def test_case_complete_stops_on_ready_prompt_without_unity_result() -> None:
         b"Running ota upload case...\r\nEnter next test, or 'enter' to see menu\r\n",
         "rest_api device accepts OTA uploads and switches the boot partition",
     )
+
+
+def test_collect_case_result_after_prompt_reads_trailing_unity_result() -> None:
+    serial = _FakeSerial(
+        [
+            b"./main/test_rest_api_device.c:1497:"
+            b"rest_api device fails closed when no status provider is configured:PASS\r\n"
+        ]
+    )
+
+    buffer = _collect_case_result_after_prompt(
+        serial,
+        case_name="rest_api device fails closed when no status provider is configured",
+        initial_buffer=(
+            b"Running rest_api device fails closed when no status provider is configured...\r\n"
+            b"Enter next test, or 'enter' to see menu\r\n"
+        ),
+        timeout=0.01,
+    )
+
+    assert b":PASS" in buffer
+
+
+def test_collect_case_result_after_prompt_keeps_initial_buffer_without_more_output() -> None:
+    serial = _FakeSerial()
+    initial = (
+        b"Running rest_api device fails closed when no status provider is configured...\r\n"
+        b"Enter next test, or 'enter' to see menu\r\n"
+    )
+
+    buffer = _collect_case_result_after_prompt(
+        serial,
+        case_name="rest_api device fails closed when no status provider is configured",
+        initial_buffer=initial,
+        timeout=0.01,
+    )
+
+    assert buffer == initial
+
+
+def test_run_all_cases_via_serial_uses_owned_serial_port() -> None:
+    dut = _FakeRunnerDut()
+    owned_serial = _FakeSerial(
+        [
+            b"Press ENTER to see the list of tests\r\n",
+            b"Here's the test menu, pick your combo:\r\n(1)\t\"foo\"\r\nEnter test for running.\r\n",
+            b"Running foo...\r\n./main/test_rest_api_device.c:1:foo:PASS\r\n",
+            b"Enter next test, or 'enter' to see menu\r\n",
+        ]
+    )
+
+    _run_all_cases_via_serial(dut, timeout=0.01, open_serial_port=lambda _dut: owned_serial)
+
+    assert len(dut.recorded_cases) == 1
+    assert dut.recorded_cases[0]["name"] == "foo"
+    assert dut.recorded_cases[0]["result"] == "PASS"
+    assert owned_serial.writes == [b"\n", b"1\n"]
 
 
 def test_recover_case_input_prompt_reopens_menu_after_boot_prompt() -> None:
