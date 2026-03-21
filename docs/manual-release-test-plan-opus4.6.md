@@ -49,8 +49,8 @@ becomes circular.
 
 ## Section 1 — Automated Quality Gates
 
-Run automated CI gates first. If these fail, stop and fix before
-proceeding to manual tests.
+Run automated CI gates first. If any of these fail, record the failure
+details and stop before proceeding to manual tests.
 
 | #   | Test                  | Command           | Expected              | Result | Notes |
 |-----|-----------------------|-------------------|-----------------------|--------|-------|
@@ -159,7 +159,7 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 
 | #   | Test                        | Command | Expected | Result | Notes |
 |-----|-----------------------------|---------|----------|--------|-------|
-| 7.1 | Input watch starts          | `timeout 10 evb-relay input watch --robot 2>/dev/null \| head -3` | NDJSON lines; first line is the stream header with `stream="events"` and `device_context`; exit 0 or 124 (timeout) | | |
+| 7.1 | Input watch starts          | `timeout 10 evb-relay input watch --robot 2>/dev/null \| head -3` | At least the initial NDJSON header is emitted; the first line has `stream="events"` and `device_context`; with default shell pipeline semantics this command should exit 0 | | |
 | 7.2 | Relay event in stream       | Start `evb-relay input watch --robot` in background, toggle a relay, capture output | `relay_changed` event appears with relay group, id, state | | |
 | 7.3 | Idle stream survives heartbeat window | `timeout 35 evb-relay input watch --robot 2>/dev/null` | Stream stays connected until timeout without a fatal CLI error; the CLI may emit only the header because SSE heartbeat comments are not surfaced as NDJSON events | | |
 | 7.4 | SSE via REST                | `timeout 5 curl -sfS -N -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/events \| head -5` | SSE framing is visible; expect at least the initial `:connected` comment, and `event:` / `data:` pairs if a device event occurs during capture | | |
@@ -219,7 +219,7 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | 10.6 | Valid token: device headers | `curl -s -D- -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/status 2>/dev/null \| grep -c 'X-FW-Version'` | `1` (header present) | | |
 | 10.7 | X-ModIO-Present header     | `curl -s -D- -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/status 2>/dev/null \| grep -i 'X-ModIO-Present'` | Header present with value `true` or `false` | | |
 | 10.8 | X-ModIO-Sync header        | `curl -s -D- -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/status 2>/dev/null \| grep -i 'X-ModIO-Sync'` | Header present with value `absent`, `unknown`, or `synchronized` | | |
-| 10.9 | CLI without token          | `EVB_RELAY_API_TOKEN="" evb-relay status 2>&1; echo "exit:$?"` | Auth error; exit code 3 | | |
+| 10.9 | CLI without token          | `evb-relay --api-token "" status 2>&1; echo "exit:$?"` | Auth error; exit code 3 | | |
 | 10.10 | CLI with wrong token      | `EVB_RELAY_API_TOKEN="WRONG" evb-relay status 2>&1; echo "exit:$?"` | Auth error; exit code 3 | | |
 | 10.11 | Auth error JSON body      | `curl -s -H "Authorization: Bearer WRONGTOKEN" http://$EVB_RELAY_HOST/api/v1/status` | JSON with error code `AUTH_FORBIDDEN` | | |
 
@@ -387,8 +387,8 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 1. Fill in the **Test Run Metadata** table before starting
 2. Execute each test in order; fill **Result** (`PASS` / `FAIL` /
    `SKIP`) and **Notes** (actual output, error messages, observations)
-3. If a test fails, record the failure details and continue — do not
-   stop the run
+3. If a manual test fails after Section 1 passes, record the failure
+   details and continue — do not stop the run
 4. Tests marked with physical actions (MOD-IO disconnect, button
    press) should be marked `SKIP` if the agent cannot perform them,
    with a note explaining why
