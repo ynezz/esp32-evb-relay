@@ -418,11 +418,11 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 |-------|----------------------------|---------|----------|--------|-------|
 | 14.1  | Set policy: all_off        | `evb-relay config set modio_boot_policy=all_off --format json` | Accepted; exit 0 |  |  |
 | 14.2  | Set MOD-IO relays ON       | `evb-relay relay set modio:1=on modio:2=on modio:3=on modio:4=on` | All ON; exit 0 |  |  |
-| 14.3  | Reboot device              | OTA reboot (reflash same firmware) | Device comes back online |  |  |
+| 14.3  | Reboot device              | `evb-relay ota flash firmware/build/evb_relay_firmware.bin --format json` | Device comes back online |  |  |
 | 14.4  | Verify all_off applied     | `evb-relay relay list --format json` | All MOD-IO relays OFF after boot |  |  |
 | 14.5  | Set policy: leave_unchanged | `evb-relay config set modio_boot_policy=leave_unchanged --format json` | Accepted; exit 0 |  |  |
 | 14.6  | Set MOD-IO relays ON       | `evb-relay relay set modio:1=on modio:2=on modio:3=on modio:4=on` | All ON; exit 0 |  |  |
-| 14.7  | Reboot device              | OTA reboot | Device comes back online |  |  |
+| 14.7  | Reboot device              | `evb-relay ota flash firmware/build/evb_relay_firmware.bin --format json` | Device comes back online |  |  |
 | 14.8  | Verify leave_unchanged     | `evb-relay relay list --format json` | MOD-IO relay state unchanged (ON) or `sync=unknown` |  |  |
 | 14.9  | Cleanup: all OFF           | `evb-relay relay set modio:1=off modio:2=off modio:3=off modio:4=off` | All OFF |  |  |
 | 14.10 | Restore default policy     | `evb-relay config set modio_boot_policy=leave_unchanged` | Accepted |  |  |
@@ -450,7 +450,7 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | #    | Test                       | Command | Expected | Result | Notes |
 |------|----------------------------|---------|----------|--------|-------|
 | 16.1 | Set distinctive values     | `evb-relay config set hostname=persist-test poll_interval_ms=250` | Accepted |  |  |
-| 16.2 | Reboot device              | OTA reboot | Device comes back online |  |  |
+| 16.2 | Reboot device              | `evb-relay ota flash firmware/build/evb_relay_firmware.bin --format json` | Device comes back online |  |  |
 | 16.3 | Verify hostname persisted  | `evb-relay config show --format json` | `persist-test` |  |  |
 | 16.4 | Verify poll_interval       | `evb-relay config show --format json` | `250` |  |  |
 | 16.5 | Restore defaults           | `evb-relay config set hostname=esp32-evb-relay poll_interval_ms=100` | Accepted |  |  |
