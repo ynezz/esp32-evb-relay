@@ -89,7 +89,7 @@ details and stop before proceeding to manual tests.
 | 3.3 | Status robot mode           | `evb-relay status --robot` | TOON envelope with `v`, `command`, `timestamp`, `elapsed_ms`, `exit_code`, `host`, `device_context`, `data.status` | | |
 | 3.4 | Status robot JSON           | `evb-relay status --robot --format json` | JSON envelope; same structure as 3.3, with the payload under `data.status` | | |
 | 3.5 | Status via REST             | `curl -sfS -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/status` | Valid JSON matching the CLI's inner `status` object; explicit header checks live in Section 10 | | |
-| 3.6 | Release version match       | Compare the semver from `evb-relay --version` with status `firmware_version` | Release version strings match; do not compare the CLI's extra commit/date text verbatim to the firmware field | | |
+| 3.6 | Release version match       | `cli_ver=$(evb-relay --version \| sed -n '1p'); fw_ver=$(evb-relay status --format json \| jq -r '.status.firmware_version'); printf 'cli_version=%s\nfirmware_version=%s\n' "$cli_ver" "$fw_ver"; test "$cli_ver" = "$fw_ver"` | Printed version strings match and the command exits 0; compare only the CLI semver line, not the extra commit/date text | | |
 
 ---
 
@@ -235,7 +235,7 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 |-----|-----------------------------|---------|----------|--------|-------|
 | 11.1 | Build RC binary            | `just build` | Binary at `firmware/build/evb_relay_firmware.bin` | | |
 | 11.2 | OTA flash                  | `evb-relay ota flash firmware/build/evb_relay_firmware.bin --format json` | `uploaded_bytes` > 0, `reboot_in_seconds` present; exit 0 | | |
-| 11.3 | Wait for reboot            | `sleep 10 && evb-relay status --format json` | Device responds and FW version matches RC; if the first post-reboot probe races DHCP or service startup, retry for up to ~30s before failing | | |
+| 11.3 | Wait for reboot            | `status_ok=0; sleep 10; for attempt in 1 2 3; do if evb-relay status --format json; then status_ok=1; break; fi; sleep 10; done; test "$status_ok" -eq 1` | Device responds and FW version matches RC; the command itself tolerates an initial post-reboot race with DHCP or service startup before failing | | |
 | 11.4 | Post-OTA relay test        | `evb-relay relay list --format json` | Relays accessible; exit 0 | | |
 | 11.5 | Post-OTA config persisted  | `evb-relay config show --format json` | Config values match pre-OTA settings | | |
 
