@@ -339,8 +339,8 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 
 | #   | Test                        | Command | Expected | Result | Notes |
 |-----|-----------------------------|---------|----------|--------|-------|
-| 17.1 | Start event stream         | `timeout 15 evb-relay input watch --robot 2>/dev/null` | Stream starts and emits the initial NDJSON header | | |
-| 17.2 | Press button               | Physically press button on ESP32-EVB | `button` event appears in the stream with a `pressed` boolean and `ts_ms` | | |
+| 17.1 | Start event capture        | `rm -f /tmp/evb-button-watch.ndjson && (timeout 15 evb-relay input watch --robot 2>/dev/null > /tmp/evb-button-watch.ndjson &) && sleep 1` | Capture file exists, the first line is the NDJSON stream header, and the background watch remains active long enough for 17.2 | | |
+| 17.2 | Press button               | Physically press button on ESP32-EVB while 17.1 is still running, then inspect `/tmp/evb-button-watch.ndjson` after the timeout exits | `button` event appears in the captured stream with a `pressed` boolean and `ts_ms` | | |
 
 ---
 
