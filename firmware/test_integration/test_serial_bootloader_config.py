@@ -208,6 +208,16 @@ def test_provision_script_disables_stub_for_parttool() -> None:
     assert '"${download_mode_check}" --port "${port}" --baud "${baud}"' in script_text
 
 
+def test_provision_script_preserves_wifi_and_network_policy_keys() -> None:
+    script_text = (_repo_root() / "scripts/provision.sh").read_text(encoding="utf-8")
+    preserve_match = re.search(r"for key in \((.*?)\):", script_text, re.DOTALL)
+
+    assert preserve_match is not None
+    preserved_keys = set(re.findall(r'"([^"]+)"', preserve_match.group(1)))
+    assert {"poll_ms", "hostname", "modio_policy"} <= preserved_keys
+    assert {"wifi_ssid", "wifi_pass", "net_policy"} <= preserved_keys
+
+
 def test_flash_script_runs_download_mode_preflight() -> None:
     script_text = (_repo_root() / "scripts/flash.sh").read_text(encoding="utf-8")
     assert 'download_mode_check="${repo_root}/scripts/check-download-mode.sh"' in script_text

@@ -193,7 +193,14 @@ with csv_path.open("w", newline="", encoding="utf-8") as handle:
     if mode != "clear":
         writer.writerow(["api_token", "data", "string", token])
 
-    for key in ("poll_ms", "hostname", "modio_policy"):
+    for key in (
+        "poll_ms",
+        "hostname",
+        "modio_policy",
+        "wifi_ssid",
+        "wifi_pass",
+        "net_policy",
+    ):
         if key in values:
             row_type, row_encoding = key_types[key]
             writer.writerow([key, row_type, row_encoding, values[key]])
