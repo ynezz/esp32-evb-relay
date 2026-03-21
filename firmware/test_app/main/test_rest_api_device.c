@@ -677,6 +677,16 @@ TEST_CASE("rest_api device exposes onboard relay endpoints", "[qa][rest_api][dev
     TEST_ASSERT_NOT_NULL(strstr(response, "\"group\":\"onboard\",\"id\":2,\"state\":false"));
 
     perform_http_request(test_port,
+                         "GET",
+                         "/api/v1/relays/onboard/1",
+                         NULL,
+                         NULL,
+                         response,
+                         sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"relay\":{\"group\":\"onboard\",\"id\":1,\"state\":false}"));
+
+    perform_http_request(test_port,
                          "PUT",
                          "/api/v1/relays/onboard/1",
                          NULL,
@@ -731,6 +741,34 @@ TEST_CASE("rest_api device returns relay errors with device headers after auth",
     TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"RELAY_NOT_FOUND\""));
     TEST_ASSERT_NULL(strstr(response, "HTTP/1.1 500 Internal Server Error"));
     TEST_ASSERT_NULL(strstr(response, "\"code\":\"RELAY_SET_FAILED\""));
+
+    perform_http_request(test_port,
+                         "GET",
+                         "/api/v1/relays/onboard/9",
+                         NULL,
+                         NULL,
+                         response,
+                         sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 404 Not Found"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-FW-Version: "));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Present: true"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Sync: synchronized"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"RELAY_NOT_FOUND\""));
+    TEST_ASSERT_NULL(strstr(response, "HTTP/1.1 405 Method Not Allowed"));
+
+    perform_http_request(test_port,
+                         "GET",
+                         "/api/v1/relays/modio/5",
+                         NULL,
+                         NULL,
+                         response,
+                         sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 404 Not Found"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-FW-Version: "));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Present: true"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Sync: synchronized"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"RELAY_NOT_FOUND\""));
+    TEST_ASSERT_NULL(strstr(response, "HTTP/1.1 405 Method Not Allowed"));
 }
 
 TEST_CASE("rest_api device exposes combined and MOD-IO relay endpoints",

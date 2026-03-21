@@ -46,7 +46,7 @@ static esp_err_t rest_api_send_error_with_status(httpd_req_t *req,
                                                  bool authenticated);
 
 #define REST_API_MAX_REQUEST_BODY_LEN 512U
-#define REST_API_URI_HANDLER_COUNT 18U
+#define REST_API_URI_HANDLER_COUNT 20U
 #define REST_API_SSE_MAX_CLIENTS 4U
 #define REST_API_SSE_DISPATCH_QUEUE_LENGTH 16U
 #define REST_API_SSE_CLIENT_QUEUE_LENGTH 8U
@@ -2621,6 +2621,30 @@ static esp_err_t rest_api_onboard_relays_handler(httpd_req_t *req)
     return rest_api_send_json_response(req, 200, root, &status, true);
 }
 
+static esp_err_t rest_api_onboard_relay_handler(httpd_req_t *req)
+{
+    rest_api_status_view_t status;
+    uint8_t relay_id = 0;
+    bool relay_state = false;
+    esp_err_t err;
+
+    if (!rest_api_require_authenticated_status(req, &status, &err)) {
+        return err;
+    }
+
+    err = rest_api_parse_onboard_relay_id(req, REST_API_ONBOARD_RELAY_ID_PREFIX, NULL, &relay_id);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = relay_get(relay_id, &relay_state);
+    if (err != ESP_OK) {
+        return rest_api_send_error(req, 500, "RELAY_UNAVAILABLE", "Failed to read relay state", true);
+    }
+
+    return rest_api_send_onboard_relay_response(req, &status, relay_id, relay_state);
+}
+
 static esp_err_t rest_api_onboard_relay_set_handler(httpd_req_t *req)
 {
     rest_api_status_view_t status;
@@ -2808,6 +2832,40 @@ static esp_err_t rest_api_modio_relays_handler(httpd_req_t *req)
 
     cJSON_AddItemToObject(root, "relays", relays);
     return rest_api_send_json_response(req, 200, root, &status, true);
+}
+
+static esp_err_t rest_api_modio_relay_handler(httpd_req_t *req)
+{
+    rest_api_status_view_t status;
+    uint8_t relay_id = 0;
+    uint8_t relay_mask = 0;
+    esp_err_t err;
+
+    if (!rest_api_require_authenticated_status(req, &status, &err)) {
+        return err;
+    }
+
+    err = rest_api_parse_modio_relay_id(req, NULL, &relay_id);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = rest_api_sync_status_with_modio_driver(&status, &relay_mask);
+    if (err == ESP_ERR_NOT_FOUND) {
+        return rest_api_send_error(req, 503, "MODIO_NOT_PRESENT", "MOD-IO is not present", true);
+    }
+    if (err != ESP_OK) {
+        return rest_api_send_error(req,
+                                   500,
+                                   "MODIO_UNAVAILABLE",
+                                   "Failed to read MOD-IO relay state",
+                                   true);
+    }
+
+    return rest_api_send_modio_relay_response(req,
+                                              &status,
+                                              relay_id,
+                                              (relay_mask & (uint8_t)(1U << (relay_id - 1U))) != 0U);
 }
 
 static esp_err_t rest_api_modio_relay_set_handler(httpd_req_t *req)
@@ -3493,6 +3551,12 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
         .handler = rest_api_onboard_relays_handler,
         .user_ctx = NULL,
     };
+    httpd_uri_t onboard_relay_uri = {
+        .uri = "/api/v1/relays/onboard/*",
+        .method = HTTP_GET,
+        .handler = rest_api_onboard_relay_handler,
+        .user_ctx = NULL,
+    };
     httpd_uri_t onboard_relay_set_uri = {
         .uri = "/api/v1/relays/onboard/*",
         .method = HTTP_PUT,
@@ -3509,6 +3573,12 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
         .uri = REST_API_MODIO_RELAYS_URI,
         .method = HTTP_GET,
         .handler = rest_api_modio_relays_handler,
+        .user_ctx = NULL,
+    };
+    httpd_uri_t modio_relay_uri = {
+        .uri = "/api/v1/relays/modio/*",
+        .method = HTTP_GET,
+        .handler = rest_api_modio_relay_handler,
         .user_ctx = NULL,
     };
     httpd_uri_t modio_relay_set_uri = {
@@ -3633,6 +3703,14 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
         return err;
     }
 
+    err = httpd_register_uri_handler(s_server, &onboard_relay_uri);
+    if (err != ESP_OK) {
+        httpd_stop(s_server);
+        s_server = NULL;
+        memset(&s_config, 0, sizeof(s_config));
+        return err;
+    }
+
     err = httpd_register_uri_handler(s_server, &onboard_relay_toggle_uri);
     if (err != ESP_OK) {
         httpd_stop(s_server);
@@ -3650,6 +3728,14 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
     }
 
     err = httpd_register_uri_handler(s_server, &modio_relays_uri);
+    if (err != ESP_OK) {
+        httpd_stop(s_server);
+        s_server = NULL;
+        memset(&s_config, 0, sizeof(s_config));
+        return err;
+    }
+
+    err = httpd_register_uri_handler(s_server, &modio_relay_uri);
     if (err != ESP_OK) {
         httpd_stop(s_server);
         s_server = NULL;
