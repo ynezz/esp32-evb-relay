@@ -71,7 +71,7 @@ proceeding to manual tests.
 |-----|-----------------------------|---------|----------|--------|-------|
 | 2.1 | CLI version flag            | `evb-relay --version` | Prints version, commit, date; exit 0 | PASS | `0.0.0-dev`, commit: unknown, built: unknown |
 | 2.2 | Robot capabilities          | `evb-relay --robot-capabilities` | JSON with command list; exit 0 | PASS | Returns JSON with v, cli_version, envelope_version, default_robot_format, commands |
-| 2.3 | mDNS discover               | `evb-relay discover --format json` | JSON array with at least 1 device | FAIL | Returns `{"devices": []}` — no devices discovered. mDNS may not resolve across network segments or avahi-daemon may not be running on the test host |
+| 2.3 | mDNS discover               | `evb-relay discover --format json` | JSON array with at least 1 device | SKIP | Returns `{"devices": []}`. Installed avahi-daemon and retried — still empty. Root cause: test host (192.168.125.0/24) and device (192.168.200.0/24) are on different L3 subnets. mDNS multicast (224.0.0.251) is link-local and cannot cross subnet boundaries. Not a software bug — infrastructure limitation of the test environment |
 | 2.4 | Discover timeout            | `evb-relay discover --timeout 1s --format json` | Completes within ~1s | PASS | Completes in 1.003s |
 
 ---
@@ -345,7 +345,7 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | Section | Description                 | Total | Pass | Fail | Skip |
 |---------|-----------------------------|-------|------|------|------|
 | 1       | Automated quality gates     | 12    | 9    | 3    | 0    |
-| 2       | Version & discovery         | 4     | 3    | 1    | 0    |
+| 2       | Version & discovery         | 4     | 2    | 0    | 1    |
 | 3       | Status                      | 6     | 6    | 0    | 0    |
 | 4       | Onboard relay control       | 13    | 13   | 0    | 0    |
 | 5       | MOD-IO relay control        | 14    | 14   | 0    | 0    |
@@ -361,45 +361,66 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | 15      | Output formats & exit codes | 9     | 9    | 0    | 0    |
 | 16      | Config persistence          | 5     | 5    | 0    | 0    |
 | 17      | Button event                | 2     | 0    | 0    | 2    |
-| **Total** |                           | **156** | **139** | **5** | **12** |
+| **Total** |                           | **156** | **139** | **4** | **13** |
 
 ---
 
 ## Failure Analysis
 
-### FAIL: 1.10 — On-device tests (`just test-device`)
+### FAIL: 1.10 — On-device tests (`just test-device`) — evb-2b0q
 
-Tests 36-43 (rest_api device tests) failed: SSE task deletion, OTA
-partition switching, URI wildcard parsing, sync enum mapping, and
-fail-closed auth tests. Test 44 (auth first-boot token) triggered the
-480s watchdog timeout. Root cause likely related to test ordering and
-resource cleanup in the rest_api test suite; first 35 tests all passed.
+Tests 36-43 (rest_api device tests) failed due to missing
+`rest_api_stop()` teardown between SSE tests 31-35. Each SSE test
+starts the HTTP server but never stops it, leaving `s_server != NULL`
+and leaking SSE dispatch tasks, queues, locks, event handlers, and
+potentially open sockets. By the time test 36 runs, resource
+exhaustion and corrupted event handler state cause cascading failures.
+Test 44 (auth first-boot token) triggered the 480s watchdog timeout.
 
-### FAIL: 1.11 — Integration tests (`just test-integration`)
+### FAIL: 1.11 — Integration tests (`just test-integration`) — evb-2huj
 
 1 of 6 tests failed with ConnectTimeout on the status endpoint; 2
-additional tests errored because they depend on the status test's
-fixture. Most likely a timing issue: the device had not fully
-completed its boot sequence (Ethernet link + DHCP) before the pytest
-HTTP client began polling.
+additional tests errored due to fixture dependency. Root cause: the
+fixture chain flashes firmware, provisions auth, and resolves the
+device IP, but never verifies that the HTTP server is listening before
+yielding the http_client. The 3-second boot settle time is
+insufficient for the ESP32 to complete its full boot sequence
+(bootloader + firmware + Ethernet link + DHCP + HTTP bind). A
+`_wait_for_http_ready()` polling helper is needed.
 
-### FAIL: 1.12 — Full CI+HW gate (`just ci-full`)
+### FAIL: 1.12 — Full CI+HW gate (`just ci-full`) — evb-c9ij
 
-Blocked by 1.10 and 1.11 failures above.
+Cascading failure blocked by 1.10 (evb-2b0q) and 1.11 (evb-2huj).
 
-### FAIL: 2.3 — mDNS discover
+### FAIL: 7.5 — Multiple SSE clients — evb-18o7
 
-`evb-relay discover` returned an empty device list. The device does
-register mDNS (confirmed by serial boot log: "Registered mDNS over
-Ethernet"), but the test host may lack avahi-daemon or the mDNS
-responder may not reach across the virtual network bridge.
+Client 2 received `SSE_CLIENT_LIMIT_REACHED` (503). The firmware has
+no active liveness detection for SSE clients. When a client
+disconnects abruptly (signal kill, network drop), the server-side
+slot remains marked `active=true` until the next heartbeat send
+attempt (30 seconds in production) detects the broken socket via
+`httpd_resp_send_chunk()` failure. Stale slots from the prior
+heartbeat test (7.3) were not released in time, exhausting the
+4-client limit.
 
-### FAIL: 7.5 — Multiple SSE clients
+### SKIP: 2.3 — mDNS discover (reclassified from FAIL)
 
-Client 2 received `SSE_CLIENT_LIMIT_REACHED` (503). The firmware
-supports up to 4 concurrent SSE clients, but lingering connections
-from prior tests (heartbeat test in 7.3) may not have been cleaned up
-server-side, exhausting the client slots.
+Test host (192.168.125.0/24) and device (192.168.200.0/24) are on
+different L3 subnets. Installed avahi-daemon and retried — still
+empty. mDNS multicast (224.0.0.251) is link-local and cannot cross
+subnet boundaries. Not a software bug; infrastructure limitation of
+the test environment.
+
+---
+
+## Filed Beads
+
+| Bead ID   | Title | Priority | Labels |
+|-----------|-------|----------|--------|
+| evb-2b0q  | On-device rest_api tests 36-43 fail due to missing rest_api_stop() between SSE test cases | P1 | firmware, testing |
+| evb-2huj  | Integration tests fail with ConnectTimeout due to missing HTTP readiness check after flash | P1 | firmware, testing |
+| evb-18o7  | SSE client slots not released when clients disconnect abruptly (stale connection leak) | P2 | firmware |
+| evb-c9ij  | just ci-full fails due to cascading test-device and test-integration failures | P2 | testing |
 
 ---
 
@@ -410,8 +431,8 @@ server-side, exhausting the client slots.
 | Completed by     | Claude Opus 4.6 (1M context) |
 | Date completed   | 2026-03-21 |
 | Final commit SHA | (filled after commit) |
-| Overall result   | 139 PASS / 5 FAIL / 12 SKIP |
-| Blocking issues  | 1.10 (on-device rest_api tests), 1.11 (integration timing), 2.3 (mDNS), 7.5 (SSE client limit). None of the 5 failures are in core relay/input/config/auth/OTA functionality — all interactive manual tests pass |
+| Overall result   | 139 PASS / 4 FAIL / 13 SKIP |
+| Blocking issues  | 1.10 (evb-2b0q), 1.11 (evb-2huj), 1.12 (evb-c9ij), 7.5 (evb-18o7). All 4 failures are in test infrastructure or firmware SSE cleanup — no failures in core relay/input/config/auth/OTA functionality |
 
 ---
 
