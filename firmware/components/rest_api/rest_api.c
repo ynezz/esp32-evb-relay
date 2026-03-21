@@ -22,7 +22,6 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "input_monitor.h"
-#include "lwip/errno.h"
 #include "lwip/sockets.h"
 #include "mod_io.h"
 #include "ota.h"
