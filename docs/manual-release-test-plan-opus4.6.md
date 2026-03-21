@@ -75,8 +75,8 @@ proceeding to manual tests.
 |-----|-----------------------------|---------|----------|--------|-------|
 | 2.1 | CLI version flag            | `evb-relay --version` | Prints version, commit, date; exit 0 | | |
 | 2.2 | Robot capabilities          | `evb-relay --robot-capabilities` | JSON with command list; exit 0 | | |
-| 2.3 | mDNS discover               | `evb-relay discover --format json` | JSON array with at least 1 device; hostname, ip, port, txt fields present | | |
-| 2.4 | Discover timeout            | `evb-relay discover --timeout 1s --format json` | Completes within ~1s | | |
+| 2.3 | mDNS discover               | `evb-relay discover --format json` | JSON object with `devices[]`; each discovered device has `hostname`, `ip`, `port`, `txt` | | |
+| 2.4 | Discover timeout            | `evb-relay discover --timeout 1s --format json` | Completes within ~1s; if one run returns `devices=[]`, retry before failing because mDNS browse timing is probabilistic | | |
 
 ---
 
@@ -85,11 +85,11 @@ proceeding to manual tests.
 | #   | Test                        | Command | Expected | Result | Notes |
 |-----|-----------------------------|---------|----------|--------|-------|
 | 3.1 | Status table format         | `evb-relay status` | Human-readable table with uptime, FW version, heap, network, MOD-IO; exit 0 | | |
-| 3.2 | Status JSON format          | `evb-relay status --format json` | Valid JSON; fields: `uptime_seconds`, `firmware_version`, `free_heap_bytes`, `network.hostname`, `network.connected`, `network.transport`, `network.ip`, `network.netmask`, `network.gateway`, `modio.present`, `modio.sync` | | |
-| 3.3 | Status robot mode           | `evb-relay status --robot` | TOON envelope with `v`, `command`, `timestamp`, `elapsed_ms`, `exit_code`, `host`, `device_context`, `data` | | |
-| 3.4 | Status robot JSON           | `evb-relay status --robot --format json` | JSON envelope; same fields as 3.3 | | |
-| 3.5 | Status via REST             | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/status` | Valid JSON matching CLI output; response headers include `X-FW-Version`, `X-ModIO-Present`, `X-ModIO-Sync` | | |
-| 3.6 | FW version match            | Compare `--version` output with status `firmware_version` | Versions match | | |
+| 3.2 | Status JSON format          | `evb-relay status --format json` | Valid JSON with top-level `status`; fields live under `status.uptime_seconds`, `status.firmware_version`, `status.free_heap_bytes`, `status.network.*`, `status.modio.*` | | |
+| 3.3 | Status robot mode           | `evb-relay status --robot` | TOON envelope with `v`, `command`, `timestamp`, `elapsed_ms`, `exit_code`, `host`, `device_context`, `data.status` | | |
+| 3.4 | Status robot JSON           | `evb-relay status --robot --format json` | JSON envelope; same structure as 3.3, with the payload under `data.status` | | |
+| 3.5 | Status via REST             | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/status` | Valid JSON matching the CLI's inner `status` object; response headers include `X-FW-Version`, `X-ModIO-Present`, `X-ModIO-Sync` | | |
+| 3.6 | Release version match       | Compare the semver from `evb-relay --version` with status `firmware_version` | Release version strings match; do not compare the CLI's extra commit/date text verbatim to the firmware field | | |
 
 ---
 
