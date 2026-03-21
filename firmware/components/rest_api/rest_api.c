@@ -143,7 +143,7 @@ bool rest_api_sse_wait_for_dispatch_shutdown_reached_for_testing(uint32_t timeou
             return false;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(1));
+        vTaskDelay(1);
     }
 
     return true;
@@ -187,7 +187,7 @@ bool rest_api_sse_wait_for_active_client_count_for_testing(size_t expected_count
             return false;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(1));
+        vTaskDelay(1);
     }
 
     return true;
@@ -886,6 +886,10 @@ static void rest_api_sse_release_client_slot(rest_api_sse_client_t *client)
         .complete_async_request = rest_api_sse_complete_async_request,
     };
 
+    if ((s_server != NULL) && (client != NULL) && (client->sockfd >= 0)) {
+        (void)httpd_sess_trigger_close(s_server, client->sockfd);
+    }
+
     rest_api_sse_release_client_lifetime(client, &hooks);
 }
 
@@ -907,6 +911,10 @@ static void rest_api_sse_force_release_client_slot(rest_api_sse_client_t *client
         .current_task_handle = xTaskGetCurrentTaskHandle,
     };
 
+    if ((s_server != NULL) && (client != NULL) && (client->sockfd >= 0)) {
+        (void)httpd_sess_trigger_close(s_server, client->sockfd);
+    }
+
     rest_api_sse_force_release_client_lifetime(client, &hooks);
 }
 
@@ -925,6 +933,10 @@ static void rest_api_sse_release_startup_client_slot(rest_api_sse_client_t *clie
         .delete_queue = vQueueDelete,
         .complete_async_request = rest_api_sse_complete_async_request,
     };
+
+    if ((s_server != NULL) && (client != NULL) && (client->sockfd >= 0)) {
+        (void)httpd_sess_trigger_close(s_server, client->sockfd);
+    }
 
     rest_api_sse_release_startup_client_lifetime(client, req, &hooks);
 }
@@ -1075,7 +1087,7 @@ static void rest_api_sse_dispatch_task(void *arg)
 #if defined(REST_API_ENABLE_TESTING_API)
     s_testing_state.dispatch_shutdown_reached = true;
     while (s_testing_state.hold_dispatch_task_on_shutdown) {
-        vTaskDelay(pdMS_TO_TICKS(1));
+        vTaskDelay(1);
     }
 #endif
 
@@ -1150,6 +1162,14 @@ static void rest_api_sse_client_task(void *arg)
                                     REST_API_SSE_HEARTBEAT_COMMENT,
                                     HTTPD_RESP_USE_STRLEN);
         last_send_tick = xTaskGetTickCount();
+    }
+
+    if (err == ESP_OK) {
+        esp_err_t end_err = httpd_resp_send_chunk(client->req, NULL, 0);
+
+        if (end_err != ESP_OK) {
+            err = end_err;
+        }
     }
 
     if (err == ESP_OK) {
@@ -1319,6 +1339,9 @@ static esp_err_t rest_api_sse_start(void)
 
 static void rest_api_sse_stop(void)
 {
+    TaskHandle_t client_task_handles[REST_API_SSE_MAX_CLIENTS] = {0};
+    size_t client_task_count = 0U;
+
     if (!s_sse_state.started && (s_sse_state.lock == NULL) &&
             (s_sse_state.dispatch_queue == NULL) && (s_sse_state.dispatch_task == NULL)) {
         return;
@@ -1345,12 +1368,23 @@ static void rest_api_sse_stop(void)
             if ((s_server != NULL) && (client->sockfd >= 0)) {
                 (void)httpd_sess_trigger_close(s_server, client->sockfd);
             }
+            if ((client->task_handle != NULL) && (client_task_count < REST_API_SSE_MAX_CLIENTS)) {
+                client_task_handles[client_task_count++] = client->task_handle;
+            }
         }
         rest_api_sse_unlock();
     }
 
+    for (size_t index = 0; index < client_task_count; ++index) {
+        (void)xTaskAbortDelay(client_task_handles[index]);
+    }
+    /* Give aborted client tasks one actual scheduler tick to observe
+     * close_requested before shutdown considers force release. */
+    vTaskDelay(1);
+
+    bool any_active = false;
     for (uint8_t attempt = 0U; attempt < 15U; ++attempt) {
-        bool any_active = false;
+        any_active = false;
 
         if (rest_api_sse_lock()) {
             for (size_t index = 0; index < REST_API_SSE_MAX_CLIENTS; ++index) {
@@ -1369,21 +1403,17 @@ static void rest_api_sse_stop(void)
         vTaskDelay(pdMS_TO_TICKS(REST_API_SSE_CLIENT_POLL_WAIT_MS));
     }
 
-    for (size_t index = 0; index < REST_API_SSE_MAX_CLIENTS; ++index) {
-        rest_api_sse_force_release_client_slot(&s_sse_state.clients[index]);
+    if (any_active) {
+        for (size_t index = 0; index < REST_API_SSE_MAX_CLIENTS; ++index) {
+            rest_api_sse_force_release_client_slot(&s_sse_state.clients[index]);
+        }
     }
-
-#if defined(REST_API_ENABLE_TESTING_API)
-    if (s_testing_state.hold_dispatch_task_on_shutdown) {
-        (void)rest_api_sse_wait_for_dispatch_shutdown_reached_for_testing(
-            REST_API_SSE_CLIENT_POLL_WAIT_MS + 1000U);
-    }
-#endif
 
     if (s_sse_state.dispatch_task != NULL) {
 #if defined(REST_API_ENABLE_TESTING_API)
         s_testing_state.dispatch_task_deleted_by_stop = true;
 #endif
+        (void)xTaskAbortDelay(s_sse_state.dispatch_task);
         rest_api_task_watchdog_delete(s_sse_state.dispatch_task, "rest_api_sse_dispatch");
         vTaskDelete(s_sse_state.dispatch_task);
         s_sse_state.dispatch_task = NULL;

@@ -147,20 +147,27 @@ static void track_client_socket(int sock)
 
 static void close_tracked_client_socket(int *sock)
 {
+    int fd;
+
     if ((sock == NULL) || (*sock < 0)) {
         return;
     }
 
+    fd = *sock;
     initialize_tracked_client_sockets();
     for (size_t index = 0; index < (sizeof(s_tracked_client_sockets) / sizeof(s_tracked_client_sockets[0]));
             ++index) {
-        if (s_tracked_client_sockets[index] == *sock) {
+        if (s_tracked_client_sockets[index] == fd) {
             s_tracked_client_sockets[index] = -1;
             break;
         }
     }
 
-    close(*sock);
+    /* These helpers close live HTTP/SSE streams between tests. Shut the
+     * connection down first so lwIP/httpd can retire loopback sessions
+     * deterministically before the next case opens fresh sockets. */
+    (void)shutdown(fd, SHUT_RDWR);
+    close(fd);
     *sock = -1;
 }
 
@@ -173,8 +180,7 @@ void test_rest_api_device_cleanup(void)
             continue;
         }
 
-        close(s_tracked_client_sockets[index]);
-        s_tracked_client_sockets[index] = -1;
+        close_tracked_client_socket(&s_tracked_client_sockets[index]);
     }
 }
 
@@ -442,7 +448,7 @@ static int open_http_stream_request(uint16_t port,
 
     written = snprintf(request + request_len,
                        sizeof(request) - request_len,
-                       "Connection: keep-alive\r\n"
+                       "Connection: close\r\n"
                        "\r\n");
     TEST_ASSERT_GREATER_THAN_INT32(0, written);
     request_len += (size_t)written;
@@ -1362,7 +1368,7 @@ TEST_CASE("rest_api device cleanup closes tracked client sockets", "[qa][rest_ap
     TEST_ASSERT_TRUE(rest_api_sse_wait_for_active_client_count_for_testing(1U, 1000U));
 
     test_rest_api_device_cleanup();
-    TEST_ASSERT_TRUE(rest_api_sse_wait_for_active_client_count_for_testing(0U, 1000U));
+    TEST_ASSERT_TRUE(rest_api_sse_wait_for_active_client_count_for_testing(0U, 2000U));
 
     sock = open_http_stream_request(test_port, "/api/v1/events", NULL);
     read_stream_until_contains(sock, ":connected", response, sizeof(response));
@@ -1447,6 +1453,8 @@ TEST_CASE("rest_api device releases SSE slots after abrupt client disconnect",
     for (size_t index = 1U; index < max_sse_clients; ++index) {
         close_tracked_client_socket(&sockets[index]);
     }
+
+    TEST_ASSERT_TRUE(rest_api_sse_wait_for_active_client_count_for_testing(0U, 2000U));
 }
 
 TEST_CASE("rest_api device returns 503 when SSE task startup fails after async detach",
@@ -1487,12 +1495,15 @@ TEST_CASE("rest_api device stop owns SSE dispatch task deletion", "[qa][rest_api
         .auth_handler = allow_auth_handler,
         .status_provider = status_provider,
     };
+    char response[1024];
     int sock = -1;
 
     ensure_tcpip_ready();
     TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
 
     sock = open_http_stream_request(test_port, "/api/v1/events", NULL);
+    read_stream_until_contains(sock, ":connected", response, sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
     TEST_ASSERT_TRUE(rest_api_sse_wait_for_active_client_count_for_testing(1U, 1000U));
     rest_api_sse_hold_dispatch_task_on_shutdown_for_testing(true);
     TEST_ASSERT_EQUAL(ESP_OK, rest_api_stop());

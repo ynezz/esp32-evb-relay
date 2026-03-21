@@ -421,6 +421,7 @@ static void test_rest_api_make_httpd_config_sets_explicit_server_stack_size(void
 
     TEST_ASSERT_EQUAL_UINT32(REST_API_DEFAULT_PORT, config.server_port);
     TEST_ASSERT_EQUAL_UINT32(REST_API_HTTPD_STACK_SIZE, config.stack_size);
+    TEST_ASSERT_TRUE(config.lru_purge_enable);
     TEST_ASSERT_EQUAL_UINT32(18U, config.max_uri_handlers);
     TEST_ASSERT_EQUAL_PTR(httpd_uri_match_wildcard, config.uri_match_fn);
 }
