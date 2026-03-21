@@ -121,10 +121,10 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 
 | #   | Test                        | Command | Expected | Result | Notes |
 |-----|-----------------------------|---------|----------|--------|-------|
-| 5.1 | MOD-IO presence             | `evb-relay status --format json \| jq '.modio.present'` | `true` | | |
-| 5.2 | MOD-IO sync state           | `evb-relay status --format json \| jq '.modio.sync'` | `unknown` or `synchronized` | | |
+| 5.1 | MOD-IO presence             | `evb-relay status --format json \| jq '.status.modio.present'` | `true` | | |
+| 5.2 | MOD-IO sync state           | `evb-relay status --format json \| jq '.status.modio.sync'` | `unknown` or `synchronized` | | |
 | 5.3 | Batch set all ON (sync)     | `evb-relay relay set modio:1=on modio:2=on modio:3=on modio:4=on --format json` | `all_ok=true`; all 4 relays `state=true`; sync becomes `synchronized` | | |
-| 5.4 | Verify sync state           | `evb-relay status --format json \| jq '.modio.sync'` | `synchronized` | | |
+| 5.4 | Verify sync state           | `evb-relay status --format json \| jq '.status.modio.sync'` | `synchronized` | | |
 | 5.5 | Single relay OFF            | `evb-relay relay off modio:2 --format json` | `id=2`, `state=false`; exit 0 | | |
 | 5.6 | Single relay ON             | `evb-relay relay on modio:2 --format json` | `id=2`, `state=true`; exit 0 | | |
 | 5.7 | Toggle relay                | `evb-relay relay toggle modio:3 --format json` | State flipped; exit 0 | | |
@@ -235,7 +235,7 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 |-----|-----------------------------|---------|----------|--------|-------|
 | 11.1 | Build RC binary            | `just build` | Binary at `firmware/build/evb_relay_firmware.bin` | | |
 | 11.2 | OTA flash                  | `evb-relay ota flash firmware/build/evb_relay_firmware.bin --format json` | `uploaded_bytes` > 0, `reboot_in_seconds` present; exit 0 | | |
-| 11.3 | Wait for reboot            | `sleep 10 && evb-relay status --format json` | Device responds; FW version matches RC | | |
+| 11.3 | Wait for reboot            | `sleep 10 && evb-relay status --format json` | Device responds and FW version matches RC; if the first post-reboot probe races DHCP or service startup, retry for up to ~30s before failing | | |
 | 11.4 | Post-OTA relay test        | `evb-relay relay list --format json` | Relays accessible; exit 0 | | |
 | 11.5 | Post-OTA config persisted  | `evb-relay config show --format json` | Config values match pre-OTA settings | | |
 
@@ -325,8 +325,8 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 |-----|-----------------------------|---------|----------|--------|-------|
 | 16.1 | Set distinctive values     | `evb-relay config set hostname=persist-test poll_interval_ms=250` | Accepted | | |
 | 16.2 | Reboot device              | Power cycle or OTA reboot | Device comes back online | | |
-| 16.3 | Verify hostname persisted  | `evb-relay config show --format json \| jq -r '.hostname'` | `persist-test` | | |
-| 16.4 | Verify poll_interval       | `evb-relay config show --format json \| jq '.poll_interval_ms'` | `250` | | |
+| 16.3 | Verify hostname persisted  | `evb-relay config show --format json \| jq -r '.config.hostname'` | `persist-test` | | |
+| 16.4 | Verify poll_interval       | `evb-relay config show --format json \| jq '.config.poll_interval_ms'` | `250` | | |
 | 16.5 | Restore defaults           | `evb-relay config set hostname=esp32-evb-relay poll_interval_ms=100` | Accepted | | |
 
 ---
