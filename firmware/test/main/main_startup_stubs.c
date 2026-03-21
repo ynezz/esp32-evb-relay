@@ -4,6 +4,7 @@
 #include <string.h>
 
 #define MAIN_STARTUP_MAX_CALLS 32U
+#define MAIN_STARTUP_NETWORK_STATUS_SEQUENCE_MAX 8U
 
 static const uintptr_t BOARD_BUS_HANDLE_VALUE = 0x1234U;
 
@@ -27,7 +28,13 @@ typedef struct {
     esp_err_t rest_api_start_result;
     uint32_t last_wait_timeout_ms;
     uint16_t last_mdns_port;
+    size_t network_get_status_call_count;
+    size_t task_delay_call_count;
+    TickType_t last_task_delay_ticks;
     network_status_t network_status;
+    network_status_t network_status_sequence[MAIN_STARTUP_NETWORK_STATUS_SEQUENCE_MAX];
+    size_t network_status_sequence_count;
+    size_t network_status_sequence_index;
     mod_io_status_t mod_io_status;
     rest_api_config_t last_rest_api_config;
     bool rest_api_config_captured;
@@ -161,6 +168,28 @@ void main_startup_stub_set_network_status(const network_status_t *status)
     }
 }
 
+void main_startup_stub_set_network_status_sequence(const network_status_t *statuses, size_t count)
+{
+    size_t copy_count;
+
+    s_state.network_status_sequence_count = 0U;
+    s_state.network_status_sequence_index = 0U;
+
+    if ((statuses == NULL) || (count == 0U)) {
+        return;
+    }
+
+    copy_count = count;
+    if (copy_count > MAIN_STARTUP_NETWORK_STATUS_SEQUENCE_MAX) {
+        copy_count = MAIN_STARTUP_NETWORK_STATUS_SEQUENCE_MAX;
+    }
+
+    memcpy(s_state.network_status_sequence,
+           statuses,
+           copy_count * sizeof(s_state.network_status_sequence[0]));
+    s_state.network_status_sequence_count = copy_count;
+}
+
 void main_startup_stub_set_mod_io_status(const mod_io_status_t *status)
 {
     if (status != NULL) {
@@ -190,6 +219,21 @@ uint32_t main_startup_stub_get_last_wait_timeout_ms(void)
 uint16_t main_startup_stub_get_last_mdns_port(void)
 {
     return s_state.last_mdns_port;
+}
+
+size_t main_startup_stub_get_network_get_status_call_count(void)
+{
+    return s_state.network_get_status_call_count;
+}
+
+size_t main_startup_stub_get_task_delay_call_count(void)
+{
+    return s_state.task_delay_call_count;
+}
+
+TickType_t main_startup_stub_get_last_task_delay_ticks(void)
+{
+    return s_state.last_task_delay_ticks;
 }
 
 const rest_api_config_t *main_startup_stub_get_last_rest_api_config(void)
@@ -305,11 +349,28 @@ esp_err_t network_get_status(network_status_t *out)
         return ESP_ERR_INVALID_ARG;
     }
 
+    s_state.network_get_status_call_count++;
+
     if (s_state.network_get_status_result == ESP_OK) {
-        *out = s_state.network_status;
+        if (s_state.network_status_sequence_count > 0U) {
+            size_t index = s_state.network_status_sequence_index;
+
+            *out = s_state.network_status_sequence[index];
+            if ((index + 1U) < s_state.network_status_sequence_count) {
+                s_state.network_status_sequence_index++;
+            }
+        } else {
+            *out = s_state.network_status;
+        }
     }
 
     return s_state.network_get_status_result;
+}
+
+void vTaskDelay(TickType_t ticks_to_delay)
+{
+    s_state.task_delay_call_count++;
+    s_state.last_task_delay_ticks = ticks_to_delay;
 }
 
 esp_err_t rest_api_start(const rest_api_config_t *config)

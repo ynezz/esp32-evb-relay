@@ -6,6 +6,8 @@
 #include "esp_err.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "input_monitor.h"
 #include "mod_io.h"
 #include "network.h"
@@ -14,6 +16,7 @@
 #include "rest_api.h"
 
 static const char *TAG = "main";
+static const uint32_t APP_NETWORK_STATUS_POLL_INTERVAL_MS = 1000U;
 
 static rest_api_network_transport_t app_status_transport_from_network(network_transport_t transport)
 {
@@ -59,6 +62,38 @@ static esp_err_t app_status_provider(rest_api_status_view_t *status, void *ctx)
     status->modio_present = mod_io_status.present;
     status->modio_sync = rest_api_modio_sync_from_driver(mod_io_status.relay_sync);
     return ESP_OK;
+}
+
+static esp_err_t app_wait_for_network_connectivity(void)
+{
+    network_status_t network_status;
+    esp_err_t err;
+
+    err = network_wait_for_ip(NETWORK_DEFAULT_WAIT_FOR_IP_TIMEOUT_MS);
+    if (err == ESP_OK) {
+        return ESP_OK;
+    }
+
+    if (err != ESP_ERR_TIMEOUT) {
+        return err;
+    }
+
+    ESP_LOGW(TAG, "Initial network wait timed out; continuing to wait for connectivity");
+
+    for (;;) {
+        err = network_get_status(&network_status);
+        if (err != ESP_OK) {
+            return err;
+        }
+
+        if (network_status.connected) {
+            return ESP_OK;
+        }
+
+        // The initial wait may already have triggered transport fallback, so
+        // keep polling shared status instead of re-entering wait side effects.
+        vTaskDelay(pdMS_TO_TICKS(APP_NETWORK_STATUS_POLL_INTERVAL_MS));
+    }
 }
 
 void app_main(void)
@@ -124,9 +159,9 @@ void app_main(void)
         return;
     }
 
-    err = network_wait_for_ip(NETWORK_DEFAULT_WAIT_FOR_IP_TIMEOUT_MS);
+    err = app_wait_for_network_connectivity();
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to acquire an Ethernet IP address: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Failed while waiting for network connectivity: %s", esp_err_to_name(err));
         return;
     }
 

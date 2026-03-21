@@ -144,6 +144,57 @@ static void test_app_main_stops_before_network_when_input_monitor_fails(void)
     TEST_ASSERT_NULL(main_startup_stub_get_last_rest_api_config());
 }
 
+static void test_app_main_keeps_waiting_after_initial_ip_timeout(void)
+{
+    static const main_startup_call_t expected_calls[] = {
+        MAIN_STARTUP_CALL_EVENT_LOOP_CREATE_DEFAULT,
+        MAIN_STARTUP_CALL_DEVICE_CONFIG_INIT,
+        MAIN_STARTUP_CALL_BOARD_INIT,
+        MAIN_STARTUP_CALL_RELAY_INIT,
+        MAIN_STARTUP_CALL_MOD_IO_INIT,
+        MAIN_STARTUP_CALL_INPUT_MONITOR_START,
+        MAIN_STARTUP_CALL_AUTH_INIT,
+        MAIN_STARTUP_CALL_NETWORK_INIT,
+        MAIN_STARTUP_CALL_OTA_CONFIRM_RUNNING_IMAGE_IF_PENDING,
+        MAIN_STARTUP_CALL_NETWORK_WAIT_FOR_IP,
+        MAIN_STARTUP_CALL_NETWORK_REGISTER_MDNS_SERVICE,
+        MAIN_STARTUP_CALL_REST_API_START,
+    };
+    static const network_status_t status_sequence[] = {
+        {
+            .connected = false,
+            .transport = NETWORK_TRANSPORT_ETHERNET,
+            .hostname = "relay-test",
+        },
+        {
+            .connected = false,
+            .transport = NETWORK_TRANSPORT_ETHERNET,
+            .hostname = "relay-test",
+        },
+        {
+            .connected = true,
+            .transport = NETWORK_TRANSPORT_ETHERNET,
+            .hostname = "relay-test",
+            .ip = "192.0.2.44",
+            .netmask = "255.255.255.0",
+            .gateway = "192.0.2.1",
+        },
+    };
+
+    main_startup_stub_set_network_wait_result(ESP_ERR_TIMEOUT);
+    main_startup_stub_set_network_status_sequence(status_sequence,
+                                                  sizeof(status_sequence) / sizeof(status_sequence[0]));
+
+    app_main();
+
+    test_assert_call_sequence(expected_calls, sizeof(expected_calls) / sizeof(expected_calls[0]));
+    TEST_ASSERT_EQUAL_UINT32(3, main_startup_stub_get_network_get_status_call_count());
+    TEST_ASSERT_EQUAL_UINT32(2, main_startup_stub_get_task_delay_call_count());
+    TEST_ASSERT_EQUAL_UINT32(pdMS_TO_TICKS(1000U), main_startup_stub_get_last_task_delay_ticks());
+    TEST_ASSERT_EQUAL_UINT16(REST_API_DEFAULT_PORT, main_startup_stub_get_last_mdns_port());
+    TEST_ASSERT_NOT_NULL(main_startup_stub_get_last_rest_api_config());
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -151,5 +202,6 @@ int main(void)
     RUN_TEST(test_app_main_stops_before_http_when_network_init_fails);
     RUN_TEST(test_app_main_stops_before_waiting_for_ip_when_ota_confirm_fails);
     RUN_TEST(test_app_main_stops_before_network_when_input_monitor_fails);
+    RUN_TEST(test_app_main_keeps_waiting_after_initial_ip_timeout);
     return UNITY_END();
 }

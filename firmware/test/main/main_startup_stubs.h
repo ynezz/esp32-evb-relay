@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "freertos/task.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -140,12 +141,16 @@ void main_startup_stub_set_network_register_mdns_result(esp_err_t result);
 void main_startup_stub_set_network_get_status_result(esp_err_t result);
 void main_startup_stub_set_rest_api_start_result(esp_err_t result);
 void main_startup_stub_set_network_status(const network_status_t *status);
+void main_startup_stub_set_network_status_sequence(const network_status_t *statuses, size_t count);
 void main_startup_stub_set_mod_io_status(const mod_io_status_t *status);
 
 size_t main_startup_stub_get_call_count(void);
 main_startup_call_t main_startup_stub_get_call(size_t index);
 uint32_t main_startup_stub_get_last_wait_timeout_ms(void);
 uint16_t main_startup_stub_get_last_mdns_port(void);
+size_t main_startup_stub_get_network_get_status_call_count(void);
+size_t main_startup_stub_get_task_delay_call_count(void);
+TickType_t main_startup_stub_get_last_task_delay_ticks(void);
 const rest_api_config_t *main_startup_stub_get_last_rest_api_config(void);
 
 esp_err_t esp_event_loop_create_default(void);
@@ -170,6 +175,7 @@ esp_err_t ota_confirm_running_image_if_pending(void);
 esp_err_t network_wait_for_ip(uint32_t timeout_ms);
 esp_err_t network_register_mdns_service(uint16_t port);
 esp_err_t network_get_status(network_status_t *out);
+void vTaskDelay(TickType_t ticks_to_delay);
 
 esp_err_t rest_api_start(const rest_api_config_t *config);
 esp_err_t rest_api_stop(void);
