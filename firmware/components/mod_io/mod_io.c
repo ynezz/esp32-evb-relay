@@ -300,23 +300,7 @@ static esp_err_t mod_io_reconcile_after_transaction_failure_locked(esp_err_t tra
 
 static uint16_t mod_io_decode_analog_sample(const uint8_t raw_bytes[2])
 {
-    uint8_t reversed_low_byte = raw_bytes[0];
-    uint16_t value = 0;
-
-    for (uint8_t bit_index = 0; bit_index < 8U; ++bit_index) {
-        if ((reversed_low_byte & 0x80U) != 0U) {
-            value |= (uint16_t)(1U << bit_index);
-        }
-        reversed_low_byte <<= 1U;
-    }
-
-    if ((raw_bytes[1] & 0x02U) != 0U) {
-        value |= (1U << 8);
-    }
-    if ((raw_bytes[1] & 0x01U) != 0U) {
-        value |= (1U << 9);
-    }
-
+    uint16_t value = raw_bytes[0] | ((uint16_t)(raw_bytes[1] & 0x03U) << 8);
     return value;
 }
 

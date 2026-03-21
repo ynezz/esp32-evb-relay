@@ -27,14 +27,9 @@ static void queue_read_analog_u16(uint16_t value)
 {
     uint8_t raw_value[2] = {0};
 
-    for (uint8_t bit_index = 0U; bit_index < 8U; ++bit_index) {
-        if ((value & (uint16_t)(1U << bit_index)) != 0U) {
-            raw_value[0] |= (uint8_t)(1U << (7U - bit_index));
-        }
-    }
+    raw_value[0] = (uint8_t)(value & 0xFFU);
+    raw_value[1] = (uint8_t)((value >> 8U) & 0x03U);
 
-    raw_value[1] = (uint8_t)(((value >> 8U) & 0x01U) << 1U);
-    raw_value[1] |= (uint8_t)((value >> 9U) & 0x01U);
     TEST_ASSERT_EQUAL(ESP_OK, i2c_stub_queue_read_data(raw_value, sizeof(raw_value)));
 }
 

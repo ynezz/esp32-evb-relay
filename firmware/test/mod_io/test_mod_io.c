@@ -318,12 +318,12 @@ static void test_mod_io_read_analog_input_validates_ids_and_decodes_samples(void
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, mod_io_read_analog_input(5U, &value));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, mod_io_read_analog_input(1U, NULL));
 
-    set_read_data_u16(0x80U, 0x00U);
+    set_read_data_u16(0x01U, 0x00U);
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_read_analog_input(1U, &value));
     assert_last_transaction_equals(expected_input_1, sizeof(expected_input_1));
     TEST_ASSERT_EQUAL_UINT16(1U, value);
 
-    set_read_data_u16(0x01U, 0x00U);
+    set_read_data_u16(0x80U, 0x00U);
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_read_analog_input(2U, &value));
     assert_last_transaction_equals(expected_input_2, sizeof(expected_input_2));
     TEST_ASSERT_EQUAL_UINT16(128U, value);
@@ -333,7 +333,7 @@ static void test_mod_io_read_analog_input_validates_ids_and_decodes_samples(void
     assert_last_transaction_equals(expected_input_3, sizeof(expected_input_3));
     TEST_ASSERT_EQUAL_UINT16(1023U, value);
 
-    set_read_data_u16(0x80U, 0x00U);
+    set_read_data_u16(0x01U, 0x00U);
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_read_analog_input(4U, &value));
     assert_last_transaction_equals(expected_input_4, sizeof(expected_input_4));
     TEST_ASSERT_EQUAL_UINT16(1U, value);
@@ -349,10 +349,10 @@ static void test_mod_io_read_analog_inputs_reads_all_channels(void)
 
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_read_analog_inputs(values));
     assert_last_transaction_equals(expected_last_transaction, sizeof(expected_last_transaction));
-    TEST_ASSERT_EQUAL_UINT16(128U, values[0]);
-    TEST_ASSERT_EQUAL_UINT16(128U, values[1]);
-    TEST_ASSERT_EQUAL_UINT16(128U, values[2]);
-    TEST_ASSERT_EQUAL_UINT16(128U, values[3]);
+    TEST_ASSERT_EQUAL_UINT16(1U, values[0]);
+    TEST_ASSERT_EQUAL_UINT16(1U, values[1]);
+    TEST_ASSERT_EQUAL_UINT16(1U, values[2]);
+    TEST_ASSERT_EQUAL_UINT16(1U, values[3]);
 }
 
 static void test_mod_io_reprobe_after_write_error_restores_authoritative_state(void)
