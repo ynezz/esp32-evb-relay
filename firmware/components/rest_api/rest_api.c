@@ -852,22 +852,33 @@ static void rest_api_sse_release_client_slot(rest_api_sse_client_t *client)
     if (rest_api_sse_lock()) {
         queue = client->queue;
         req = client->req;
-        memset(client, 0, sizeof(*client));
-        client->sockfd = 0;
+        client->queue = NULL;
+        client->req = NULL;
         rest_api_sse_unlock();
     } else {
         queue = client->queue;
         req = client->req;
-        memset(client, 0, sizeof(*client));
+        client->queue = NULL;
+        client->req = NULL;
     }
 
     if (queue != NULL) {
         vQueueDelete(queue);
     }
 
+    /* Complete async request before clearing the slot so that
+     * rest_api_sse_stop() waits for true completion. */
     if (req != NULL) {
         (void)httpd_resp_send_chunk(req, NULL, 0);
         (void)httpd_req_async_handler_complete(req);
+    }
+
+    if (rest_api_sse_lock()) {
+        memset(client, 0, sizeof(*client));
+        client->sockfd = 0;
+        rest_api_sse_unlock();
+    } else {
+        memset(client, 0, sizeof(*client));
     }
 }
 
@@ -890,8 +901,9 @@ static void rest_api_sse_force_release_client_slot(rest_api_sse_client_t *client
         queue = client->queue;
         req = client->req;
         task_handle = client->task_handle;
-        memset(client, 0, sizeof(*client));
-        client->sockfd = 0;
+        client->queue = NULL;
+        client->req = NULL;
+        client->task_handle = NULL;
         rest_api_sse_unlock();
     } else {
         if (!client->active) {
@@ -901,7 +913,9 @@ static void rest_api_sse_force_release_client_slot(rest_api_sse_client_t *client
         queue = client->queue;
         req = client->req;
         task_handle = client->task_handle;
-        memset(client, 0, sizeof(*client));
+        client->queue = NULL;
+        client->req = NULL;
+        client->task_handle = NULL;
     }
 
     if ((task_handle != NULL) && (task_handle != xTaskGetCurrentTaskHandle())) {
@@ -914,6 +928,14 @@ static void rest_api_sse_force_release_client_slot(rest_api_sse_client_t *client
 
     if (req != NULL) {
         (void)httpd_req_async_handler_complete(req);
+    }
+
+    if (rest_api_sse_lock()) {
+        memset(client, 0, sizeof(*client));
+        client->sockfd = 0;
+        rest_api_sse_unlock();
+    } else {
+        memset(client, 0, sizeof(*client));
     }
 }
 
