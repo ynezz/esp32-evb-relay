@@ -929,7 +929,7 @@ TEST_CASE("rest_api device updates config with live apply metadata",
 TEST_CASE("rest_api device rejects invalid config updates without partial apply",
           "[qa][rest_api][device]")
 {
-    static const uint16_t test_port = 18090U;
+    static const uint16_t test_port = 18102U;
     static const rest_api_config_t config = {
         .port = test_port,
         .auth_handler = allow_auth_handler,
@@ -978,7 +978,7 @@ TEST_CASE("rest_api device rejects invalid config updates without partial apply"
 TEST_CASE("rest_api device reports input sample unavailable before the monitor starts",
           "[qa][rest_api][device]")
 {
-    static const uint16_t test_port = 18092U;
+    static const uint16_t test_port = 18103U;
     static const char *paths[] = {
         "/api/v1/inputs/digital",
         "/api/v1/inputs/digital/1",
@@ -1406,7 +1406,7 @@ TEST_CASE("rest_api device stop owns SSE dispatch task deletion", "[qa][rest_api
 TEST_CASE("rest_api device accepts OTA uploads and switches the boot partition",
           "[qa][rest_api][device]")
 {
-    static const uint16_t test_port = 18098U;
+    static const uint16_t test_port = 18104U;
     static const rest_api_config_t config = {
         .port = test_port,
         .auth_handler = allow_auth_handler,
