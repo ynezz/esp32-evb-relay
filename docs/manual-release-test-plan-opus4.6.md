@@ -123,7 +123,7 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 |-----|-----------------------------|---------|----------|--------|-------|
 | 5.1 | MOD-IO presence             | `evb-relay status --format json \| jq '.status.modio.present'` | `true` | | |
 | 5.2 | MOD-IO sync state           | `evb-relay status --format json \| jq '.status.modio.sync'` | `unknown` or `synchronized` | | |
-| 5.3 | Batch set all ON (sync)     | `evb-relay relay set modio:1=on modio:2=on modio:3=on modio:4=on --format json` | `all_ok=true`; all 4 relays `state=true`; sync becomes `synchronized` | | |
+| 5.3 | Batch set all ON (sync)     | `evb-relay relay set modio:1=on modio:2=on modio:3=on modio:4=on --format json` | `all_ok=true`; all 4 relays `state=true`; each MOD-IO result reports `sync=synchronized` | | |
 | 5.4 | Verify sync state           | `evb-relay status --format json \| jq '.status.modio.sync'` | `synchronized` | | |
 | 5.5 | Single relay OFF            | `evb-relay relay off modio:2 --format json` | `id=2`, `state=false`; exit 0 | | |
 | 5.6 | Single relay ON             | `evb-relay relay on modio:2 --format json` | `id=2`, `state=true`; exit 0 | | |
@@ -179,12 +179,12 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | 8.6 | Set poll_interval_ms        | `evb-relay config set poll_interval_ms=200 --format json` | Accepted; exit 0 | | |
 | 8.7 | Verify poll_interval_ms     | `evb-relay config show --format json \| jq '.config.poll_interval_ms'` | `200` | | |
 | 8.8 | Set modio_boot_policy       | `evb-relay config set modio_boot_policy=all_off --format json` | Accepted; exit 0 | | |
-| 8.9 | Invalid: poll too low       | `evb-relay config set poll_interval_ms=10` | Rejected by the device (`INVALID_CONFIG_VALUE` / HTTP 400); CLI exits non-zero and is typically `1`, not local parse error `5` | | |
-| 8.10 | Invalid: poll too high     | `evb-relay config set poll_interval_ms=20000` | Rejected by the device (`INVALID_CONFIG_VALUE` / HTTP 400); CLI exits non-zero and is typically `1` | | |
+| 8.9 | Invalid: poll too low       | `evb-relay config set poll_interval_ms=10` | Rejected by the device (`INVALID_CONFIG_VALUE` / HTTP 400); CLI exits with code `1`, not local parse error `5` | | |
+| 8.10 | Invalid: poll too high     | `evb-relay config set poll_interval_ms=20000` | Rejected by the device (`INVALID_CONFIG_VALUE` / HTTP 400); CLI exits with code `1` | | |
 | 8.11 | Invalid: empty hostname    | `evb-relay config set hostname=` | Rejected; exit code 5 | | |
-| 8.12 | Invalid: hostname too long | `evb-relay config set hostname=a234567890123456789012345678901234567890123456789012345678901234` | Rejected by the device (64 chars > max 63); CLI exits non-zero and is typically `1`, not `5` | | |
-| 8.13 | Invalid: hostname leading hyphen | `evb-relay config set hostname=-bad` | Rejected by the device; CLI exits non-zero and is typically `1` | | |
-| 8.14 | Invalid: hostname special chars | `evb-relay config set hostname=host.name` | Rejected by the device; CLI exits non-zero and is typically `1` | | |
+| 8.12 | Invalid: hostname too long | `evb-relay config set hostname=a234567890123456789012345678901234567890123456789012345678901234` | Rejected by the device (64 chars > max 63); CLI exits with code `1`, not `5` | | |
+| 8.13 | Invalid: hostname leading hyphen | `evb-relay config set hostname=-bad` | Rejected by the device; CLI exits with code `1` | | |
+| 8.14 | Invalid: hostname special chars | `evb-relay config set hostname=host.name` | Rejected by the device; CLI exits with code `1` | | |
 | 8.15 | Config via REST             | `curl -sfS -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d '{"poll_interval_ms":100}' http://$EVB_RELAY_HOST/api/v1/config` | JSON `changes[]` includes `poll_interval_ms -> 100`; `restart_required=false` | | |
 | 8.16 | Restore defaults            | `evb-relay config set hostname=esp32-evb-relay poll_interval_ms=100 modio_boot_policy=leave_unchanged` | All accepted | | |
 
@@ -299,7 +299,7 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | 14.7 | Reboot device              | Power cycle or OTA reboot | Device comes back online | | |
 | 14.8 | Verify leave_unchanged     | `evb-relay relay list --format json` | `modio_sync=unknown` after reboot; do not require the API to report the pre-reboot ON mask, because firmware intentionally discards MOD-IO relay cache until a new full-mask write re-establishes synchronization | | |
 | 14.9 | Single relay blocked while sync is unknown | `evb-relay relay on modio:1 2>&1; echo "exit:$?"` | Error; expected `MODIO_STATE_UNKNOWN` / exit code 6 until a full-mask write succeeds | | |
-| 14.10 | Cleanup and re-synchronize | `evb-relay relay set modio:1=off modio:2=off modio:3=off modio:4=off --format json` | All OFF; `all_ok=true`; `modio_sync=synchronized` | | |
+| 14.10 | Cleanup and re-synchronize | `evb-relay relay set modio:1=off modio:2=off modio:3=off modio:4=off --format json` | All OFF; `all_ok=true`; each MOD-IO result reports `sync=synchronized` | | |
 | 14.11 | Restore default policy    | `evb-relay config set modio_boot_policy=leave_unchanged` | Accepted | | |
 
 ---
