@@ -27,6 +27,7 @@
 #include "relay.h"
 #include "relay_events.h"
 #include "rest_api_request_recv.h"
+#include "rest_api_sse_lifetime.h"
 
 static const char *TAG = "rest_api";
 
@@ -106,16 +107,6 @@ typedef struct {
 } rest_api_sse_message_t;
 
 typedef struct {
-    bool active;
-    bool close_requested;
-    QueueHandle_t queue;
-    TaskHandle_t task_handle;
-    httpd_req_t *req;
-    rest_api_status_view_t status;
-    int sockfd;
-} rest_api_sse_client_t;
-
-typedef struct {
     bool started;
     QueueHandle_t dispatch_queue;
     SemaphoreHandle_t lock;
@@ -177,6 +168,8 @@ static esp_err_t rest_api_send_error_with_retryable(httpd_req_t *req,
 static esp_err_t rest_api_send_request_body_read_error(httpd_req_t *req, esp_err_t err);
 static esp_err_t rest_api_sse_start(void);
 static void rest_api_sse_stop(void);
+static void rest_api_sse_send_terminal_chunk(httpd_req_t *req);
+static void rest_api_sse_complete_async_request(httpd_req_t *req);
 
 #if CONFIG_ESP_TASK_WDT_EN
 static bool rest_api_task_watchdog_register(const char *task_name)
@@ -850,107 +843,29 @@ static bool rest_api_sse_format_message(int32_t event_id,
 
 static void rest_api_sse_release_client_slot(rest_api_sse_client_t *client)
 {
-    QueueHandle_t queue = NULL;
-    httpd_req_t *req = NULL;
+    static const rest_api_sse_lifetime_hooks_t hooks = {
+        .lock = rest_api_sse_lock,
+        .unlock = rest_api_sse_unlock,
+        .delete_queue = vQueueDelete,
+        .send_terminal_chunk = rest_api_sse_send_terminal_chunk,
+        .complete_async_request = rest_api_sse_complete_async_request,
+    };
 
-    if (client == NULL) {
-        return;
-    }
-
-    if (rest_api_sse_lock()) {
-        queue = client->queue;
-        req = client->req;
-        client->queue = NULL;
-        client->req = NULL;
-        rest_api_sse_unlock();
-    } else {
-        queue = client->queue;
-        req = client->req;
-        client->queue = NULL;
-        client->req = NULL;
-    }
-
-    if (queue != NULL) {
-        vQueueDelete(queue);
-    }
-
-    /* Complete async request before clearing the slot so that
-     * rest_api_sse_stop() waits for true completion. */
-    if (req != NULL) {
-        (void)httpd_resp_send_chunk(req, NULL, 0);
-        (void)httpd_req_async_handler_complete(req);
-    }
-
-    if (rest_api_sse_lock()) {
-        memset(client, 0, sizeof(*client));
-        client->sockfd = 0;
-        rest_api_sse_unlock();
-    } else {
-        memset(client, 0, sizeof(*client));
-    }
+    rest_api_sse_release_client_lifetime(client, &hooks);
 }
 
 static void rest_api_sse_force_release_client_slot(rest_api_sse_client_t *client)
 {
-    QueueHandle_t queue = NULL;
-    httpd_req_t *req = NULL;
-    TaskHandle_t task_handle = NULL;
+    static const rest_api_sse_lifetime_hooks_t hooks = {
+        .lock = rest_api_sse_lock,
+        .unlock = rest_api_sse_unlock,
+        .delete_queue = vQueueDelete,
+        .complete_async_request = rest_api_sse_complete_async_request,
+        .delete_task = vTaskDelete,
+        .current_task_handle = xTaskGetCurrentTaskHandle,
+    };
 
-    if (client == NULL) {
-        return;
-    }
-
-    if (rest_api_sse_lock()) {
-        if (!client->active) {
-            rest_api_sse_unlock();
-            return;
-        }
-
-        queue = client->queue;
-        req = client->req;
-        task_handle = client->task_handle;
-
-        if ((task_handle != NULL) && (task_handle != xTaskGetCurrentTaskHandle())) {
-            vTaskDelete(task_handle);
-        }
-
-        client->queue = NULL;
-        client->req = NULL;
-        client->task_handle = NULL;
-        rest_api_sse_unlock();
-    } else {
-        if (!client->active) {
-            return;
-        }
-
-        queue = client->queue;
-        req = client->req;
-        task_handle = client->task_handle;
-
-        if ((task_handle != NULL) && (task_handle != xTaskGetCurrentTaskHandle())) {
-            vTaskDelete(task_handle);
-        }
-
-        client->queue = NULL;
-        client->req = NULL;
-        client->task_handle = NULL;
-    }
-
-    if (queue != NULL) {
-        vQueueDelete(queue);
-    }
-
-    if (req != NULL) {
-        (void)httpd_req_async_handler_complete(req);
-    }
-
-    if (rest_api_sse_lock()) {
-        memset(client, 0, sizeof(*client));
-        client->sockfd = 0;
-        rest_api_sse_unlock();
-    } else {
-        memset(client, 0, sizeof(*client));
-    }
+    rest_api_sse_force_release_client_lifetime(client, &hooks);
 }
 
 static void rest_api_sse_clear_client_slot(rest_api_sse_client_t *client)
@@ -973,6 +888,20 @@ static void rest_api_sse_clear_client_slot(rest_api_sse_client_t *client)
 
     if (queue != NULL) {
         vQueueDelete(queue);
+    }
+}
+
+static void rest_api_sse_send_terminal_chunk(httpd_req_t *req)
+{
+    if (req != NULL) {
+        (void)httpd_resp_send_chunk(req, NULL, 0);
+    }
+}
+
+static void rest_api_sse_complete_async_request(httpd_req_t *req)
+{
+    if (req != NULL) {
+        (void)httpd_req_async_handler_complete(req);
     }
 }
 

@@ -1,5 +1,6 @@
 #include "rest_api.h"
 #include "rest_api_request_recv.h"
+#include "rest_api_sse_lifetime.h"
 
 #include <string.h>
 
@@ -30,6 +31,184 @@ int httpd_req_recv(httpd_req_t *req, char *buf, size_t buf_len)
     }
 
     return response;
+}
+
+typedef enum {
+    SSE_LIFETIME_EVENT_NONE = 0,
+    SSE_LIFETIME_EVENT_DELETE_QUEUE,
+    SSE_LIFETIME_EVENT_SEND_TERMINAL_CHUNK,
+    SSE_LIFETIME_EVENT_COMPLETE_ASYNC_REQUEST,
+    SSE_LIFETIME_EVENT_DELETE_TASK,
+} sse_lifetime_event_t;
+
+typedef struct {
+    rest_api_sse_client_t *client;
+    TaskHandle_t current_task;
+    size_t event_count;
+    sse_lifetime_event_t events[8];
+    size_t lock_count;
+    size_t unlock_count;
+    size_t delete_task_count;
+} rest_api_sse_lifetime_test_ctx_t;
+
+static rest_api_sse_lifetime_test_ctx_t s_sse_lifetime_test_ctx;
+
+static void rest_api_sse_lifetime_test_reset(rest_api_sse_client_t *client)
+{
+    memset(&s_sse_lifetime_test_ctx, 0, sizeof(s_sse_lifetime_test_ctx));
+    s_sse_lifetime_test_ctx.client = client;
+}
+
+static void rest_api_sse_lifetime_record_event(sse_lifetime_event_t event)
+{
+    TEST_ASSERT_TRUE(s_sse_lifetime_test_ctx.event_count < (sizeof(s_sse_lifetime_test_ctx.events) /
+                                                            sizeof(s_sse_lifetime_test_ctx.events[0])));
+    s_sse_lifetime_test_ctx.events[s_sse_lifetime_test_ctx.event_count++] = event;
+}
+
+static bool rest_api_sse_lifetime_test_lock(void)
+{
+    ++s_sse_lifetime_test_ctx.lock_count;
+    return true;
+}
+
+static void rest_api_sse_lifetime_test_unlock(void)
+{
+    ++s_sse_lifetime_test_ctx.unlock_count;
+}
+
+static void rest_api_sse_lifetime_test_delete_queue(QueueHandle_t queue)
+{
+    TEST_ASSERT_NOT_NULL(queue);
+    rest_api_sse_lifetime_record_event(SSE_LIFETIME_EVENT_DELETE_QUEUE);
+}
+
+static void rest_api_sse_lifetime_test_send_terminal_chunk(httpd_req_t *req)
+{
+    TEST_ASSERT_NOT_NULL(req);
+    TEST_ASSERT_TRUE(s_sse_lifetime_test_ctx.client->active);
+    rest_api_sse_lifetime_record_event(SSE_LIFETIME_EVENT_SEND_TERMINAL_CHUNK);
+}
+
+static void rest_api_sse_lifetime_test_complete_async_request(httpd_req_t *req)
+{
+    TEST_ASSERT_NOT_NULL(req);
+    TEST_ASSERT_TRUE(s_sse_lifetime_test_ctx.client->active);
+    rest_api_sse_lifetime_record_event(SSE_LIFETIME_EVENT_COMPLETE_ASYNC_REQUEST);
+}
+
+static void rest_api_sse_lifetime_test_delete_task(TaskHandle_t task_handle)
+{
+    TEST_ASSERT_NOT_NULL(task_handle);
+    TEST_ASSERT_TRUE(s_sse_lifetime_test_ctx.client->active);
+    ++s_sse_lifetime_test_ctx.delete_task_count;
+    rest_api_sse_lifetime_record_event(SSE_LIFETIME_EVENT_DELETE_TASK);
+}
+
+static TaskHandle_t rest_api_sse_lifetime_test_current_task_handle(void)
+{
+    return s_sse_lifetime_test_ctx.current_task;
+}
+
+static void test_rest_api_sse_release_client_lifetime_keeps_slot_active_until_completion(void)
+{
+    static const rest_api_sse_lifetime_hooks_t hooks = {
+        .lock = rest_api_sse_lifetime_test_lock,
+        .unlock = rest_api_sse_lifetime_test_unlock,
+        .delete_queue = rest_api_sse_lifetime_test_delete_queue,
+        .send_terminal_chunk = rest_api_sse_lifetime_test_send_terminal_chunk,
+        .complete_async_request = rest_api_sse_lifetime_test_complete_async_request,
+    };
+    rest_api_sse_client_t client = {
+        .active = true,
+        .queue = (QueueHandle_t)0x1,
+        .req = (httpd_req_t *)0x2,
+        .task_handle = (TaskHandle_t)0x3,
+        .sockfd = 42,
+    };
+
+    rest_api_sse_lifetime_test_reset(&client);
+    rest_api_sse_release_client_lifetime(&client, &hooks);
+
+    TEST_ASSERT_EQUAL_UINT32(3U, s_sse_lifetime_test_ctx.event_count);
+    TEST_ASSERT_EQUAL_INT(SSE_LIFETIME_EVENT_DELETE_QUEUE, s_sse_lifetime_test_ctx.events[0]);
+    TEST_ASSERT_EQUAL_INT(SSE_LIFETIME_EVENT_SEND_TERMINAL_CHUNK, s_sse_lifetime_test_ctx.events[1]);
+    TEST_ASSERT_EQUAL_INT(SSE_LIFETIME_EVENT_COMPLETE_ASYNC_REQUEST, s_sse_lifetime_test_ctx.events[2]);
+    TEST_ASSERT_EQUAL_UINT32(2U, s_sse_lifetime_test_ctx.lock_count);
+    TEST_ASSERT_EQUAL_UINT32(2U, s_sse_lifetime_test_ctx.unlock_count);
+    TEST_ASSERT_FALSE(client.active);
+    TEST_ASSERT_NULL(client.queue);
+    TEST_ASSERT_NULL(client.req);
+    TEST_ASSERT_NULL(client.task_handle);
+    TEST_ASSERT_EQUAL_INT(0, client.sockfd);
+}
+
+static void test_rest_api_sse_force_release_deletes_foreign_task_before_completion(void)
+{
+    static const rest_api_sse_lifetime_hooks_t hooks = {
+        .lock = rest_api_sse_lifetime_test_lock,
+        .unlock = rest_api_sse_lifetime_test_unlock,
+        .delete_queue = rest_api_sse_lifetime_test_delete_queue,
+        .complete_async_request = rest_api_sse_lifetime_test_complete_async_request,
+        .delete_task = rest_api_sse_lifetime_test_delete_task,
+        .current_task_handle = rest_api_sse_lifetime_test_current_task_handle,
+    };
+    rest_api_sse_client_t client = {
+        .active = true,
+        .queue = (QueueHandle_t)0x10,
+        .req = (httpd_req_t *)0x20,
+        .task_handle = (TaskHandle_t)0x30,
+        .sockfd = 7,
+    };
+
+    rest_api_sse_lifetime_test_reset(&client);
+    s_sse_lifetime_test_ctx.current_task = (TaskHandle_t)0x40;
+    rest_api_sse_force_release_client_lifetime(&client, &hooks);
+
+    TEST_ASSERT_EQUAL_UINT32(3U, s_sse_lifetime_test_ctx.event_count);
+    TEST_ASSERT_EQUAL_INT(SSE_LIFETIME_EVENT_DELETE_TASK, s_sse_lifetime_test_ctx.events[0]);
+    TEST_ASSERT_EQUAL_INT(SSE_LIFETIME_EVENT_DELETE_QUEUE, s_sse_lifetime_test_ctx.events[1]);
+    TEST_ASSERT_EQUAL_INT(SSE_LIFETIME_EVENT_COMPLETE_ASYNC_REQUEST, s_sse_lifetime_test_ctx.events[2]);
+    TEST_ASSERT_EQUAL_UINT32(1U, s_sse_lifetime_test_ctx.delete_task_count);
+    TEST_ASSERT_FALSE(client.active);
+    TEST_ASSERT_NULL(client.queue);
+    TEST_ASSERT_NULL(client.req);
+    TEST_ASSERT_NULL(client.task_handle);
+    TEST_ASSERT_EQUAL_INT(0, client.sockfd);
+}
+
+static void test_rest_api_sse_force_release_skips_delete_for_current_task(void)
+{
+    static const rest_api_sse_lifetime_hooks_t hooks = {
+        .lock = rest_api_sse_lifetime_test_lock,
+        .unlock = rest_api_sse_lifetime_test_unlock,
+        .delete_queue = rest_api_sse_lifetime_test_delete_queue,
+        .complete_async_request = rest_api_sse_lifetime_test_complete_async_request,
+        .delete_task = rest_api_sse_lifetime_test_delete_task,
+        .current_task_handle = rest_api_sse_lifetime_test_current_task_handle,
+    };
+    TaskHandle_t current_task = (TaskHandle_t)0x50;
+    rest_api_sse_client_t client = {
+        .active = true,
+        .queue = (QueueHandle_t)0x60,
+        .req = (httpd_req_t *)0x70,
+        .task_handle = current_task,
+        .sockfd = 8,
+    };
+
+    rest_api_sse_lifetime_test_reset(&client);
+    s_sse_lifetime_test_ctx.current_task = current_task;
+    rest_api_sse_force_release_client_lifetime(&client, &hooks);
+
+    TEST_ASSERT_EQUAL_UINT32(2U, s_sse_lifetime_test_ctx.event_count);
+    TEST_ASSERT_EQUAL_INT(SSE_LIFETIME_EVENT_DELETE_QUEUE, s_sse_lifetime_test_ctx.events[0]);
+    TEST_ASSERT_EQUAL_INT(SSE_LIFETIME_EVENT_COMPLETE_ASYNC_REQUEST, s_sse_lifetime_test_ctx.events[1]);
+    TEST_ASSERT_EQUAL_UINT32(0U, s_sse_lifetime_test_ctx.delete_task_count);
+    TEST_ASSERT_FALSE(client.active);
+    TEST_ASSERT_NULL(client.queue);
+    TEST_ASSERT_NULL(client.req);
+    TEST_ASSERT_NULL(client.task_handle);
+    TEST_ASSERT_EQUAL_INT(0, client.sockfd);
 }
 
 static void test_rest_api_modio_sync_from_driver_maps_absent(void)
@@ -134,6 +313,9 @@ static void test_rest_api_request_recv_exact_returns_failure_for_socket_errors(v
 
 void test_rest_api_suite(void)
 {
+    RUN_TEST(test_rest_api_sse_release_client_lifetime_keeps_slot_active_until_completion);
+    RUN_TEST(test_rest_api_sse_force_release_deletes_foreign_task_before_completion);
+    RUN_TEST(test_rest_api_sse_force_release_skips_delete_for_current_task);
     RUN_TEST(test_rest_api_modio_sync_from_driver_maps_absent);
     RUN_TEST(test_rest_api_modio_sync_from_driver_maps_synchronized);
     RUN_TEST(test_rest_api_modio_sync_from_driver_maps_unknown);

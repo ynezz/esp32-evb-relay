@@ -11,6 +11,7 @@ typedef uint32_t configSTACK_DEPTH_TYPE;
 typedef void (*TaskFunction_t)(void *arg);
 typedef struct freertos_stub_task *TaskHandle_t;
 typedef struct freertos_stub_event_group *EventGroupHandle_t;
+typedef void *QueueHandle_t;
 typedef uint32_t EventBits_t;
 
 typedef struct {
