@@ -345,7 +345,7 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | Section | Description                 | Total | Pass | Fail | Skip |
 |---------|-----------------------------|-------|------|------|------|
 | 1       | Automated quality gates     | 12    | 9    | 3    | 0    |
-| 2       | Version & discovery         | 4     | 2    | 0    | 1    |
+| 2       | Version & discovery         | 4     | 3    | 0    | 1    |
 | 3       | Status                      | 6     | 6    | 0    | 0    |
 | 4       | Onboard relay control       | 13    | 13   | 0    | 0    |
 | 5       | MOD-IO relay control        | 14    | 14   | 0    | 0    |
