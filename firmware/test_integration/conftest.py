@@ -208,6 +208,9 @@ def _read_device_config_values(repo_root: Path, flash_port: str, flash_baud: str
         if not line or line.startswith("Page "):
             continue
 
+        if ":" not in line or " = " not in line:
+            raise RuntimeError(f"unexpected nvs_tool output: {line!r}")
+
         namespaced_key, value = line.split(" = ", 1)
         namespace, key = namespaced_key.split(":", 1)
         if namespace == "device_cfg":

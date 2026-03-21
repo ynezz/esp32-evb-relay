@@ -201,6 +201,20 @@ def test_integration_parttool_uses_rom_bootloader_only() -> None:
     ]
 
 
+def test_read_device_config_values_rejects_unexpected_dump_lines(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    module = _load_integration_conftest()
+    outputs = iter(["", "device_cfg:api_token = token-123\nbad-line-without-separators\n"])
+
+    monkeypatch.setenv("IDF_PATH", str(tmp_path / "idf"))
+    monkeypatch.setattr(module, "_run_command", lambda _command: next(outputs))
+
+    with pytest.raises(RuntimeError, match=r"unexpected nvs_tool output: 'bad-line-without-separators'"):
+        module._read_device_config_values(_repo_root(), "/dev/esp32-evb", "115200")
+
+
 def test_provision_script_disables_stub_for_parttool() -> None:
     script_text = (_repo_root() / "scripts/provision.sh").read_text(encoding="utf-8")
     assert "parttool_esptool_args=(--esptool-args no-stub)" in script_text
