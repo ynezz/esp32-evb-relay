@@ -57,11 +57,14 @@ test-device: _ensure-python-tools
         rm -f firmware/test_app/sdkconfig
     {{idf_activate}} cd firmware/test_app && \
         idf.py -DSDKCONFIG_DEFAULTS="{{test_app_sdkconfig_defaults}}" build
+    # The custom serial runner owns the UART directly and stalls under
+    # pytest's default stdout/stderr capture, so keep `-s` enabled here.
     {{idf_activate}} cd firmware/test_app && \
         ../../{{venv_python}} ../../scripts/run_with_watchdog.py \
         --timeout-seconds {{test_device_watchdog_seconds}} \
         -- \
         ../../{{venv_python}} -m pytest --target esp32 -p no:cacheprovider \
+            -s \
             pytest_evb_relay.py \
             --esptool-baud 115200 \
             --flash-port {{flash_port}} \
