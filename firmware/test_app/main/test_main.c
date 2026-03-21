@@ -8,12 +8,15 @@
 #include "rest_api.h"
 #include "unity.h"
 
+void test_rest_api_device_cleanup(void);
+
 void setUp(void)
 {
 }
 
 void tearDown(void)
 {
+    test_rest_api_device_cleanup();
     (void)rest_api_stop();
     ota_reset_for_testing();
 

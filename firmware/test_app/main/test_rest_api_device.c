@@ -109,6 +109,75 @@ typedef struct {
     bool api_token_set;
 } device_config_fixture_t;
 
+static int s_tracked_client_sockets[CONFIG_LWIP_MAX_SOCKETS];
+static bool s_tracked_client_sockets_initialized;
+
+static void initialize_tracked_client_sockets(void)
+{
+    if (s_tracked_client_sockets_initialized) {
+        return;
+    }
+
+    for (size_t index = 0; index < (sizeof(s_tracked_client_sockets) / sizeof(s_tracked_client_sockets[0]));
+            ++index) {
+        s_tracked_client_sockets[index] = -1;
+    }
+
+    s_tracked_client_sockets_initialized = true;
+}
+
+static void track_client_socket(int sock)
+{
+    initialize_tracked_client_sockets();
+
+    for (size_t index = 0; index < (sizeof(s_tracked_client_sockets) / sizeof(s_tracked_client_sockets[0]));
+            ++index) {
+        if (s_tracked_client_sockets[index] == sock) {
+            return;
+        }
+
+        if (s_tracked_client_sockets[index] < 0) {
+            s_tracked_client_sockets[index] = sock;
+            return;
+        }
+    }
+
+    TEST_FAIL_MESSAGE("No free tracked client socket slots");
+}
+
+static void close_tracked_client_socket(int *sock)
+{
+    if ((sock == NULL) || (*sock < 0)) {
+        return;
+    }
+
+    initialize_tracked_client_sockets();
+    for (size_t index = 0; index < (sizeof(s_tracked_client_sockets) / sizeof(s_tracked_client_sockets[0]));
+            ++index) {
+        if (s_tracked_client_sockets[index] == *sock) {
+            s_tracked_client_sockets[index] = -1;
+            break;
+        }
+    }
+
+    close(*sock);
+    *sock = -1;
+}
+
+void test_rest_api_device_cleanup(void)
+{
+    initialize_tracked_client_sockets();
+    for (size_t index = 0; index < (sizeof(s_tracked_client_sockets) / sizeof(s_tracked_client_sockets[0]));
+            ++index) {
+        if (s_tracked_client_sockets[index] < 0) {
+            continue;
+        }
+
+        close(s_tracked_client_sockets[index]);
+        s_tracked_client_sockets[index] = -1;
+    }
+}
+
 static void capture_auth_token_fixture(auth_token_fixture_t *fixture)
 {
     TEST_ASSERT_NOT_NULL(fixture);
@@ -271,6 +340,7 @@ static void perform_http_request(uint16_t port,
 
     sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
     TEST_ASSERT_GREATER_OR_EQUAL_INT32(0, sock);
+    track_client_socket(sock);
     TEST_ASSERT_GREATER_OR_EQUAL_INT32(0,
                                        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)));
     TEST_ASSERT_GREATER_OR_EQUAL_INT32(0,
@@ -291,7 +361,7 @@ static void perform_http_request(uint16_t port,
         response[received] = '\0';
     }
     TEST_ASSERT_GREATER_THAN_UINT32(0U, received);
-    close(sock);
+    close_tracked_client_socket(&sock);
 }
 
 static size_t count_substring_occurrences(const char *haystack, const char *needle)
@@ -380,6 +450,7 @@ static int open_http_stream_request(uint16_t port,
 
     sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
     TEST_ASSERT_GREATER_OR_EQUAL_INT32(0, sock);
+    track_client_socket(sock);
     TEST_ASSERT_GREATER_OR_EQUAL_INT32(0,
                                        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)));
     TEST_ASSERT_GREATER_OR_EQUAL_INT32(0,
@@ -397,8 +468,7 @@ static void abort_http_stream_socket(int *sock)
     TEST_ASSERT_NOT_NULL(sock);
     TEST_ASSERT_GREATER_OR_EQUAL_INT32(0, *sock);
     TEST_ASSERT_GREATER_OR_EQUAL_INT32(0, shutdown(*sock, SHUT_RDWR));
-    close(*sock);
-    *sock = -1;
+    close_tracked_client_socket(sock);
 }
 
 static void read_stream_until_contains(int sock,
@@ -524,6 +594,7 @@ static void perform_partition_upload_request(uint16_t port,
 
     sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
     TEST_ASSERT_GREATER_OR_EQUAL_INT32(0, sock);
+    track_client_socket(sock);
     TEST_ASSERT_GREATER_OR_EQUAL_INT32(0,
                                        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)));
     TEST_ASSERT_GREATER_OR_EQUAL_INT32(0,
@@ -548,7 +619,7 @@ static void perform_partition_upload_request(uint16_t port,
     }
 
     read_response_to_close(sock, response, response_size);
-    close(sock);
+    close_tracked_client_socket(&sock);
 }
 
 TEST_CASE("rest_api device starts the HTTP server on the configured port",
@@ -1211,7 +1282,7 @@ TEST_CASE("rest_api device streams relay events over SSE", "[qa][rest_api][devic
     TEST_ASSERT_NOT_NULL(strstr(response,
                                 "data: {\"group\":\"onboard\",\"id\":1,\"state\":true,\"ts_ms\":12345}"));
 
-    close(sock);
+    close_tracked_client_socket(&sock);
 }
 
 TEST_CASE("rest_api device streams MOD-IO presence events over SSE", "[qa][rest_api][device]")
@@ -1247,7 +1318,7 @@ TEST_CASE("rest_api device streams MOD-IO presence events over SSE", "[qa][rest_
     TEST_ASSERT_NOT_NULL(strstr(response, "event: modio_presence"));
     TEST_ASSERT_NOT_NULL(strstr(response, "data: {\"present\":false,\"ts_ms\":12345}"));
 
-    close(sock);
+    close_tracked_client_socket(&sock);
 }
 
 TEST_CASE("rest_api device emits SSE heartbeats", "[qa][rest_api][device]")
@@ -1269,7 +1340,34 @@ TEST_CASE("rest_api device emits SSE heartbeats", "[qa][rest_api][device]")
     read_stream_until_contains(sock, ":heartbeat", response, sizeof(response));
     TEST_ASSERT_NOT_NULL(strstr(response, ":heartbeat"));
 
-    close(sock);
+    close_tracked_client_socket(&sock);
+}
+
+TEST_CASE("rest_api device cleanup closes tracked client sockets", "[qa][rest_api][device]")
+{
+    static const uint16_t test_port = 18105U;
+    static const rest_api_config_t config = {
+        .port = test_port,
+        .auth_handler = allow_auth_handler,
+        .status_provider = status_provider,
+    };
+    char response[1024];
+    int sock = -1;
+
+    ensure_tcpip_ready();
+    TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
+
+    sock = open_http_stream_request(test_port, "/api/v1/events", NULL);
+    read_stream_until_contains(sock, ":connected", response, sizeof(response));
+    TEST_ASSERT_TRUE(rest_api_sse_wait_for_active_client_count_for_testing(1U, 1000U));
+
+    test_rest_api_device_cleanup();
+    TEST_ASSERT_TRUE(rest_api_sse_wait_for_active_client_count_for_testing(0U, 1000U));
+
+    sock = open_http_stream_request(test_port, "/api/v1/events", NULL);
+    read_stream_until_contains(sock, ":connected", response, sizeof(response));
+    TEST_ASSERT_TRUE(rest_api_sse_wait_for_active_client_count_for_testing(1U, 1000U));
+    close_tracked_client_socket(&sock);
 }
 
 TEST_CASE("rest_api device enforces the SSE client limit", "[qa][rest_api][device]")
@@ -1303,10 +1401,10 @@ TEST_CASE("rest_api device enforces the SSE client limit", "[qa][rest_api][devic
                                sizeof(response));
     TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 503 Service Unavailable"));
     TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"SSE_CLIENT_LIMIT_REACHED\""));
-    close(extra_sock);
+    close_tracked_client_socket(&extra_sock);
 
     for (size_t index = 0; index < max_sse_clients; ++index) {
-        close(sockets[index]);
+        close_tracked_client_socket(&sockets[index]);
     }
 }
 
@@ -1344,10 +1442,10 @@ TEST_CASE("rest_api device releases SSE slots after abrupt client disconnect",
     TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
     TEST_ASSERT_NULL(strstr(response, "\"code\":\"SSE_CLIENT_LIMIT_REACHED\""));
     TEST_ASSERT_NOT_NULL(strstr(response, ":connected"));
-    close(replacement_sock);
+    close_tracked_client_socket(&replacement_sock);
 
     for (size_t index = 1U; index < max_sse_clients; ++index) {
-        close(sockets[index]);
+        close_tracked_client_socket(&sockets[index]);
     }
 }
 
@@ -1373,12 +1471,12 @@ TEST_CASE("rest_api device returns 503 when SSE task startup fails after async d
     TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 503 Service Unavailable"));
     TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"SSE_UNAVAILABLE\""));
     TEST_ASSERT_NOT_NULL(strstr(response, "\"message\":\"Failed to start event stream task\""));
-    close(sock);
+    close_tracked_client_socket(&sock);
 
     sock = open_http_stream_request(test_port, "/api/v1/events", NULL);
     read_stream_until_contains(sock, ":connected", response, sizeof(response));
     TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
-    close(sock);
+    close_tracked_client_socket(&sock);
 }
 
 TEST_CASE("rest_api device stop owns SSE dispatch task deletion", "[qa][rest_api][device]")
@@ -1400,7 +1498,7 @@ TEST_CASE("rest_api device stop owns SSE dispatch task deletion", "[qa][rest_api
     TEST_ASSERT_EQUAL(ESP_OK, rest_api_stop());
     TEST_ASSERT_TRUE(rest_api_sse_dispatch_task_deleted_by_stop_for_testing());
 
-    close(sock);
+    close_tracked_client_socket(&sock);
 }
 
 TEST_CASE("rest_api device accepts OTA uploads and switches the boot partition",
