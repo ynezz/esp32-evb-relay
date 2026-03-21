@@ -171,20 +171,20 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 
 | #   | Test                        | Command | Expected | Result | Notes |
 |-----|-----------------------------|---------|----------|--------|-------|
-| 8.1 | Config show (CLI)           | `evb-relay config show --format json` | JSON with `poll_interval_ms`, `hostname`, `modio_boot_policy`, `api_token_set`, `wifi.ssid_set`, `wifi.passphrase_set`, `wifi.network_policy` | | |
+| 8.1 | Config show (CLI)           | `evb-relay config show --format json` | JSON with top-level `config`; fields under `config.poll_interval_ms`, `config.hostname`, `config.modio_boot_policy`, `config.api_token_set`, `config.wifi.*` | | |
 | 8.2 | Config show (table)         | `evb-relay config show` | Human-readable table; exit 0 | | |
 | 8.3 | Config show (REST)          | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/config` | JSON matching CLI output; secrets shown as `_set` booleans only | | |
 | 8.4 | Set hostname                | `evb-relay config set hostname=test-relay --format json` | Accepted; exit 0 | | |
-| 8.5 | Verify hostname             | `evb-relay config show --format json \| jq -r '.hostname'` | `test-relay` | | |
+| 8.5 | Verify hostname             | `evb-relay config show --format json \| jq -r '.config.hostname'` | `test-relay` | | |
 | 8.6 | Set poll_interval_ms        | `evb-relay config set poll_interval_ms=200 --format json` | Accepted; exit 0 | | |
-| 8.7 | Verify poll_interval_ms     | `evb-relay config show --format json \| jq '.poll_interval_ms'` | `200` | | |
+| 8.7 | Verify poll_interval_ms     | `evb-relay config show --format json \| jq '.config.poll_interval_ms'` | `200` | | |
 | 8.8 | Set modio_boot_policy       | `evb-relay config set modio_boot_policy=all_off --format json` | Accepted; exit 0 | | |
-| 8.9 | Invalid: poll too low       | `evb-relay config set poll_interval_ms=10` | Rejected; exit code 5 (bad argument) | | |
-| 8.10 | Invalid: poll too high     | `evb-relay config set poll_interval_ms=20000` | Rejected; exit code 5 | | |
+| 8.9 | Invalid: poll too low       | `evb-relay config set poll_interval_ms=10` | Rejected by the device (`INVALID_CONFIG_VALUE` / HTTP 400); CLI exits non-zero and is typically `1`, not local parse error `5` | | |
+| 8.10 | Invalid: poll too high     | `evb-relay config set poll_interval_ms=20000` | Rejected by the device (`INVALID_CONFIG_VALUE` / HTTP 400); CLI exits non-zero and is typically `1` | | |
 | 8.11 | Invalid: empty hostname    | `evb-relay config set hostname=` | Rejected; exit code 5 | | |
-| 8.12 | Invalid: hostname too long | `evb-relay config set hostname=a234567890123456789012345678901234567890123456789012345678901234` | Rejected (64 chars > max 63); exit code 5 | | |
-| 8.13 | Invalid: hostname leading hyphen | `evb-relay config set hostname=-bad` | Rejected; exit code 5 | | |
-| 8.14 | Invalid: hostname special chars | `evb-relay config set hostname=host.name` | Rejected; exit code 5 | | |
+| 8.12 | Invalid: hostname too long | `evb-relay config set hostname=a234567890123456789012345678901234567890123456789012345678901234` | Rejected by the device (64 chars > max 63); CLI exits non-zero and is typically `1`, not `5` | | |
+| 8.13 | Invalid: hostname leading hyphen | `evb-relay config set hostname=-bad` | Rejected by the device; CLI exits non-zero and is typically `1` | | |
+| 8.14 | Invalid: hostname special chars | `evb-relay config set hostname=host.name` | Rejected by the device; CLI exits non-zero and is typically `1` | | |
 | 8.15 | Config via REST             | `curl -s -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d '{"poll_interval_ms":100}' http://$EVB_RELAY_HOST/api/v1/config` | HTTP 200; accepted | | |
 | 8.16 | Restore defaults            | `evb-relay config set hostname=esp32-evb-relay poll_interval_ms=100 modio_boot_policy=leave_unchanged` | All accepted | | |
 
@@ -195,13 +195,13 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | #   | Test                        | Command | Expected | Result | Notes |
 |-----|-----------------------------|---------|----------|--------|-------|
 | 9.1 | Set WiFi credentials        | `evb-relay config wifi ssid=TestNet passphrase=secret123 --format json` | Accepted; `restart_required` may be true; exit 0 | | |
-| 9.2 | Verify ssid_set             | `evb-relay config show --format json \| jq '.wifi.ssid_set'` | `true` | | |
-| 9.3 | Verify passphrase_set       | `evb-relay config show --format json \| jq '.wifi.passphrase_set'` | `true` | | |
+| 9.2 | Verify ssid_set             | `evb-relay config show --format json \| jq '.config.wifi.ssid_set'` | `true` | | |
+| 9.3 | Verify passphrase_set       | `evb-relay config show --format json \| jq '.config.wifi.passphrase_set'` | `true` | | |
 | 9.4 | Set network_policy          | `evb-relay config wifi network_policy=prefer_ethernet --format json` | Accepted; exit 0 | | |
-| 9.5 | Verify network_policy       | `evb-relay config show --format json \| jq -r '.wifi.network_policy'` | `prefer_ethernet` | | |
+| 9.5 | Verify network_policy       | `evb-relay config show --format json \| jq -r '.config.wifi.network_policy'` | `prefer_ethernet` | | |
 | 9.6 | WiFi via REST               | `curl -s -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d '{"network_policy":"ethernet_only"}' http://$EVB_RELAY_HOST/api/v1/config/wifi` | HTTP 200; accepted | | |
 | 9.7 | Clear WiFi credentials      | `evb-relay config wifi clear=true --format json` | Accepted; exit 0 | | |
-| 9.8 | Verify cleared              | `evb-relay config show --format json \| jq '.wifi.ssid_set'` | `false` | | |
+| 9.8 | Verify cleared              | `evb-relay config show --format json \| jq '{ssid_set: .config.wifi.ssid_set, passphrase_set: .config.wifi.passphrase_set}'` | Both booleans are `false` | | |
 | 9.9 | Invalid: passphrase without ssid | `evb-relay config wifi passphrase=secret` | Rejected; exit code 5 | | |
 | 9.10 | Invalid: clear with ssid   | `evb-relay config wifi clear=true ssid=TestNet` | Rejected; exit code 5 | | |
 
@@ -251,14 +251,14 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | 12.4 | Invalid input ID           | `evb-relay input digital 5 2>&1; echo "exit:$?"` | Error; exit code 5 | | |
 | 12.5 | Invalid input ID 0         | `evb-relay input analog 0 2>&1; echo "exit:$?"` | Error; exit code 5 | | |
 | 12.6 | Invalid group name         | `evb-relay relay on bogus:1 2>&1; echo "exit:$?"` | Error; exit code 5 | | |
-| 12.7 | Invalid relay via REST     | `curl -s -o /dev/null -w '%{http_code}' -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d '{"state":true}' http://$EVB_RELAY_HOST/api/v1/relays/onboard/9` | HTTP 400 or 404 | | |
-| 12.8 | Invalid input via REST     | `curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/inputs/digital/9` | HTTP 400 or 404 | | |
+| 12.7 | Invalid relay via REST     | `curl -s -o /dev/null -w '%{http_code}' -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d '{"state":true}' http://$EVB_RELAY_HOST/api/v1/relays/onboard/9` | HTTP 404 with `RELAY_NOT_FOUND` | | |
+| 12.8 | Invalid input via REST     | `curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/inputs/digital/9` | HTTP 404 with `INPUT_NOT_FOUND` | | |
 | 12.9 | Missing JSON body (relay)  | `curl -s -o /dev/null -w '%{http_code}' -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/relays/onboard/1` | HTTP 400 | | |
 | 12.10 | Invalid JSON body         | `curl -s -o /dev/null -w '%{http_code}' -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d 'not-json' http://$EVB_RELAY_HOST/api/v1/relays/onboard/1` | HTTP 400 | | |
 | 12.11 | Unknown endpoint          | `curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/nonexistent` | HTTP 404 | | |
 | 12.12 | Network error (CLI)       | `EVB_RELAY_HOST=192.0.2.1 evb-relay status --timeout 2s 2>&1; echo "exit:$?"` | Network error; exit code 2 | | |
-| 12.13 | Relay set partial bad target | `evb-relay relay set onboard:1=on bogus:1=on --format json 2>&1; echo "exit:$?"` | Error or partial failure; exit code != 0 | | |
-| 12.14 | OTA with bad file         | `echo "garbage" > /tmp/bad-fw.bin && evb-relay ota flash /tmp/bad-fw.bin 2>&1; echo "exit:$?"` | Error or device rejects; device recovers on next boot | | |
+| 12.13 | Mixed good/bad relay targets | `evb-relay relay set onboard:1=on bogus:1=on --format json 2>&1; echo "exit:$?"` | Rejected locally before any HTTP request; exit code 5, no device-side partial failure record is expected | | |
+| 12.14 | OTA with bad file         | `echo "garbage" > /tmp/bad-fw.bin && evb-relay ota flash /tmp/bad-fw.bin 2>&1; echo "exit:$?"` | Upload fails with a non-zero exit; verify the next `evb-relay status` still succeeds before continuing instead of assuming a reboot path | | |
 
 ---
 
