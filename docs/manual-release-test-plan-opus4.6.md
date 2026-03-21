@@ -271,14 +271,14 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | #   | Test                        | Command | Expected | Result | Notes |
 |-----|-----------------------------|---------|----------|--------|-------|
 | 13.1 | Disconnect MOD-IO          | Physically disconnect MOD-IO from UEXT | Device continues running | | |
-| 13.2 | Status shows absent        | `evb-relay status --format json \| jq '.modio'` | `present=false`, `sync=absent` | | |
-| 13.3 | MOD-IO relay → state error | `evb-relay relay on modio:1 2>&1; echo "exit:$?"` | Error; exit code 6 (state error) or 7 (HW unavailable) | | |
-| 13.4 | MOD-IO input → error       | `evb-relay input digital 2>&1; echo "exit:$?"` | Error or empty/stale data | | |
+| 13.2 | Status shows absent        | `evb-relay status --format json \| jq '.status.modio'` | `present=false`, `sync=absent` | | |
+| 13.3 | MOD-IO relay → absent error | `evb-relay relay on modio:1 2>&1; echo "exit:$?"` | Error; expected `MODIO_NOT_PRESENT` / exit code 7, not state-error 6 | | |
+| 13.4 | MOD-IO input → absent error | `evb-relay input digital 2>&1; echo "exit:$?"` | Error; expected `MODIO_NOT_PRESENT` / exit code 7 rather than empty or stale cached data | | |
 | 13.5 | Onboard relays still work  | `evb-relay relay toggle onboard:1 --format json` | Works normally; exit 0 | | |
 | 13.6 | REST modio → 503           | `curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -X PUT -H "Content-Type: application/json" -d '{"state":true}' http://$EVB_RELAY_HOST/api/v1/relays/modio/1` | HTTP 503 (service unavailable) | | |
-| 13.7 | Relay list (degraded)      | `evb-relay relay list --format json` | `modio_present=false`; only onboard relays listed or modio relays with sync=absent | | |
+| 13.7 | Relay list (degraded)      | `evb-relay relay list --format json` | `modio_present=false`; only onboard relays are listed because the combined relay API omits absent MOD-IO relays | | |
 | 13.8 | Reconnect MOD-IO           | Physically reconnect MOD-IO to UEXT | Device detects MOD-IO | | |
-| 13.9 | Status shows recovery      | `evb-relay status --format json \| jq '.modio'` | `present=true`; sync transitions to `unknown` or `synchronized` | | |
+| 13.9 | Status shows recovery      | `evb-relay status --format json \| jq '.status.modio'` | `present=true`; sync transitions to `unknown` or `synchronized` | | |
 | 13.10 | Cleanup: onboard OFF     | `evb-relay relay off onboard:1` | Exit 0 | | |
 
 ---
@@ -297,7 +297,7 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | 14.5 | Set policy: leave_unchanged | `evb-relay config set modio_boot_policy=leave_unchanged --format json` | Accepted; exit 0 | | |
 | 14.6 | Set MOD-IO relays ON       | `evb-relay relay set modio:1=on modio:2=on modio:3=on modio:4=on` | All ON; exit 0 | | |
 | 14.7 | Reboot device              | Power cycle or OTA reboot | Device comes back online | | |
-| 14.8 | Verify leave_unchanged     | `evb-relay relay list --format json` | MOD-IO relay state unchanged (ON) or `sync=unknown` (cache lost on reboot) | | |
+| 14.8 | Verify leave_unchanged     | `evb-relay relay list --format json` | `modio_sync=unknown` after reboot; do not require the API to report the pre-reboot ON mask, because firmware intentionally discards MOD-IO relay cache until a new full-mask write re-establishes synchronization | | |
 | 14.9 | Cleanup: all OFF           | `evb-relay relay set modio:1=off modio:2=off modio:3=off modio:4=off` | All OFF | | |
 | 14.10 | Restore default policy    | `evb-relay config set modio_boot_policy=leave_unchanged` | Accepted | | |
 
@@ -397,20 +397,17 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
    ```bash
    git add docs/manual-release-test-plan-opus4.6.md
    git -c commit.gpgsign=false commit -s -m "$(cat <<'EOF'
-   test: complete manual pre-release test plan for vX.Y.Z
+   test: record manual pre-release results for vX.Y.Z
 
-   Currently there is no agent-executable pre-release validation
-   checklist that covers the full CLI + firmware feature set against
-   real hardware.
+   Currently the release candidate needs a completed real-hardware
+   sign-off record before the final tag is cut.
 
-   So lets add a comprehensive 156-test checklist covering all 17
-   functional areas: CI gates, status, relay control (onboard +
-   MOD-IO), inputs, SSE streaming, config, WiFi, auth, OTA, error
-   handling, graceful degradation, boot policy, output formats, exit
-   codes, persistence, and button events.
+   So lets commit the finished manual pre-release checklist with the
+   observed PASS/FAIL/SKIP results, notes, and sign-off metadata for
+   this release candidate.
 
-   The executing agent fills in results and commits the completed
-   file as the test record for the release.
+   This commit captures the executed test record rather than adding the
+   checklist for the first time.
    EOF
    )"
    ```
