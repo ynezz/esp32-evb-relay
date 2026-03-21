@@ -55,11 +55,13 @@ just build          # -> firmware/build/evb_relay_firmware.bin
 
 ```bash
 cd cli && go build -o /tmp/evb-relay . && cd ..
+export PATH="/tmp:$PATH"
+hash -r
 ```
 
-Or use `just cli-test` to also run unit tests. The binary is only
-needed on `PATH` (or referenced by absolute path) for the test
-commands below.
+Or use `just cli-test` to also run unit tests. The commands below
+assume `evb-relay` resolves on `PATH`; if you skip the `export PATH`
+step, replace `evb-relay` with `/tmp/evb-relay`.
 
 ### Step 3 — Flash production firmware
 
@@ -167,7 +169,7 @@ At this point all of the following must be true:
 - `echo $EVB_RELAY_HOST` prints the device IP
 - `echo $EVB_RELAY_API_TOKEN` prints the provisioned token
 - `curl` to the status endpoint returns HTTP 200 with JSON
-- `/tmp/evb-relay --version` prints the CLI version
+- `evb-relay --version` prints the CLI version
 
 ---
 
