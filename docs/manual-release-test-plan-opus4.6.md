@@ -311,12 +311,12 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | 15.1 | Table format (default)     | `evb-relay relay list` | Formatted ASCII table; exit 0 | | |
 | 15.2 | Plain format               | `evb-relay relay list --format plain` | Minimal text output; exit 0 | | |
 | 15.3 | JSON format                | `evb-relay relay list --format json` | Valid JSON (parseable by jq); exit 0 | | |
-| 15.4 | Robot TOON format          | `evb-relay relay list --robot` | TOON envelope line; exit 0 | | |
+| 15.4 | Robot TOON format          | `evb-relay relay list --robot` | Multiline TOON envelope with `v`, `command`, `timestamp`, `elapsed_ms`, `exit_code`, `host`, `device_context`, and `data`; exit 0 | | |
 | 15.5 | Robot JSON format          | `evb-relay relay list --robot --format json` | JSON envelope with `v`, `command`, `timestamp`, `elapsed_ms`, `exit_code`, `host`, `device_context`, `data`; exit 0 | | |
-| 15.6 | Exit code 0 (success)      | `evb-relay status; echo $?` | `0` | | |
-| 15.7 | Exit code 2 (network)      | `EVB_RELAY_HOST=192.0.2.1 evb-relay status --timeout 2s 2>/dev/null; echo $?` | `2` | | |
-| 15.8 | Exit code 3 (auth)         | `EVB_RELAY_API_TOKEN=wrong evb-relay status 2>/dev/null; echo $?` | `3` | | |
-| 15.9 | Exit code 5 (bad arg)      | `evb-relay relay on onboard:99 2>/dev/null; echo $?` | `5` | | |
+| 15.6 | Exit code 0 (success)      | `status=0; evb-relay status >/dev/null 2>&1 || status=$?; printf 'exit:%s\n' "$status"; test "$status" -eq 0` | Printed `exit:0`; overall shell exits 0 only if the CLI returned success code 0 | | |
+| 15.7 | Exit code 2 (network)      | `status=0; EVB_RELAY_HOST=192.0.2.1 evb-relay status --timeout 2s >/dev/null 2>&1 || status=$?; printf 'exit:%s\n' "$status"; test "$status" -eq 2` | Printed `exit:2`; overall shell exits 0 only if the CLI returned network-error code 2 | | |
+| 15.8 | Exit code 3 (auth)         | `status=0; EVB_RELAY_API_TOKEN=wrong evb-relay status >/dev/null 2>&1 || status=$?; printf 'exit:%s\n' "$status"; test "$status" -eq 3` | Printed `exit:3`; overall shell exits 0 only if the CLI returned auth-error code 3 | | |
+| 15.9 | Exit code 5 (bad arg)      | `status=0; evb-relay relay on onboard:99 >/dev/null 2>&1 || status=$?; printf 'exit:%s\n' "$status"; test "$status" -eq 5` | Printed `exit:5`; overall shell exits 0 only if the CLI returned bad-argument code 5 | | |
 
 ---
 
