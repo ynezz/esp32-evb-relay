@@ -27,6 +27,11 @@ const (
 
 var queryMDNS = mdns.QueryContext
 
+var discoverNoResultsNext = []string{
+	"Check the device serial console or DHCP lease table for the IP address.",
+	"Retry discovery from a network segment that forwards mDNS multicast.",
+}
+
 type discoverDevice struct {
 	Hostname string   `json:"hostname"`
 	IP       string   `json:"ip"`
@@ -74,20 +79,39 @@ func runDiscover(cmd *cobra.Command, _ []string) error {
 	startedAt := time.Now()
 	result, err := discoverDevices(cmd.Context(), timeout)
 	elapsed := time.Since(startedAt)
+	warnings, next := discoverAdvice(result, err)
 
 	if runtime.Robot {
 		return robot.Wrap(cmd, cmd.OutOrStdout(), robot.WrapOpts{
-			Data:    result,
-			Err:     err,
-			Format:  runtime.Format,
-			Elapsed: elapsed,
+			Data:     result,
+			Err:      err,
+			Format:   runtime.Format,
+			Elapsed:  elapsed,
+			Warnings: warnings,
+			Next:     next,
 		})
 	}
 	if err != nil {
 		return err
 	}
 
+	for _, warning := range warnings {
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), warning)
+	}
+	for _, step := range next {
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), step)
+	}
+
 	return outputformat.Output(cmd.OutOrStdout(), result, runtime.Format)
+}
+
+func discoverAdvice(result discoverResult, err error) ([]string, []string) {
+	if err != nil || len(result.Devices) > 0 {
+		return nil, nil
+	}
+
+	return []string{"No EVB relay devices were discovered via mDNS on this network segment."},
+		append([]string(nil), discoverNoResultsNext...)
 }
 
 func discoverDevices(ctx context.Context, timeout time.Duration) (discoverResult, error) {

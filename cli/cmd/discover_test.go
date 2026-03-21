@@ -144,3 +144,79 @@ func TestDiscoverAllowsCustomTimeoutOverride(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 }
+
+func TestDiscoverWarnsWhenNoDevicesAreFound(t *testing.T) {
+	restore := stubMDNSQuery(t, func(_ context.Context, params *mdns.QueryParam) error {
+		return nil
+	})
+	defer restore()
+
+	command := newRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	command.SetOut(stdout)
+	command.SetErr(stderr)
+	command.SetArgs([]string{"--format", "json", "discover"})
+
+	if err := command.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	var payload struct {
+		Devices []any `json:"devices"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(payload.Devices) != 0 {
+		t.Fatalf("device count = %d, want 0", len(payload.Devices))
+	}
+
+	warning := "No EVB relay devices were discovered via mDNS on this network segment."
+	if got := stderr.String(); !bytes.Contains([]byte(got), []byte(warning)) {
+		t.Fatalf("stderr = %q, want warning %q", got, warning)
+	}
+	if got := stderr.String(); !bytes.Contains([]byte(got), []byte(discoverNoResultsNext[0])) {
+		t.Fatalf("stderr = %q, want fallback hint %q", got, discoverNoResultsNext[0])
+	}
+}
+
+func TestDiscoverRobotIncludesWarningWhenNoDevicesAreFound(t *testing.T) {
+	restore := stubMDNSQuery(t, func(_ context.Context, params *mdns.QueryParam) error {
+		return nil
+	})
+	defer restore()
+
+	command := newRootCommand()
+	stdout := &bytes.Buffer{}
+	command.SetOut(stdout)
+	command.SetErr(&bytes.Buffer{})
+	command.SetArgs([]string{"--robot", "--format", "json", "discover"})
+
+	if err := command.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	warnings, ok := payload["warnings"].([]any)
+	if !ok || len(warnings) != 1 {
+		t.Fatalf("warnings = %#v, want one warning", payload["warnings"])
+	}
+	if got := warnings[0]; got != "No EVB relay devices were discovered via mDNS on this network segment." {
+		t.Fatalf("warning = %#v, want no-devices warning", got)
+	}
+
+	next, ok := payload["next"].([]any)
+	if !ok || len(next) != len(discoverNoResultsNext) {
+		t.Fatalf("next = %#v, want %#v", payload["next"], discoverNoResultsNext)
+	}
+	for index, want := range discoverNoResultsNext {
+		if got := next[index]; got != want {
+			t.Fatalf("next[%d] = %#v, want %q", index, got, want)
+		}
+	}
+}
