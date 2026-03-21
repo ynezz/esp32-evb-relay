@@ -298,8 +298,9 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | 14.6 | Set MOD-IO relays ON       | `evb-relay relay set modio:1=on modio:2=on modio:3=on modio:4=on` | All ON; exit 0 | | |
 | 14.7 | Reboot device              | Power cycle or OTA reboot | Device comes back online | | |
 | 14.8 | Verify leave_unchanged     | `evb-relay relay list --format json` | `modio_sync=unknown` after reboot; do not require the API to report the pre-reboot ON mask, because firmware intentionally discards MOD-IO relay cache until a new full-mask write re-establishes synchronization | | |
-| 14.9 | Cleanup: all OFF           | `evb-relay relay set modio:1=off modio:2=off modio:3=off modio:4=off` | All OFF | | |
-| 14.10 | Restore default policy    | `evb-relay config set modio_boot_policy=leave_unchanged` | Accepted | | |
+| 14.9 | Single relay blocked while sync is unknown | `evb-relay relay on modio:1 2>&1; echo "exit:$?"` | Error; expected `MODIO_STATE_UNKNOWN` / exit code 6 until a full-mask write succeeds | | |
+| 14.10 | Cleanup and re-synchronize | `evb-relay relay set modio:1=off modio:2=off modio:3=off modio:4=off --format json` | All OFF; `all_ok=true`; `modio_sync=synchronized` | | |
+| 14.11 | Restore default policy    | `evb-relay config set modio_boot_policy=leave_unchanged` | Accepted | | |
 
 ---
 
@@ -361,11 +362,11 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | 11      | OTA firmware update        | 5     |      |      |      |
 | 12      | Error handling & edge cases | 14   |      |      |      |
 | 13      | MOD-IO absent (degradation) | 10   |      |      |      |
-| 14      | MOD-IO boot policy         | 10    |      |      |      |
+| 14      | MOD-IO boot policy         | 11    |      |      |      |
 | 15      | Output formats & exit codes | 9    |      |      |      |
 | 16      | Config persistence         | 5     |      |      |      |
 | 17      | Button event               | 2     |      |      |      |
-| **Total** |                          | **156** |    |      |      |
+| **Total** |                          | **157** |    |      |      |
 
 ---
 
