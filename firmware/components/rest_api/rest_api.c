@@ -22,6 +22,8 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "input_monitor.h"
+#include "lwip/errno.h"
+#include "lwip/sockets.h"
 #include "mod_io.h"
 #include "ota.h"
 #include "relay.h"
@@ -56,14 +58,19 @@ static esp_err_t rest_api_send_error_with_status(httpd_req_t *req,
 #define REST_API_SSE_DISPATCH_TASK_PRIORITY 6U
 #define REST_API_SSE_CONNECTED_COMMENT ":connected\n\n"
 #define REST_API_SSE_HEARTBEAT_COMMENT ":heartbeat\n\n"
-#define REST_API_SSE_CLIENT_POLL_WAIT_MS 1000U
 #define REST_API_OTA_UPLOAD_CHUNK_LEN 1024U
 
 #if defined(REST_API_ENABLE_TESTING_API)
 #define REST_API_SSE_HEARTBEAT_MS 250U
+#define REST_API_SSE_CLIENT_POLL_WAIT_MS 250U
 #else
 #define REST_API_SSE_HEARTBEAT_MS 30000U
+#define REST_API_SSE_CLIENT_POLL_WAIT_MS 1000U
 #endif
+
+#define REST_API_SSE_KEEPALIVE_IDLE_SECONDS 10
+#define REST_API_SSE_KEEPALIVE_INTERVAL_SECONDS 5
+#define REST_API_SSE_KEEPALIVE_PROBE_COUNT 3
 
 static const char *REST_API_RELAYS_URI = "/api/v1/relays";
 static const char *REST_API_ONBOARD_RELAYS_URI = "/api/v1/relays/onboard";
@@ -104,10 +111,13 @@ typedef struct {
     SemaphoreHandle_t lock;
     TaskHandle_t dispatch_task;
     esp_event_handler_instance_t event_handler;
+    size_t pending_async_completions;
     rest_api_sse_client_t clients[REST_API_SSE_MAX_CLIENTS];
 } rest_api_sse_state_t;
 
 static rest_api_sse_state_t s_sse_state;
+static bool rest_api_sse_lock(void);
+static void rest_api_sse_unlock(void);
 
 #if defined(REST_API_ENABLE_TESTING_API)
 typedef struct {
@@ -149,6 +159,40 @@ void rest_api_sse_force_next_client_task_create_failure_for_testing(void)
 {
     s_testing_state.force_next_client_task_create_failure = true;
 }
+
+size_t rest_api_sse_active_client_count_for_testing(void)
+{
+    size_t active_client_count = 0U;
+
+    if (!rest_api_sse_lock()) {
+        return 0U;
+    }
+
+    for (size_t index = 0; index < REST_API_SSE_MAX_CLIENTS; ++index) {
+        if (s_sse_state.clients[index].active) {
+            ++active_client_count;
+        }
+    }
+
+    rest_api_sse_unlock();
+    return active_client_count;
+}
+
+bool rest_api_sse_wait_for_active_client_count_for_testing(size_t expected_count, uint32_t timeout_ms)
+{
+    TickType_t start_tick = xTaskGetTickCount();
+    TickType_t timeout_ticks = pdMS_TO_TICKS(timeout_ms);
+
+    while (rest_api_sse_active_client_count_for_testing() != expected_count) {
+        if ((timeout_ticks == 0U) || ((xTaskGetTickCount() - start_tick) >= timeout_ticks)) {
+            return false;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+
+    return true;
+}
 #endif
 
 static esp_err_t rest_api_send_error_with_retryable(httpd_req_t *req,
@@ -158,9 +202,10 @@ static esp_err_t rest_api_send_error_with_retryable(httpd_req_t *req,
                                                     bool authenticated,
                                                     bool retryable);
 static esp_err_t rest_api_send_request_body_read_error(httpd_req_t *req, esp_err_t err);
+static bool rest_api_sse_lock(void);
+static void rest_api_sse_unlock(void);
 static esp_err_t rest_api_sse_start(void);
 static void rest_api_sse_stop(void);
-static void rest_api_sse_send_terminal_chunk(httpd_req_t *req);
 static void rest_api_sse_complete_async_request(httpd_req_t *req);
 
 #if CONFIG_ESP_TASK_WDT_EN
@@ -839,11 +884,53 @@ static void rest_api_sse_release_client_slot(rest_api_sse_client_t *client)
         .lock = rest_api_sse_lock,
         .unlock = rest_api_sse_unlock,
         .delete_queue = vQueueDelete,
-        .send_terminal_chunk = rest_api_sse_send_terminal_chunk,
         .complete_async_request = rest_api_sse_complete_async_request,
     };
 
     rest_api_sse_release_client_lifetime(client, &hooks);
+}
+
+static void rest_api_sse_release_disconnected_client_slot(rest_api_sse_client_t *client)
+{
+    QueueHandle_t queue = NULL;
+    httpd_req_t *req = NULL;
+
+    if (client == NULL) {
+        return;
+    }
+
+    if (!rest_api_sse_lock()) {
+        rest_api_sse_release_client_slot(client);
+        return;
+    }
+
+    if (!client->active) {
+        rest_api_sse_unlock();
+        return;
+    }
+
+    queue = client->queue;
+    req = client->req;
+    if (req != NULL) {
+        ++s_sse_state.pending_async_completions;
+    }
+    rest_api_sse_reset_client(client);
+    rest_api_sse_unlock();
+
+    if (queue != NULL) {
+        vQueueDelete(queue);
+    }
+
+    if (req != NULL) {
+        rest_api_sse_complete_async_request(req);
+
+        if (rest_api_sse_lock()) {
+            if (s_sse_state.pending_async_completions > 0U) {
+                --s_sse_state.pending_async_completions;
+            }
+            rest_api_sse_unlock();
+        }
+    }
 }
 
 static void rest_api_sse_force_release_client_slot(rest_api_sse_client_t *client)
@@ -858,13 +945,6 @@ static void rest_api_sse_force_release_client_slot(rest_api_sse_client_t *client
     };
 
     rest_api_sse_force_release_client_lifetime(client, &hooks);
-}
-
-static void rest_api_sse_send_terminal_chunk(httpd_req_t *req)
-{
-    if (req != NULL) {
-        (void)httpd_resp_send_chunk(req, NULL, 0);
-    }
 }
 
 static void rest_api_sse_complete_async_request(httpd_req_t *req)
@@ -898,6 +978,69 @@ static esp_err_t rest_api_sse_send_async_error_and_complete(httpd_req_t *async_r
     err = rest_api_send_error(async_req, http_status, code, message, true);
     (void)httpd_req_async_handler_complete(async_req);
     return err;
+}
+
+static bool rest_api_sse_socket_probe_error_is_retryable(int socket_errno)
+{
+    return (socket_errno == EAGAIN) || (socket_errno == EWOULDBLOCK) || (socket_errno == EINTR);
+}
+
+static void rest_api_sse_configure_socket_keepalive(int sockfd)
+{
+    int enabled = 1;
+    int idle_seconds = REST_API_SSE_KEEPALIVE_IDLE_SECONDS;
+    int interval_seconds = REST_API_SSE_KEEPALIVE_INTERVAL_SECONDS;
+    int probe_count = REST_API_SSE_KEEPALIVE_PROBE_COUNT;
+
+    if (sockfd < 0) {
+        return;
+    }
+
+    if (setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, &enabled, sizeof(enabled)) < 0) {
+        ESP_LOGW(TAG, "Failed to enable SSE socket keepalive: errno=%d", errno);
+        return;
+    }
+
+    if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPIDLE, &idle_seconds, sizeof(idle_seconds)) < 0) {
+        ESP_LOGW(TAG, "Failed to set SSE keepalive idle: errno=%d", errno);
+    }
+
+    if (setsockopt(sockfd,
+                   IPPROTO_TCP,
+                   TCP_KEEPINTVL,
+                   &interval_seconds,
+                   sizeof(interval_seconds)) < 0) {
+        ESP_LOGW(TAG, "Failed to set SSE keepalive interval: errno=%d", errno);
+    }
+
+    if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPCNT, &probe_count, sizeof(probe_count)) < 0) {
+        ESP_LOGW(TAG, "Failed to set SSE keepalive probe count: errno=%d", errno);
+    }
+}
+
+static bool rest_api_sse_client_connection_alive(const rest_api_sse_client_t *client)
+{
+    uint8_t probe_byte = 0U;
+    ssize_t probe_result;
+
+    if ((client == NULL) || (client->sockfd < 0)) {
+        return false;
+    }
+
+    errno = 0;
+    probe_result = recv(client->sockfd,
+                        &probe_byte,
+                        sizeof(probe_byte),
+                        MSG_PEEK | MSG_DONTWAIT);
+    if (probe_result > 0) {
+        return true;
+    }
+
+    if (probe_result == 0) {
+        return false;
+    }
+
+    return rest_api_sse_socket_probe_error_is_retryable(errno);
 }
 
 static void rest_api_sse_dispatch_event_handler(void *arg,
@@ -1031,6 +1174,11 @@ static void rest_api_sse_client_task(void *arg)
             break;
         }
 
+        if (!rest_api_sse_client_connection_alive(client)) {
+            err = ESP_FAIL;
+            break;
+        }
+
         if ((xTaskGetTickCount() - last_send_tick) < pdMS_TO_TICKS(REST_API_SSE_HEARTBEAT_MS)) {
             continue;
         }
@@ -1041,7 +1189,11 @@ static void rest_api_sse_client_task(void *arg)
         last_send_tick = xTaskGetTickCount();
     }
 
-    rest_api_sse_release_client_slot(client);
+    if (err == ESP_OK) {
+        rest_api_sse_release_client_slot(client);
+    } else {
+        rest_api_sse_release_disconnected_client_slot(client);
+    }
     vTaskDelete(NULL);
 }
 
@@ -1112,6 +1264,7 @@ static esp_err_t rest_api_events_handler(httpd_req_t *req)
 
     client->req = async_req;
     client->sockfd = httpd_req_to_sockfd(async_req);
+    rest_api_sse_configure_socket_keepalive(client->sockfd);
 
 #if defined(REST_API_ENABLE_TESTING_API)
     if (s_testing_state.force_next_client_task_create_failure) {
@@ -1235,6 +1388,7 @@ static void rest_api_sse_stop(void)
 
     for (uint8_t attempt = 0U; attempt < 15U; ++attempt) {
         bool any_active = false;
+        bool completion_pending = false;
 
         if (rest_api_sse_lock()) {
             for (size_t index = 0; index < REST_API_SSE_MAX_CLIENTS; ++index) {
@@ -1243,10 +1397,11 @@ static void rest_api_sse_stop(void)
                     break;
                 }
             }
+            completion_pending = s_sse_state.pending_async_completions > 0U;
             rest_api_sse_unlock();
         }
 
-        if (!any_active) {
+        if (!any_active && !completion_pending) {
             break;
         }
 

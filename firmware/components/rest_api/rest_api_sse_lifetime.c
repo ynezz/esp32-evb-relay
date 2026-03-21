@@ -93,17 +93,11 @@ void rest_api_sse_release_client_lifetime(rest_api_sse_client_t *client,
         hooks->delete_queue(queue);
     }
 
-    if (req != NULL) {
-        if (hooks->send_terminal_chunk != NULL) {
-            hooks->send_terminal_chunk(req);
-        }
-
+    if ((req != NULL) && (hooks->complete_async_request != NULL)) {
         /* Keep the slot active until async completion returns so
          * rest_api_sse_stop() never treats a cleared slot as proof that the
          * HTTP server has finished relinquishing the async request. */
-        if (hooks->complete_async_request != NULL) {
-            hooks->complete_async_request(req);
-        }
+        hooks->complete_async_request(req);
     }
 
     rest_api_sse_lifetime_clear_client(client, hooks);

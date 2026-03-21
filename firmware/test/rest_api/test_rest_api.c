@@ -37,7 +37,6 @@ int httpd_req_recv(httpd_req_t *req, char *buf, size_t buf_len)
 typedef enum {
     SSE_LIFETIME_EVENT_NONE = 0,
     SSE_LIFETIME_EVENT_DELETE_QUEUE,
-    SSE_LIFETIME_EVENT_SEND_TERMINAL_CHUNK,
     SSE_LIFETIME_EVENT_COMPLETE_ASYNC_REQUEST,
     SSE_LIFETIME_EVENT_DELETE_TASK,
 } sse_lifetime_event_t;
@@ -84,13 +83,6 @@ static void rest_api_sse_lifetime_test_delete_queue(QueueHandle_t queue)
     rest_api_sse_lifetime_record_event(SSE_LIFETIME_EVENT_DELETE_QUEUE);
 }
 
-static void rest_api_sse_lifetime_test_send_terminal_chunk(httpd_req_t *req)
-{
-    TEST_ASSERT_NOT_NULL(req);
-    TEST_ASSERT_TRUE(s_sse_lifetime_test_ctx.client->active);
-    rest_api_sse_lifetime_record_event(SSE_LIFETIME_EVENT_SEND_TERMINAL_CHUNK);
-}
-
 static void rest_api_sse_lifetime_test_complete_async_request(httpd_req_t *req)
 {
     TEST_ASSERT_NOT_NULL(req);
@@ -132,7 +124,6 @@ static void test_rest_api_sse_release_client_lifetime_keeps_slot_active_until_co
         .lock = rest_api_sse_lifetime_test_lock,
         .unlock = rest_api_sse_lifetime_test_unlock,
         .delete_queue = rest_api_sse_lifetime_test_delete_queue,
-        .send_terminal_chunk = rest_api_sse_lifetime_test_send_terminal_chunk,
         .complete_async_request = rest_api_sse_lifetime_test_complete_async_request,
     };
     rest_api_sse_client_t client = {
@@ -146,10 +137,9 @@ static void test_rest_api_sse_release_client_lifetime_keeps_slot_active_until_co
     rest_api_sse_lifetime_test_reset(&client);
     rest_api_sse_release_client_lifetime(&client, &hooks);
 
-    TEST_ASSERT_EQUAL_UINT32(3U, s_sse_lifetime_test_ctx.event_count);
+    TEST_ASSERT_EQUAL_UINT32(2U, s_sse_lifetime_test_ctx.event_count);
     TEST_ASSERT_EQUAL_INT(SSE_LIFETIME_EVENT_DELETE_QUEUE, s_sse_lifetime_test_ctx.events[0]);
-    TEST_ASSERT_EQUAL_INT(SSE_LIFETIME_EVENT_SEND_TERMINAL_CHUNK, s_sse_lifetime_test_ctx.events[1]);
-    TEST_ASSERT_EQUAL_INT(SSE_LIFETIME_EVENT_COMPLETE_ASYNC_REQUEST, s_sse_lifetime_test_ctx.events[2]);
+    TEST_ASSERT_EQUAL_INT(SSE_LIFETIME_EVENT_COMPLETE_ASYNC_REQUEST, s_sse_lifetime_test_ctx.events[1]);
     TEST_ASSERT_EQUAL_UINT32(2U, s_sse_lifetime_test_ctx.lock_count);
     TEST_ASSERT_EQUAL_UINT32(2U, s_sse_lifetime_test_ctx.unlock_count);
     TEST_ASSERT_FALSE(client.active);

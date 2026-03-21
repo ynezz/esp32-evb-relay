@@ -23,7 +23,6 @@ typedef struct {
     bool (*lock)(void);
     void (*unlock)(void);
     void (*delete_queue)(QueueHandle_t queue);
-    void (*send_terminal_chunk)(httpd_req_t *req);
     void (*complete_async_request)(httpd_req_t *req);
     void (*delete_task)(TaskHandle_t task_handle);
     TaskHandle_t (*current_task_handle)(void);

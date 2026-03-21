@@ -392,6 +392,15 @@ static int open_http_stream_request(uint16_t port,
     return sock;
 }
 
+static void abort_http_stream_socket(int *sock)
+{
+    TEST_ASSERT_NOT_NULL(sock);
+    TEST_ASSERT_GREATER_OR_EQUAL_INT32(0, *sock);
+    TEST_ASSERT_GREATER_OR_EQUAL_INT32(0, shutdown(*sock, SHUT_RDWR));
+    close(*sock);
+    *sock = -1;
+}
+
 static void read_stream_until_contains(int sock,
                                        const char *needle,
                                        char *response,
@@ -416,7 +425,7 @@ static void read_stream_until_contains(int sock,
         }
     }
 
-    TEST_FAIL_MESSAGE("Expected stream fragment was not received");
+    TEST_FAIL_MESSAGE(response[0] != '\0' ? response : "Expected stream fragment was not received");
 }
 
 static void read_response_to_close(int sock, char *response, size_t response_size)
@@ -1301,6 +1310,47 @@ TEST_CASE("rest_api device enforces the SSE client limit", "[qa][rest_api][devic
     }
 }
 
+TEST_CASE("rest_api device releases SSE slots after abrupt client disconnect",
+          "[qa][rest_api][device]")
+{
+    static const uint16_t test_port = 18101U;
+    static const size_t max_sse_clients = 4U;
+    static const rest_api_config_t config = {
+        .port = test_port,
+        .auth_handler = allow_auth_handler,
+        .status_provider = status_provider,
+    };
+    char response[1024];
+    int sockets[4];
+    int replacement_sock = -1;
+
+    memset(sockets, 0xFF, sizeof(sockets));
+
+    ensure_tcpip_ready();
+    TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
+
+    for (size_t index = 0; index < max_sse_clients; ++index) {
+        sockets[index] = open_http_stream_request(test_port, "/api/v1/events", NULL);
+        read_stream_until_contains(sockets[index], ":connected", response, sizeof(response));
+        TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+    }
+
+    abort_http_stream_socket(&sockets[0]);
+    TEST_ASSERT_TRUE(rest_api_sse_wait_for_active_client_count_for_testing(max_sse_clients - 1U,
+                                                                           2000U));
+
+    replacement_sock = open_http_stream_request(test_port, "/api/v1/events", NULL);
+    read_stream_until_contains(replacement_sock, ":connected", response, sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+    TEST_ASSERT_NULL(strstr(response, "\"code\":\"SSE_CLIENT_LIMIT_REACHED\""));
+    TEST_ASSERT_NOT_NULL(strstr(response, ":connected"));
+    close(replacement_sock);
+
+    for (size_t index = 1U; index < max_sse_clients; ++index) {
+        close(sockets[index]);
+    }
+}
+
 TEST_CASE("rest_api device returns 503 when SSE task startup fails after async detach",
           "[qa][rest_api][device]")
 {
@@ -1339,14 +1389,13 @@ TEST_CASE("rest_api device stop owns SSE dispatch task deletion", "[qa][rest_api
         .auth_handler = allow_auth_handler,
         .status_provider = status_provider,
     };
-    char response[1024];
     int sock = -1;
 
     ensure_tcpip_ready();
     TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
 
     sock = open_http_stream_request(test_port, "/api/v1/events", NULL);
-    read_stream_until_contains(sock, ":connected", response, sizeof(response));
+    TEST_ASSERT_TRUE(rest_api_sse_wait_for_active_client_count_for_testing(1U, 1000U));
     rest_api_sse_hold_dispatch_task_on_shutdown_for_testing(true);
     TEST_ASSERT_EQUAL(ESP_OK, rest_api_stop());
     TEST_ASSERT_TRUE(rest_api_sse_dispatch_task_deleted_by_stop_for_testing());
