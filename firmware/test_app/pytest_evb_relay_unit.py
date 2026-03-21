@@ -143,6 +143,30 @@ def test_collect_case_result_after_prompt_reads_trailing_unity_result() -> None:
     assert b":PASS" in buffer
 
 
+def test_collect_case_result_after_prompt_matches_split_unity_result_without_draining_followup_output() -> None:
+    extra_prompt = b"Enter next test, or 'enter' to see menu\r\n"
+    serial = _FakeSerial(
+        [
+            b"when no status provider is configured:PASS\r\n",
+            extra_prompt,
+        ]
+    )
+
+    buffer = _collect_case_result_after_prompt(
+        serial,
+        case_name="rest_api device fails closed when no status provider is configured",
+        initial_buffer=(
+            b"Running rest_api device fails closed when no status provider is configured...\r\n"
+            b"Enter next test, or 'enter' to see menu\r\n"
+            b"./main/test_rest_api_device.c:1497:rest_api device fails closed "
+        ),
+        timeout=0.01,
+    )
+
+    assert b":PASS" in buffer
+    assert serial.read_all() == extra_prompt
+
+
 def test_collect_case_result_after_prompt_keeps_initial_buffer_without_more_output() -> None:
     serial = _FakeSerial()
     initial = (

@@ -241,18 +241,17 @@ def _collect_case_result_after_prompt(
         return initial_buffer
 
     try:
-        trailing = _serial_read_until(
+        return _serial_read_until(
             ser,
             timeout=timeout,
             predicate=lambda buffer, name=case_name: _extract_case_attrs(
                 remove_asci_color_code(buffer), name
             )
             is not None,
+            initial_buffer=initial_buffer,
         )
     except _SerialCaseTimeout as exc:
-        trailing = exc.buffer
-
-    return initial_buffer + trailing
+        return exc.buffer
 
 
 def _open_case_runner_serial(dut: Dut):
