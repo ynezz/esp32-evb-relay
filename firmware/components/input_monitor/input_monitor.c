@@ -343,6 +343,7 @@ static void input_monitor_collect_button_event_locked(uint64_t now_ms,
                                                       evb_relay_button_event_t *event)
 {
     bool edge_pending = s_button_irq_pending;
+    bool sampled_pressed;
 
     *publish_event = false;
     if (event != NULL) {
@@ -368,6 +369,12 @@ static void input_monitor_collect_button_event_locked(uint64_t now_ms,
     }
 
     if ((now_ms - s_state.button_candidate_since_ms) < INPUT_MONITOR_DEFAULT_BUTTON_DEBOUNCE_MS) {
+        return;
+    }
+
+    sampled_pressed = input_monitor_button_pressed();
+    if (sampled_pressed != s_state.button_candidate_pressed) {
+        s_state.button_candidate_valid = false;
         return;
     }
 

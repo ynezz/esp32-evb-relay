@@ -210,6 +210,52 @@ static void test_input_monitor_button_edges_are_debounced(void)
     TEST_ASSERT_EQUAL_UINT64(1040ULL, event.ts_ms);
 }
 
+static void test_input_monitor_button_debounce_resamples_gpio_before_publishing(void)
+{
+    static const uint16_t analog_values[MOD_IO_ANALOG_INPUT_COUNT] = {0U, 0U, 0U, 0U};
+    evb_relay_button_event_t event = {0};
+
+    init_present_mod_io(0x00U);
+    gpio_stub_set_input_level(BOARD_BUTTON, 1U);
+    TEST_ASSERT_EQUAL(ESP_OK, input_monitor_start());
+
+    queue_snapshot(0x00U, analog_values);
+    esp_stub_set_time_us(1000000LL);
+    TEST_ASSERT_EQUAL(ESP_OK, input_monitor_poll_once_for_testing());
+
+    esp_event_stub_reset();
+    gpio_stub_set_input_level(BOARD_BUTTON, 0U);
+    gpio_stub_trigger_isr(BOARD_BUTTON);
+    queue_snapshot(0x00U, analog_values);
+    esp_stub_set_time_us(1020000LL);
+    TEST_ASSERT_EQUAL(ESP_OK, input_monitor_poll_once_for_testing());
+    TEST_ASSERT_NULL(esp_event_stub_get_last_base());
+
+    gpio_stub_set_input_level(BOARD_BUTTON, 1U);
+    queue_snapshot(0x00U, analog_values);
+    esp_stub_set_time_us(1095000LL);
+    TEST_ASSERT_EQUAL(ESP_OK, input_monitor_poll_once_for_testing());
+    TEST_ASSERT_NULL(esp_event_stub_get_last_base());
+
+    gpio_stub_set_input_level(BOARD_BUTTON, 0U);
+    gpio_stub_trigger_isr(BOARD_BUTTON);
+    queue_snapshot(0x00U, analog_values);
+    esp_stub_set_time_us(1100000LL);
+    TEST_ASSERT_EQUAL(ESP_OK, input_monitor_poll_once_for_testing());
+    TEST_ASSERT_NULL(esp_event_stub_get_last_base());
+
+    queue_snapshot(0x00U, analog_values);
+    esp_stub_set_time_us(1155000LL);
+    TEST_ASSERT_EQUAL(ESP_OK, input_monitor_poll_once_for_testing());
+
+    TEST_ASSERT_EQUAL(EVB_RELAY_EVENT, esp_event_stub_get_last_base());
+    TEST_ASSERT_EQUAL_INT(EVB_RELAY_EVENT_BUTTON, esp_event_stub_get_last_id());
+    TEST_ASSERT_EQUAL_UINT32(sizeof(event),
+                             esp_event_stub_copy_last_data(&event, sizeof(event)));
+    TEST_ASSERT_TRUE(event.pressed);
+    TEST_ASSERT_EQUAL_UINT64(1100ULL, event.ts_ms);
+}
+
 static void test_input_monitor_recovers_after_modio_absence(void)
 {
     static const uint16_t analog_values[MOD_IO_ANALOG_INPUT_COUNT] = {1U, 2U, 3U, 4U};
@@ -275,6 +321,7 @@ void test_input_monitor_suite(void)
     RUN_TEST(test_input_monitor_publishes_digital_change_events);
     RUN_TEST(test_input_monitor_aggregates_analog_changes_against_threshold);
     RUN_TEST(test_input_monitor_button_edges_are_debounced);
+    RUN_TEST(test_input_monitor_button_debounce_resamples_gpio_before_publishing);
     RUN_TEST(test_input_monitor_recovers_after_modio_absence);
     RUN_TEST(test_input_monitor_task_registers_and_feeds_task_watchdog);
 }
