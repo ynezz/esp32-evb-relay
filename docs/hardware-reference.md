@@ -120,7 +120,7 @@ I2C addresses and protocols. Do NOT confuse them.**
 |----------|--------|---------|
 | I2C address | **`0x58`** | `0x21` |
 | Relay write cmd | `0x10` | `0x40` |
-| Relay read cmd | `0x40` | — |
+| Relay read cmd | — | — |
 | Relays | 4 | 2 |
 
 ### MOD-IO I2C Protocol (address `0x58`)
@@ -130,13 +130,13 @@ I2C addresses and protocols. Do NOT confuse them.**
 | Set relays | `0x10` | 1 byte bitmask (bits 0–3) | `0x01`=R1, `0x02`=R2, `0x04`=R3, `0x08`=R4, `0x0F`=all |
 | Read digital inputs | `0x20` | — (read 1 byte) | 4 opto-isolated inputs |
 | Read analog input | `0x30`–`0x33` | — (read 2 bytes) | 10-bit ADC, LSB:MSB |
-| Read relay state | `0x40` | — (read 1 byte) | Current relay bitmask |
 | Change address | `0xF0` | 1 byte new addr | Requires PROG jumper closed |
 
-For the deployed MOD-IO board used in this project, command `0x40` is the
-authoritative relay-state source. Older write-only / unknown-state assumptions
-elsewhere in the repo came from earlier debugging against the wrong board and
-address and should not guide new firmware or tests.
+The official MOD-IO manual does not document any relay-state readback
+command. For the deployed `0x58` board used in this project, firmware
+should use documented commands such as `0x20` only to prove presence,
+and it should treat relay state as `unknown` after boot or hot reattach
+until a full relay-mask write succeeds.
 
 ### Arduino Example (relay sweep)
 
@@ -171,5 +171,10 @@ void setup() {
 
 Full I2C scan on bus `13/16` finds exactly one device at `0x58`.
 Relay sweep (masks `0x00`, `0x01`, `0x02`, `0x04`, `0x08`, `0x0F`,
-`0x00`) completes with all `txErr=0`. Relay state readback confirms
-`0x00` after final all-off command.
+`0x00`) completes with all `txErr=0`.
+
+Focused regression rerun on 2026-03-21 confirmed that the live board
+does not expose a usable `0x40` relay-state readback path: after a
+write of `0x05`, the board still returned `0x00` to the repo's
+readback logic. Treat `0x10` writes as authoritative only for the
+firmware-owned cached state after a successful full-mask write.

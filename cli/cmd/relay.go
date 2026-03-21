@@ -162,6 +162,7 @@ func newRelayOnCommand() *cobra.Command {
 			"AUTH_FORBIDDEN",
 			"RELAY_NOT_FOUND",
 			"MODIO_NOT_PRESENT",
+			"MODIO_STATE_UNKNOWN",
 		},
 		Example: "evb-relay relay on onboard:1",
 	})
@@ -195,6 +196,7 @@ func newRelayOffCommand() *cobra.Command {
 			"AUTH_FORBIDDEN",
 			"RELAY_NOT_FOUND",
 			"MODIO_NOT_PRESENT",
+			"MODIO_STATE_UNKNOWN",
 		},
 		Example: "evb-relay relay off modio:3",
 	})
@@ -226,6 +228,7 @@ func newRelayToggleCommand() *cobra.Command {
 			"AUTH_FORBIDDEN",
 			"RELAY_NOT_FOUND",
 			"MODIO_NOT_PRESENT",
+			"MODIO_STATE_UNKNOWN",
 		},
 		Example: "evb-relay relay toggle onboard:2",
 	})
@@ -263,6 +266,7 @@ func newRelaySetCommand() *cobra.Command {
 			"AUTH_FORBIDDEN",
 			"RELAY_NOT_FOUND",
 			"MODIO_NOT_PRESENT",
+			"MODIO_STATE_UNKNOWN",
 			"PARTIAL_FAILURE",
 		},
 		Example: "evb-relay relay set onboard:1=on modio:3=off",
@@ -595,6 +599,68 @@ func relayByID(relays []relayView, id int) (relayView, bool) {
 	return relayView{}, false
 }
 
+func modioAssignmentsCoverAllRelays(assignments []relayAssignment) bool {
+	if len(assignments) < modioRelayCount {
+		return false
+	}
+
+	seen := [modioRelayCount]bool{}
+	for _, assignment := range assignments {
+		if assignment.Target.Group != relayGroupModIO {
+			continue
+		}
+		if assignment.Target.ID < 1 || assignment.Target.ID > modioRelayCount {
+			return false
+		}
+		seen[assignment.Target.ID-1] = true
+	}
+
+	for _, present := range seen {
+		if !present {
+			return false
+		}
+	}
+
+	return true
+}
+
+func modioRelayStatesFromAssignments(assignments []relayAssignment) []bool {
+	states := make([]bool, modioRelayCount)
+
+	for _, assignment := range assignments {
+		if assignment.Target.Group != relayGroupModIO {
+			continue
+		}
+		states[assignment.Target.ID-1] = assignment.State
+	}
+
+	return states
+}
+
+func modioRelaySync(relays []relayView) string {
+	for _, relay := range relays {
+		if relay.Group != string(relayGroupModIO) {
+			continue
+		}
+		if relay.Sync != nil {
+			return *relay.Sync
+		}
+	}
+
+	return ""
+}
+
+func modioStateUnknownError() error {
+	return exitcodes.Wrap(
+		exitcodes.StateError,
+		&client.APIError{
+			Code:    "MODIO_STATE_UNKNOWN",
+			Message: "MOD-IO relay state is unknown; use a full modio relay set first",
+			Status:  http.StatusConflict,
+		},
+	)
+}
+
 func runRelayBatchSet(
 	cmd *cobra.Command,
 	relayClient *client.Client,
@@ -655,28 +721,43 @@ func runRelayBatchSet(
 	}
 
 	if len(modioAssignments) > 0 {
-		current, result, err := fetchModIORelayArray(cmd, relayClient)
-		if deviceContext == nil {
-			deviceContext = robot.FromClientDeviceContext(result.DeviceContext)
+		states := make([]bool, modioRelayCount)
+		haveFullState := false
+
+		if modioAssignmentsCoverAllRelays(modioAssignments) {
+			states = modioRelayStatesFromAssignments(modioAssignments)
+			haveFullState = true
+		} else {
+			current, result, err := fetchModIORelayArray(cmd, relayClient)
+			if deviceContext == nil {
+				deviceContext = robot.FromClientDeviceContext(result.DeviceContext)
+			}
+
+			if err != nil {
+				for _, assignment := range modioAssignments {
+					recordError(assignment.Target, err)
+				}
+			} else if modioRelaySync(current.Relays) != "synchronized" {
+				stateErr := modioStateUnknownError()
+				for _, assignment := range modioAssignments {
+					recordError(assignment.Target, stateErr)
+				}
+			} else {
+				for _, relay := range current.Relays {
+					if relay.ID >= 1 && relay.ID <= modioRelayCount {
+						states[relay.ID-1] = relay.State
+					}
+				}
+				for _, assignment := range modioAssignments {
+					states[assignment.Target.ID-1] = assignment.State
+				}
+				haveFullState = true
+			}
 		}
 
-		if err != nil {
-			for _, assignment := range modioAssignments {
-				recordError(assignment.Target, err)
-			}
-		} else {
-			states := make([]bool, modioRelayCount)
-			for _, relay := range current.Relays {
-				if relay.ID >= 1 && relay.ID <= modioRelayCount {
-					states[relay.ID-1] = relay.State
-				}
-			}
-			for _, assignment := range modioAssignments {
-				states[assignment.Target.ID-1] = assignment.State
-			}
-
+		if haveFullState {
 			var payload relayArrayResponse
-			result, err = relayClient.DoJSON(
+			result, err := relayClient.DoJSON(
 				cmd.Context(),
 				http.MethodPut,
 				"/relays/modio",

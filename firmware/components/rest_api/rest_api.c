@@ -34,6 +34,12 @@ static httpd_handle_t s_server;
 static rest_api_config_t s_config;
 
 static rest_api_auth_result_t rest_api_authorize_request(httpd_req_t *req);
+static esp_err_t rest_api_send_error_with_status(httpd_req_t *req,
+                                                 int http_status,
+                                                 const char *code,
+                                                 const char *message,
+                                                 const rest_api_status_view_t *status,
+                                                 bool authenticated);
 
 #define REST_API_MAX_REQUEST_BODY_LEN 512U
 #define REST_API_URI_HANDLER_COUNT 18U
@@ -277,10 +283,12 @@ const char *rest_api_modio_sync_to_string(rest_api_modio_sync_t sync_state)
     switch (sync_state) {
     case REST_API_MODIO_SYNC_ABSENT:
         return "absent";
+    case REST_API_MODIO_SYNC_UNKNOWN:
+        return "unknown";
     case REST_API_MODIO_SYNC_SYNCHRONIZED:
         return "synchronized";
     default:
-        return "absent";
+        return "unknown";
     }
 }
 
@@ -2790,28 +2798,66 @@ static esp_err_t rest_api_modio_relay_set_handler(httpd_req_t *req)
         return err;
     }
 
-    err = mod_io_set_relay(relay_id, requested_state);
+    err = rest_api_sync_status_with_modio_driver(&status, NULL);
     if (err == ESP_ERR_NOT_FOUND) {
-        return rest_api_send_error(req, 503, "MODIO_NOT_PRESENT", "MOD-IO is not present", true);
+        return rest_api_send_error_with_status(req,
+                                               503,
+                                               "MODIO_NOT_PRESENT",
+                                               "MOD-IO is not present",
+                                               &status,
+                                               true);
     }
     if (err != ESP_OK) {
-        return rest_api_send_error(req,
-                                   500,
-                                   "MODIO_SET_FAILED",
-                                   "Failed to set MOD-IO relay state",
-                                   true);
+        return rest_api_send_error_with_status(req,
+                                               500,
+                                               "MODIO_UNAVAILABLE",
+                                               "Failed to read MOD-IO relay state",
+                                               &status,
+                                               true);
+    }
+
+    err = mod_io_set_relay(relay_id, requested_state);
+    if (err == ESP_ERR_NOT_FOUND) {
+        return rest_api_send_error_with_status(req,
+                                               503,
+                                               "MODIO_NOT_PRESENT",
+                                               "MOD-IO is not present",
+                                               &status,
+                                               true);
+    }
+    if (err == ESP_ERR_INVALID_STATE) {
+        return rest_api_send_error_with_status(req,
+                                               409,
+                                               "MODIO_STATE_UNKNOWN",
+                                               "MOD-IO relay state is unknown until a full-mask write succeeds",
+                                               &status,
+                                               true);
+    }
+    if (err != ESP_OK) {
+        return rest_api_send_error_with_status(req,
+                                               500,
+                                               "MODIO_SET_FAILED",
+                                               "Failed to set MOD-IO relay state",
+                                               &status,
+                                               true);
     }
 
     err = rest_api_sync_status_with_modio_driver(&status, &relay_mask);
     if (err == ESP_ERR_NOT_FOUND) {
-        return rest_api_send_error(req, 503, "MODIO_NOT_PRESENT", "MOD-IO is not present", true);
+        return rest_api_send_error_with_status(req,
+                                               503,
+                                               "MODIO_NOT_PRESENT",
+                                               "MOD-IO is not present",
+                                               &status,
+                                               true);
     }
     if (err != ESP_OK) {
-        return rest_api_send_error(req,
-                                   500,
-                                   "MODIO_UNAVAILABLE",
-                                   "Failed to read MOD-IO relay state",
-                                   true);
+        return rest_api_send_error_with_status(req,
+                                               500,
+                                               "MODIO_UNAVAILABLE",
+                                               "Failed to read MOD-IO relay state",
+                                               &status,
+                                               true);
     }
 
     return rest_api_send_modio_relay_response(req,
@@ -2836,28 +2882,66 @@ static esp_err_t rest_api_modio_relay_toggle_handler(httpd_req_t *req)
         return err;
     }
 
-    err = mod_io_toggle_relay(relay_id, NULL);
+    err = rest_api_sync_status_with_modio_driver(&status, NULL);
     if (err == ESP_ERR_NOT_FOUND) {
-        return rest_api_send_error(req, 503, "MODIO_NOT_PRESENT", "MOD-IO is not present", true);
+        return rest_api_send_error_with_status(req,
+                                               503,
+                                               "MODIO_NOT_PRESENT",
+                                               "MOD-IO is not present",
+                                               &status,
+                                               true);
     }
     if (err != ESP_OK) {
-        return rest_api_send_error(req,
-                                   500,
-                                   "MODIO_TOGGLE_FAILED",
-                                   "Failed to toggle MOD-IO relay state",
-                                   true);
+        return rest_api_send_error_with_status(req,
+                                               500,
+                                               "MODIO_UNAVAILABLE",
+                                               "Failed to read MOD-IO relay state",
+                                               &status,
+                                               true);
+    }
+
+    err = mod_io_toggle_relay(relay_id, NULL);
+    if (err == ESP_ERR_NOT_FOUND) {
+        return rest_api_send_error_with_status(req,
+                                               503,
+                                               "MODIO_NOT_PRESENT",
+                                               "MOD-IO is not present",
+                                               &status,
+                                               true);
+    }
+    if (err == ESP_ERR_INVALID_STATE) {
+        return rest_api_send_error_with_status(req,
+                                               409,
+                                               "MODIO_STATE_UNKNOWN",
+                                               "MOD-IO relay state is unknown until a full-mask write succeeds",
+                                               &status,
+                                               true);
+    }
+    if (err != ESP_OK) {
+        return rest_api_send_error_with_status(req,
+                                               500,
+                                               "MODIO_TOGGLE_FAILED",
+                                               "Failed to toggle MOD-IO relay state",
+                                               &status,
+                                               true);
     }
 
     err = rest_api_sync_status_with_modio_driver(&status, &relay_mask);
     if (err == ESP_ERR_NOT_FOUND) {
-        return rest_api_send_error(req, 503, "MODIO_NOT_PRESENT", "MOD-IO is not present", true);
+        return rest_api_send_error_with_status(req,
+                                               503,
+                                               "MODIO_NOT_PRESENT",
+                                               "MOD-IO is not present",
+                                               &status,
+                                               true);
     }
     if (err != ESP_OK) {
-        return rest_api_send_error(req,
-                                   500,
-                                   "MODIO_UNAVAILABLE",
-                                   "Failed to read MOD-IO relay state",
-                                   true);
+        return rest_api_send_error_with_status(req,
+                                               500,
+                                               "MODIO_UNAVAILABLE",
+                                               "Failed to read MOD-IO relay state",
+                                               &status,
+                                               true);
     }
 
     return rest_api_send_modio_relay_response(req,
@@ -3178,11 +3262,12 @@ static esp_err_t rest_api_send_error_internal(httpd_req_t *req,
                                               int http_status,
                                               const char *code,
                                               const char *message,
+                                              const rest_api_status_view_t *status_override,
                                               bool authenticated,
                                               bool include_retryable,
                                               bool retryable)
 {
-    rest_api_status_view_t status;
+    rest_api_status_view_t header_status;
     cJSON *root = NULL;
     cJSON *error_obj = NULL;
     char *response = NULL;
@@ -3227,9 +3312,13 @@ static esp_err_t rest_api_send_error_internal(httpd_req_t *req,
     }
 
     if (authenticated && (http_status != 401) && (http_status != 403)) {
-        err = rest_api_build_status_view(&status);
-        if (err == ESP_OK) {
-            rest_api_try_attach_device_context_headers(req, &status, true);
+        if (status_override != NULL) {
+            rest_api_try_attach_device_context_headers(req, status_override, true);
+        } else {
+            err = rest_api_build_status_view(&header_status);
+            if (err == ESP_OK) {
+                rest_api_try_attach_device_context_headers(req, &header_status, true);
+            }
         }
     }
 
@@ -3249,6 +3338,7 @@ static esp_err_t rest_api_send_error_with_retryable(httpd_req_t *req,
                                         http_status,
                                         code,
                                         message,
+                                        NULL,
                                         authenticated,
                                         true,
                                         retryable);
@@ -3290,6 +3380,24 @@ esp_err_t rest_api_send_error(httpd_req_t *req,
                                         http_status,
                                         code,
                                         message,
+                                        NULL,
+                                        authenticated,
+                                        false,
+                                        false);
+}
+
+static esp_err_t rest_api_send_error_with_status(httpd_req_t *req,
+                                                 int http_status,
+                                                 const char *code,
+                                                 const char *message,
+                                                 const rest_api_status_view_t *status,
+                                                 bool authenticated)
+{
+    return rest_api_send_error_internal(req,
+                                        http_status,
+                                        code,
+                                        message,
+                                        status,
                                         authenticated,
                                         false,
                                         false);

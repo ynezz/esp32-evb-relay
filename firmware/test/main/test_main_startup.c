@@ -51,7 +51,7 @@ static void test_app_main_initializes_network_before_starting_http(void)
     };
     mod_io_status_t mod_io_status = {
         .present = true,
-        .relay_sync = MOD_IO_RELAY_SYNC_SYNCHRONIZED,
+        .relay_sync = MOD_IO_RELAY_SYNC_UNKNOWN,
         .relay_mask = 0x00U,
     };
 
@@ -79,7 +79,7 @@ static void test_app_main_initializes_network_before_starting_http(void)
     TEST_ASSERT_EQUAL_STRING("255.255.255.0", status.network.netmask);
     TEST_ASSERT_EQUAL_STRING("192.0.2.1", status.network.gateway);
     TEST_ASSERT_TRUE(status.modio_present);
-    TEST_ASSERT_EQUAL_INT(REST_API_MODIO_SYNC_SYNCHRONIZED, status.modio_sync);
+    TEST_ASSERT_EQUAL_INT(REST_API_MODIO_SYNC_UNKNOWN, status.modio_sync);
 }
 
 static void test_app_main_stops_before_http_when_network_init_fails(void)

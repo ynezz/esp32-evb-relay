@@ -7,7 +7,7 @@ import pytest
 def _assert_device_context_headers(response: requests.Response) -> None:
     assert response.headers["X-FW-Version"]
     assert response.headers["X-ModIO-Present"] in {"true", "false"}
-    assert response.headers["X-ModIO-Sync"] in {"absent", "synchronized"}
+    assert response.headers["X-ModIO-Sync"] in {"absent", "unknown", "synchronized"}
 
 
 def _assert_no_device_context_headers(response: requests.Response) -> None:

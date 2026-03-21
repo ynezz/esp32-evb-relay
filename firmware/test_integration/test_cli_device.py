@@ -24,7 +24,7 @@ def _assert_success(result: Any, command: str) -> dict[str, Any]:
     assert isinstance(device_context, dict)
     assert isinstance(device_context["firmware_version"], str)
     assert device_context["firmware_version"]
-    assert device_context["modio_sync"] in {"absent", "synchronized"}
+    assert device_context["modio_sync"] in {"absent", "unknown", "synchronized"}
     assert device_context["modio_present"] in {True, False}
     return data
 
@@ -70,7 +70,7 @@ def test_cli_status_round_trip(cli_robot_run, dut_endpoint) -> None:
     assert status["network"]["connected"] is True
     assert status["network"]["ip"] == dut_endpoint.ip
     assert status["network"]["hostname"]
-    assert status["modio"]["sync"] in {"absent", "synchronized"}
+    assert status["modio"]["sync"] in {"absent", "unknown", "synchronized"}
 
 
 def test_cli_relay_list_round_trip(cli_robot_run) -> None:

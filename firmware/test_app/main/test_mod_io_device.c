@@ -90,11 +90,11 @@ TEST_CASE("mod_io device probe detects board", "[qa][mod_io][device]")
 
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_get_status(&status));
     TEST_ASSERT_TRUE(status.present);
-    TEST_ASSERT_EQUAL(MOD_IO_RELAY_SYNC_SYNCHRONIZED, status.relay_sync);
+    TEST_ASSERT_EQUAL(MOD_IO_RELAY_SYNC_UNKNOWN, status.relay_sync);
     TEST_ASSERT_EQUAL_HEX8(0x00U, status.relay_mask & (uint8_t)~MOD_IO_RELAY_MASK_ALL);
 }
 
-TEST_CASE("mod_io device relay readback matches writes", "[qa][mod_io][device]")
+TEST_CASE("mod_io device synchronized cache survives presence probes", "[qa][mod_io][device]")
 {
     uint8_t relay_mask = 0;
     mod_io_relay_sync_t relay_sync = MOD_IO_RELAY_SYNC_ABSENT;
@@ -135,7 +135,18 @@ TEST_CASE("mod_io device analog inputs stay within 10-bit range", "[qa][mod_io][
     }
 }
 
-TEST_CASE("mod_io device all-off readback is authoritative", "[qa][mod_io][device]")
+TEST_CASE("mod_io device single-relay operations require synchronized cache",
+          "[qa][mod_io][device]")
+{
+    bool actual_state = false;
+
+    require_mod_io_or_skip();
+
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mod_io_set_relay(1U, true));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mod_io_toggle_relay(1U, &actual_state));
+}
+
+TEST_CASE("mod_io device all-off write updates synchronized cache", "[qa][mod_io][device]")
 {
     uint8_t relay_mask = 0xFFU;
     mod_io_relay_sync_t relay_sync = MOD_IO_RELAY_SYNC_ABSENT;

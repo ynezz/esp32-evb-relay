@@ -727,6 +727,41 @@ TEST_CASE("rest_api device exposes combined and MOD-IO relay endpoints",
     TEST_ASSERT_NOT_NULL(strstr(response, "\"group\":\"modio\",\"id\":4,\"state\":false,\"sync\":\"synchronized\""));
 }
 
+TEST_CASE("rest_api device reports unknown MOD-IO sync until full-mask write",
+          "[qa][rest_api][device]")
+{
+    static const uint16_t test_port = 18092U;
+    static const rest_api_config_t config = {
+        .port = test_port,
+        .auth_handler = allow_auth_handler,
+        .status_provider = status_provider,
+    };
+    char response[2048];
+
+    ensure_tcpip_ready();
+    require_mod_io_present_or_skip();
+    TEST_ASSERT_EQUAL(ESP_OK, relay_init());
+    TEST_ASSERT_EQUAL(ESP_OK, rest_api_start(&config));
+
+    perform_http_request(test_port, "GET", "/api/v1/relays", NULL, NULL, response, sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 200 OK"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Present: true"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Sync: unknown"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"modio_present\":true"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"modio_sync\":\"unknown\""));
+
+    perform_http_request(test_port,
+                         "PUT",
+                         "/api/v1/relays/modio/1",
+                         NULL,
+                         "{\"state\":true}",
+                         response,
+                         sizeof(response));
+    TEST_ASSERT_NOT_NULL(strstr(response, "HTTP/1.1 409 Conflict"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "X-ModIO-Sync: unknown"));
+    TEST_ASSERT_NOT_NULL(strstr(response, "\"code\":\"MODIO_STATE_UNKNOWN\""));
+}
+
 TEST_CASE("rest_api device reports absent MOD-IO on relay routes", "[qa][rest_api][device]")
 {
     static const uint16_t test_port = 18091U;
@@ -1390,6 +1425,7 @@ TEST_CASE("rest_api device maps MOD-IO sync enums to wire strings",
           "[qa][rest_api][device]")
 {
     TEST_ASSERT_EQUAL_STRING("absent", rest_api_modio_sync_to_string(REST_API_MODIO_SYNC_ABSENT));
+    TEST_ASSERT_EQUAL_STRING("unknown", rest_api_modio_sync_to_string(REST_API_MODIO_SYNC_UNKNOWN));
     TEST_ASSERT_EQUAL_STRING("synchronized",
                              rest_api_modio_sync_to_string(REST_API_MODIO_SYNC_SYNCHRONIZED));
 }

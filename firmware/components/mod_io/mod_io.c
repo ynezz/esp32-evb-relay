@@ -15,7 +15,6 @@
 #define MOD_IO_RELAY_WRITE_COMMAND 0x10U
 #define MOD_IO_DIGITAL_INPUT_READ_COMMAND 0x20U
 #define MOD_IO_ANALOG_INPUT_BASE_COMMAND 0x30U
-#define MOD_IO_RELAY_READ_COMMAND 0x40U
 
 typedef struct {
     i2c_master_bus_handle_t bus_handle;
@@ -180,10 +179,19 @@ static void mod_io_mark_synchronized_locked(uint8_t relay_mask)
     s_state.next_probe_after_ms = 0;
 }
 
-static esp_err_t mod_io_read_relay_mask_locked(uint8_t *out_mask)
+static void mod_io_mark_present_unknown_locked(void)
 {
-    const uint8_t command = MOD_IO_RELAY_READ_COMMAND;
-    uint8_t relay_mask = 0;
+    s_state.present = true;
+    s_state.relay_sync = MOD_IO_RELAY_SYNC_UNKNOWN;
+    s_state.relay_mask = 0;
+    s_state.last_probe_err = ESP_OK;
+    s_state.next_probe_after_ms = 0;
+}
+
+static esp_err_t mod_io_read_digital_input_mask_locked(uint8_t *out_mask)
+{
+    const uint8_t command = MOD_IO_DIGITAL_INPUT_READ_COMMAND;
+    uint8_t input_mask = 0;
     esp_err_t err;
 
     ESP_RETURN_ON_FALSE(out_mask != NULL, ESP_ERR_INVALID_ARG, TAG, "Relay mask output is required");
@@ -200,13 +208,13 @@ static esp_err_t mod_io_read_relay_mask_locked(uint8_t *out_mask)
     if (err != ESP_OK) {
         return err;
     }
-    err = i2c_master_receive(s_state.device_handle, &relay_mask, sizeof(relay_mask),
+    err = i2c_master_receive(s_state.device_handle, &input_mask, sizeof(input_mask),
                              MOD_IO_I2C_TIMEOUT_MS);
     if (err != ESP_OK) {
         return err;
     }
 
-    *out_mask = (uint8_t)(relay_mask & MOD_IO_RELAY_MASK_ALL);
+    *out_mask = (uint8_t)(input_mask & MOD_IO_DIGITAL_INPUT_MASK_ALL);
     return ESP_OK;
 }
 
@@ -214,25 +222,27 @@ static esp_err_t mod_io_probe_hardware_locked(void)
 {
     esp_err_t err;
     bool was_present;
-    uint8_t relay_mask = 0;
+    uint8_t input_mask = 0;
 
     ESP_RETURN_ON_ERROR(mod_io_require_initialized_locked(), TAG, "MOD-IO is not initialized");
 
     was_present = s_state.present;
 
-    /* Read the relay register directly — do NOT call i2c_master_probe() first.
-     * A bare write-address probe (START + addr + STOP, no data) causes the
-     * MOD-IO PIC's I2C ISR to see an incomplete write transaction, which can
-     * corrupt its internal command state and make the subsequent relay-register
-     * read return stale or reset data (0x00) even when relays are set.
-     * Instead we use the relay-mask read as the liveness check: if the device
-     * is absent the I2C NACK propagates as ESP_ERR_NOT_FOUND. */
-    err = mod_io_read_relay_mask_locked(&relay_mask);
+    /* Use a documented MOD-IO read command as the liveness check instead of a
+     * bare address probe. The board does not expose authoritative relay
+     * readback, so a successful probe only proves presence and leaves relay
+     * state unknown until firmware performs a full-mask write. */
+    err = mod_io_read_digital_input_mask_locked(&input_mask);
     if (err == ESP_OK) {
-        mod_io_mark_synchronized_locked(relay_mask);
         if (!was_present) {
-            ESP_LOGI(TAG, "Detected MOD-IO at 0x%02X; relay mask refreshed to 0x%02X",
-                     MOD_IO_I2C_ADDRESS, relay_mask);
+            mod_io_mark_present_unknown_locked();
+            ESP_LOGI(TAG,
+                     "Detected MOD-IO at 0x%02X; relay state is unknown until a full-mask write succeeds",
+                     MOD_IO_I2C_ADDRESS);
+        } else {
+            s_state.present = true;
+            s_state.last_probe_err = ESP_OK;
+            s_state.next_probe_after_ms = 0;
         }
         return ESP_OK;
     }
@@ -241,7 +251,7 @@ static esp_err_t mod_io_probe_hardware_locked(void)
     if ((err == ESP_ERR_NOT_FOUND) && was_present) {
         ESP_LOGW(TAG, "MOD-IO disappeared from the I2C bus; relay state reset to absent");
     } else if ((err != ESP_ERR_NOT_FOUND) && was_present) {
-        ESP_LOGW(TAG, "MOD-IO relay readback failed; marking board absent: %s",
+        ESP_LOGW(TAG, "MOD-IO presence probe failed; marking board absent: %s",
                  esp_err_to_name(err));
     }
 
@@ -334,10 +344,12 @@ const char *mod_io_relay_sync_to_string(mod_io_relay_sync_t relay_sync)
     switch (relay_sync) {
     case MOD_IO_RELAY_SYNC_ABSENT:
         return "absent";
+    case MOD_IO_RELAY_SYNC_UNKNOWN:
+        return "unknown";
     case MOD_IO_RELAY_SYNC_SYNCHRONIZED:
         return "synchronized";
     default:
-        return "absent";
+        return "unknown";
     }
 }
 
@@ -509,6 +521,11 @@ esp_err_t mod_io_set_relay(uint8_t relay_id, bool state)
         return err;
     }
 
+    if (s_state.relay_sync != MOD_IO_RELAY_SYNC_SYNCHRONIZED) {
+        mod_io_unlock();
+        return ESP_ERR_INVALID_STATE;
+    }
+
     relay_mask = s_state.relay_mask;
     if (state) {
         relay_mask |= (uint8_t)(1U << (relay_id - 1U));
@@ -541,6 +558,11 @@ esp_err_t mod_io_toggle_relay(uint8_t relay_id, bool *out_state)
         return err;
     }
 
+    if (s_state.relay_sync != MOD_IO_RELAY_SYNC_SYNCHRONIZED) {
+        mod_io_unlock();
+        return ESP_ERR_INVALID_STATE;
+    }
+
     relay_mask = (uint8_t)(s_state.relay_mask ^ (uint8_t)(1U << (relay_id - 1U)));
     actual_state = (relay_mask & (uint8_t)(1U << (relay_id - 1U))) != 0U;
 
@@ -559,8 +581,6 @@ esp_err_t mod_io_toggle_relay(uint8_t relay_id, bool *out_state)
 
 esp_err_t mod_io_read_digital_inputs(uint8_t *out_mask)
 {
-    const uint8_t command = MOD_IO_DIGITAL_INPUT_READ_COMMAND;
-    uint8_t read_value = 0;
     esp_err_t err;
 
     ESP_RETURN_ON_FALSE(out_mask != NULL, ESP_ERR_INVALID_ARG, TAG, "Input mask output is required");
@@ -571,18 +591,13 @@ esp_err_t mod_io_read_digital_inputs(uint8_t *out_mask)
         return err;
     }
 
-    err = i2c_master_transmit(s_state.device_handle, &command, sizeof(command),
-                              MOD_IO_I2C_TIMEOUT_MS);
+    err = mod_io_read_digital_input_mask_locked(out_mask);
     if (err == ESP_OK) {
-        err = i2c_master_receive(s_state.device_handle, &read_value, sizeof(read_value),
-                                 MOD_IO_I2C_TIMEOUT_MS);
-    }
-    if (err == ESP_OK) {
-        *out_mask = (uint8_t)(read_value & MOD_IO_DIGITAL_INPUT_MASK_ALL);
-    } else {
-        err = mod_io_reconcile_after_transaction_failure_locked(err);
+        mod_io_unlock();
+        return ESP_OK;
     }
 
+    err = mod_io_reconcile_after_transaction_failure_locked(err);
     mod_io_unlock();
     return err;
 }

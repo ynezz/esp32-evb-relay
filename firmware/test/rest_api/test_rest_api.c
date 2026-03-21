@@ -44,9 +44,15 @@ static void test_rest_api_modio_sync_from_driver_maps_synchronized(void)
                           rest_api_modio_sync_from_driver(MOD_IO_RELAY_SYNC_SYNCHRONIZED));
 }
 
-static void test_rest_api_modio_sync_from_driver_maps_unknown_to_absent(void)
+static void test_rest_api_modio_sync_from_driver_maps_unknown(void)
 {
-    TEST_ASSERT_EQUAL_INT(REST_API_MODIO_SYNC_ABSENT,
+    TEST_ASSERT_EQUAL_INT(REST_API_MODIO_SYNC_UNKNOWN,
+                          rest_api_modio_sync_from_driver(MOD_IO_RELAY_SYNC_UNKNOWN));
+}
+
+static void test_rest_api_modio_sync_from_driver_maps_invalid_to_unknown(void)
+{
+    TEST_ASSERT_EQUAL_INT(REST_API_MODIO_SYNC_UNKNOWN,
                           rest_api_modio_sync_from_driver((mod_io_relay_sync_t)99));
 }
 
@@ -130,7 +136,8 @@ void test_rest_api_suite(void)
 {
     RUN_TEST(test_rest_api_modio_sync_from_driver_maps_absent);
     RUN_TEST(test_rest_api_modio_sync_from_driver_maps_synchronized);
-    RUN_TEST(test_rest_api_modio_sync_from_driver_maps_unknown_to_absent);
+    RUN_TEST(test_rest_api_modio_sync_from_driver_maps_unknown);
+    RUN_TEST(test_rest_api_modio_sync_from_driver_maps_invalid_to_unknown);
     RUN_TEST(test_rest_api_network_transport_to_string_maps_known_values);
     RUN_TEST(test_rest_api_network_transport_to_string_maps_unknown_to_none);
     RUN_TEST(test_rest_api_request_recv_exact_times_out_after_three_consecutive_timeouts);

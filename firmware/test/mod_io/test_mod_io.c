@@ -45,10 +45,16 @@ static void set_read_data_u16(uint8_t low, uint8_t high)
     TEST_ASSERT_EQUAL(ESP_OK, i2c_stub_set_read_data(bytes, sizeof(bytes)));
 }
 
-static void init_present_mod_io(uint8_t relay_mask)
+static void init_present_mod_io(uint8_t probe_value)
 {
-    set_read_data_u8(relay_mask);
+    set_read_data_u8(probe_value);
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_init(test_bus_handle()));
+}
+
+static void sync_mod_io_relays(uint8_t relay_mask)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, mod_io_set_relays(relay_mask));
+    assert_status(true, MOD_IO_RELAY_SYNC_SYNCHRONIZED, relay_mask);
 }
 
 static void assert_last_relay_changed_event(uint8_t expected_id, bool expected_state)
@@ -78,24 +84,24 @@ static void test_mod_io_requires_initialization(void)
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mod_io_read_analog_input(1U, &analog_value));
 }
 
-static void test_mod_io_init_reads_authoritative_relay_state(void)
+static void test_mod_io_init_marks_present_boards_unknown_until_full_write(void)
 {
-    const uint8_t expected_transaction[] = {0x40U};
+    const uint8_t expected_transaction[] = {0x20U};
     uint8_t relay_mask = 0;
     mod_io_relay_sync_t relay_sync = MOD_IO_RELAY_SYNC_ABSENT;
 
     init_present_mod_io(0x05U);
 
     assert_last_transaction_equals(expected_transaction, sizeof(expected_transaction));
-    assert_status(true, MOD_IO_RELAY_SYNC_SYNCHRONIZED, 0x05U);
+    assert_status(true, MOD_IO_RELAY_SYNC_UNKNOWN, 0x00U);
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_get_relays(&relay_mask, &relay_sync));
-    TEST_ASSERT_EQUAL_HEX8(0x05U, relay_mask);
-    TEST_ASSERT_EQUAL_INT(MOD_IO_RELAY_SYNC_SYNCHRONIZED, relay_sync);
+    TEST_ASSERT_EQUAL_HEX8(0x00U, relay_mask);
+    TEST_ASSERT_EQUAL_INT(MOD_IO_RELAY_SYNC_UNKNOWN, relay_sync);
 }
 
-static void test_mod_io_probe_transitions_absent_to_present_with_readback(void)
+static void test_mod_io_probe_transitions_absent_to_present_with_unknown_state(void)
 {
-    const uint8_t expected_transaction[] = {0x40U};
+    const uint8_t expected_transaction[] = {0x20U};
 
     i2c_stub_set_transmit_receive_result(ESP_ERR_NOT_FOUND);
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_init(test_bus_handle()));
@@ -106,7 +112,7 @@ static void test_mod_io_probe_transitions_absent_to_present_with_readback(void)
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_probe());
 
     assert_last_transaction_equals(expected_transaction, sizeof(expected_transaction));
-    assert_status(true, MOD_IO_RELAY_SYNC_SYNCHRONIZED, 0x02U);
+    assert_status(true, MOD_IO_RELAY_SYNC_UNKNOWN, 0x00U);
 }
 
 static void test_mod_io_probe_keeps_absent_state_when_board_is_missing(void)
@@ -119,7 +125,7 @@ static void test_mod_io_probe_keeps_absent_state_when_board_is_missing(void)
 
 static void test_mod_io_probe_keeps_absent_state_when_command_transmit_fails(void)
 {
-    const uint8_t expected_transaction[] = {0x40U};
+    const uint8_t expected_transaction[] = {0x20U};
 
     i2c_stub_set_transmit_result_persistent(ESP_ERR_NOT_FOUND);
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_init(test_bus_handle()));
@@ -149,7 +155,7 @@ static void test_mod_io_probe_bypasses_internal_backoff_window(void)
     i2c_stub_set_transmit_receive_result(ESP_OK);
     set_read_data_u8(0x03U);
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_probe());
-    assert_status(true, MOD_IO_RELAY_SYNC_SYNCHRONIZED, 0x03U);
+    assert_status(true, MOD_IO_RELAY_SYNC_UNKNOWN, 0x00U);
 }
 
 static void test_mod_io_set_relays_waits_for_internal_backoff_window(void)
@@ -187,7 +193,7 @@ static void test_mod_io_set_relays_maps_internal_invalid_state_probe_to_absent(v
     assert_status(false, MOD_IO_RELAY_SYNC_ABSENT, 0x00U);
 }
 
-static void test_mod_io_set_relays_validates_mask_and_round_trips_via_readback(void)
+static void test_mod_io_set_relays_validates_mask_and_preserves_cache_across_probe(void)
 {
     const uint8_t expected_write[] = {0x10U, 0x0FU};
 
@@ -198,7 +204,7 @@ static void test_mod_io_set_relays_validates_mask_and_round_trips_via_readback(v
     assert_last_transaction_equals(expected_write, sizeof(expected_write));
     assert_status(true, MOD_IO_RELAY_SYNC_SYNCHRONIZED, 0x0FU);
 
-    set_read_data_u8(0x0FU);
+    set_read_data_u8(0x03U);
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_probe());
     assert_status(true, MOD_IO_RELAY_SYNC_SYNCHRONIZED, 0x0FU);
 }
@@ -211,22 +217,32 @@ static void test_mod_io_set_relays_publishes_event_for_changed_bit(void)
     assert_last_relay_changed_event(1U, true);
 }
 
-static void test_mod_io_set_relay_validates_ids_and_uses_read_modify_write(void)
+static void test_mod_io_set_relay_requires_synchronized_cache(void)
+{
+    bool actual_state = false;
+
+    init_present_mod_io(0x00U);
+
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mod_io_set_relay(1U, true));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mod_io_toggle_relay(1U, &actual_state));
+    assert_status(true, MOD_IO_RELAY_SYNC_UNKNOWN, 0x00U);
+}
+
+static void test_mod_io_set_relay_validates_ids_and_uses_cached_state(void)
 {
     const uint8_t expected_write_on[] = {0x10U, 0x07U};
     const uint8_t expected_write_off[] = {0x10U, 0x06U};
 
-    init_present_mod_io(0x05U);
+    init_present_mod_io(0x00U);
+    sync_mod_io_relays(0x05U);
 
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, mod_io_set_relay(0U, true));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, mod_io_set_relay(5U, true));
 
-    set_read_data_u8(0x05U);
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_set_relay(2U, true));
     assert_last_transaction_equals(expected_write_on, sizeof(expected_write_on));
     assert_status(true, MOD_IO_RELAY_SYNC_SYNCHRONIZED, 0x07U);
 
-    set_read_data_u8(0x07U);
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_set_relay(1U, false));
     assert_last_transaction_equals(expected_write_off, sizeof(expected_write_off));
     assert_status(true, MOD_IO_RELAY_SYNC_SYNCHRONIZED, 0x06U);
@@ -236,7 +252,8 @@ static void test_mod_io_set_relay_skips_reprobe_when_board_is_already_present(vo
 {
     const uint8_t expected_write[] = {0x10U, 0x07U};
 
-    init_present_mod_io(0x05U);
+    init_present_mod_io(0x00U);
+    sync_mod_io_relays(0x05U);
     i2c_stub_set_transmit_receive_result(ESP_ERR_NOT_FOUND);
 
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_set_relay(2U, true));
@@ -246,7 +263,8 @@ static void test_mod_io_set_relay_skips_reprobe_when_board_is_already_present(vo
 
 static void test_mod_io_set_relay_publishes_change_event(void)
 {
-    init_present_mod_io(0x05U);
+    init_present_mod_io(0x00U);
+    sync_mod_io_relays(0x05U);
 
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_set_relay(2U, true));
     assert_last_relay_changed_event(2U, true);
@@ -258,7 +276,8 @@ static void test_mod_io_toggle_relay_validates_ids_and_flips_cached_state(void)
     const uint8_t expected_write_on[] = {0x10U, 0x06U};
     bool actual_state = false;
 
-    init_present_mod_io(0x05U);
+    init_present_mod_io(0x00U);
+    sync_mod_io_relays(0x05U);
 
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, mod_io_toggle_relay(0U, &actual_state));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, mod_io_toggle_relay(5U, &actual_state));
@@ -278,7 +297,8 @@ static void test_mod_io_toggle_relay_publishes_change_event(void)
 {
     bool actual_state = false;
 
-    init_present_mod_io(0x05U);
+    init_present_mod_io(0x00U);
+    sync_mod_io_relays(0x05U);
 
     TEST_ASSERT_EQUAL(ESP_OK, mod_io_toggle_relay(1U, &actual_state));
     TEST_ASSERT_FALSE(actual_state);
@@ -355,22 +375,24 @@ static void test_mod_io_read_analog_inputs_reads_all_channels(void)
     TEST_ASSERT_EQUAL_UINT16(1U, values[3]);
 }
 
-static void test_mod_io_reprobe_after_write_error_restores_authoritative_state(void)
+static void test_mod_io_reprobe_after_write_error_preserves_synchronized_cache(void)
 {
-    const uint8_t expected_readback[] = {0x40U};
+    const uint8_t expected_probe[] = {0x20U};
 
-    init_present_mod_io(0x01U);
+    init_present_mod_io(0x00U);
+    sync_mod_io_relays(0x01U);
     i2c_stub_set_transmit_result(ESP_FAIL);
     set_read_data_u8(0x0AU);
 
     TEST_ASSERT_EQUAL(ESP_FAIL, mod_io_set_relays(0x0FU));
-    assert_last_transaction_equals(expected_readback, sizeof(expected_readback));
-    assert_status(true, MOD_IO_RELAY_SYNC_SYNCHRONIZED, 0x0AU);
+    assert_last_transaction_equals(expected_probe, sizeof(expected_probe));
+    assert_status(true, MOD_IO_RELAY_SYNC_SYNCHRONIZED, 0x01U);
 }
 
 static void test_mod_io_transaction_failure_marks_board_absent_when_reprobe_fails(void)
 {
-    init_present_mod_io(0x01U);
+    init_present_mod_io(0x00U);
+    sync_mod_io_relays(0x01U);
     i2c_stub_set_transmit_result(ESP_FAIL);
     i2c_stub_set_transmit_receive_result(ESP_ERR_NOT_FOUND);
 
@@ -378,20 +400,37 @@ static void test_mod_io_transaction_failure_marks_board_absent_when_reprobe_fail
     assert_status(false, MOD_IO_RELAY_SYNC_ABSENT, 0x00U);
 }
 
+static void test_mod_io_probe_after_reattach_resets_cache_to_unknown(void)
+{
+    init_present_mod_io(0x00U);
+    sync_mod_io_relays(0x05U);
+
+    i2c_stub_set_transmit_result_persistent(ESP_ERR_NOT_FOUND);
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, mod_io_probe());
+    assert_status(false, MOD_IO_RELAY_SYNC_ABSENT, 0x00U);
+
+    i2c_stub_set_transmit_result_persistent(ESP_OK);
+    i2c_stub_set_transmit_receive_result(ESP_OK);
+    set_read_data_u8(0x07U);
+    TEST_ASSERT_EQUAL(ESP_OK, mod_io_probe());
+    assert_status(true, MOD_IO_RELAY_SYNC_UNKNOWN, 0x00U);
+}
+
 void test_mod_io_suite(void)
 {
     RUN_TEST(test_mod_io_requires_initialization);
-    RUN_TEST(test_mod_io_init_reads_authoritative_relay_state);
-    RUN_TEST(test_mod_io_probe_transitions_absent_to_present_with_readback);
+    RUN_TEST(test_mod_io_init_marks_present_boards_unknown_until_full_write);
+    RUN_TEST(test_mod_io_probe_transitions_absent_to_present_with_unknown_state);
     RUN_TEST(test_mod_io_probe_keeps_absent_state_when_board_is_missing);
     RUN_TEST(test_mod_io_probe_keeps_absent_state_when_command_transmit_fails);
     RUN_TEST(test_mod_io_init_treats_probe_timeouts_as_absent);
     RUN_TEST(test_mod_io_probe_bypasses_internal_backoff_window);
     RUN_TEST(test_mod_io_set_relays_waits_for_internal_backoff_window);
     RUN_TEST(test_mod_io_set_relays_maps_internal_invalid_state_probe_to_absent);
-    RUN_TEST(test_mod_io_set_relays_validates_mask_and_round_trips_via_readback);
+    RUN_TEST(test_mod_io_set_relays_validates_mask_and_preserves_cache_across_probe);
     RUN_TEST(test_mod_io_set_relays_publishes_event_for_changed_bit);
-    RUN_TEST(test_mod_io_set_relay_validates_ids_and_uses_read_modify_write);
+    RUN_TEST(test_mod_io_set_relay_requires_synchronized_cache);
+    RUN_TEST(test_mod_io_set_relay_validates_ids_and_uses_cached_state);
     RUN_TEST(test_mod_io_set_relay_skips_reprobe_when_board_is_already_present);
     RUN_TEST(test_mod_io_set_relay_publishes_change_event);
     RUN_TEST(test_mod_io_toggle_relay_validates_ids_and_flips_cached_state);
@@ -400,6 +439,7 @@ void test_mod_io_suite(void)
     RUN_TEST(test_mod_io_read_digital_inputs_uses_protocol_command);
     RUN_TEST(test_mod_io_read_analog_input_validates_ids_and_decodes_samples);
     RUN_TEST(test_mod_io_read_analog_inputs_reads_all_channels);
-    RUN_TEST(test_mod_io_reprobe_after_write_error_restores_authoritative_state);
+    RUN_TEST(test_mod_io_reprobe_after_write_error_preserves_synchronized_cache);
     RUN_TEST(test_mod_io_transaction_failure_marks_board_absent_when_reprobe_fails);
+    RUN_TEST(test_mod_io_probe_after_reattach_resets_cache_to_unknown);
 }

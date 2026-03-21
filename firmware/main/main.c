@@ -42,7 +42,7 @@ static esp_err_t app_status_provider(rest_api_status_view_t *status, void *ctx)
 
     err = mod_io_probe();
     if ((err != ESP_OK) && (err != ESP_ERR_NOT_FOUND)) {
-        ESP_LOGW(TAG, "Failed to refresh MOD-IO state from readback: %s", esp_err_to_name(err));
+        ESP_LOGW(TAG, "Failed to refresh MOD-IO presence: %s", esp_err_to_name(err));
     }
 
     err = mod_io_get_status(&mod_io_status);

@@ -24,10 +24,11 @@
 
 - Hardware-backed test lanes require a dedicated self-hosted runner. The
   public GitHub-hosted CI jobs can only cover host-side build and test work.
-- The MOD-IO relay-state model is now settled: the hardware reference documents
-  command `0x40` relay-state readback and records a verified-working relay
-  sweep on 2026-03-16. QA should assert that authoritative readback behavior,
-  not preserve the older write-only unknown/synchronized model.
+- The MOD-IO relay-state model is now settled: the official manual does not
+  document relay readback, and the focused hardware rerun on 2026-03-21
+  confirmed that the repo's `0x40` readback assumption does not hold on the
+  deployed board. QA should assert the explicit `absent -> unknown ->
+  synchronized` state machine instead of the old readback model.
 
 ---
 
@@ -146,23 +147,23 @@ serial bootloader path, then validates the live system over HTTP.
 
 ### mod_io — Tier 1 (stubs) + Tier 2
 
-MOD-IO relay-state readback via command `0x40` is authoritative for the
-deployed board. The component-level tests below should assert that model
-consistently.
+MOD-IO does not expose documented relay-state readback on the deployed
+board. The component-level tests below should assert the firmware-owned
+cache model consistently.
 
 **Host tests (Tier 1):**
 - I2C stubs capture transaction bytes and verify protocol:
   - Relay write: command `0x10` + 1 byte mask
-  - Relay readback: command `0x40`, returns 1 byte
+  - Presence probe: documented command `0x20`, returns 1 byte
   - Digital input read: command `0x20`, returns 1 byte
   - Analog input read: commands `0x30`–`0x33`, returns 2 bytes each
-- State machine transitions: probe → present/readable, absent → probe fails
-  → stays absent
+- State machine transitions: absent → unknown after a successful probe,
+  synchronized → unknown after hot reattach, absent → absent when the
+  board still does not respond
 - `mod_io_set_relays`: `0x0F` is accepted, `0x10` is rejected, and a
-  successful write is observable via readback or the component's refreshed
-  cache
-- `mod_io_set_relay`: 0 → invalid, 1–4 → valid when MOD-IO is present,
-  5 → invalid
+  successful write transitions the cache to `synchronized`
+- `mod_io_set_relay` / `mod_io_toggle_relay`: 0 → invalid, 1–4 → valid
+  only when the relay cache is already synchronized, 5 → invalid
 - `mod_io_read_analog_input`: 0 → invalid, 1–4 → valid, 5 → invalid
 - Public analog read APIs return correctly decoded samples for known
   byte pairs (for example `{0x80, 0x00}` → 1, `{0x01, 0x00}` → 128,

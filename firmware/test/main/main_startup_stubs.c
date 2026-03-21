@@ -75,7 +75,7 @@ void main_startup_stub_reset(void)
                    "192.0.2.1");
 
     s_state.mod_io_status.present = true;
-    s_state.mod_io_status.relay_sync = MOD_IO_RELAY_SYNC_SYNCHRONIZED;
+    s_state.mod_io_status.relay_sync = MOD_IO_RELAY_SYNC_UNKNOWN;
     s_state.mod_io_status.relay_mask = 0x00U;
 }
 

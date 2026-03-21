@@ -86,6 +86,10 @@ func knownErrorPolicies() map[string]errorPolicy {
 		"MODIO_NOT_PRESENT": {
 			Retryable: false,
 		},
+		"MODIO_STATE_UNKNOWN": {
+			Retryable:   false,
+			Remediation: stringPtr("Use evb-relay relay set with all four modio relays to establish the full MOD-IO state before single-relay changes"),
+		},
 		"MODIO_SAMPLE_UNAVAILABLE": {
 			Retryable: true,
 		},

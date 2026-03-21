@@ -91,9 +91,11 @@ esp32-evb-relay/
   - `0x10` + bitmask → set relay outputs (bits 0-3)
   - `0x20` → read digital inputs (1 byte)
   - `0x30-0x33` → select analog inputs 1-4, then read two bytes carrying the 10-bit sample in the MOD-IO manual's bit-packed `LSB:MSB` format; decode it explicitly instead of treating it as a plain host-endian `uint16`
-  - `0x40` → read the current relay-state bitmask (authoritative hardware readback)
-- The write command still always sends the full 4-bit relay bitmap, so single-relay operations should perform a read-modify-write cycle against the authoritative readback value instead of trusting stale RAM
-- After ESP32 reboot or MOD-IO hot reattach, repopulate the cached relay bitmap from command `0x40`; do not force clients through a synthetic recovery step when the hardware can report its own state
+  - No documented relay-state readback command exists on MOD-IO; do not invent one in firmware or tests
+- Use a documented command such as `0x20` to probe board presence without relying on a bare I2C address ping that can perturb the PIC state machine
+- The write command always sends the full 4-bit relay bitmap, so `mod_io_set_relays()` establishes the authoritative firmware-owned cache
+- After ESP32 reboot or MOD-IO hot reattach, reset the cached relay bitmap to `unknown` until a full-mask write succeeds
+- Reject single-relay read-modify-write operations while the relay cache is `unknown`; otherwise the firmware would have to guess the other three relay bits
 - Do not write every relay toggle to NVS just to simulate readback; that would create flash wear without making the state authoritative
 - Serialize all MOD-IO I2C transactions inside the component so background polling and request handlers never race each other on the shared bus
 - `mod_io_init(bus_handle)`, `mod_io_is_present()`, graceful failure if module absent
@@ -106,7 +108,7 @@ esp32-evb-relay/
 - Also monitors onboard button (GPIO34 interrupt → `button` event on the same internal event queue)
 - Debounce the onboard button in software before emitting `button` events so one press does not fan out into multiple spurious notifications
 - Analog inputs: configurable threshold for change detection on 10-bit samples (avoid noise-triggered events)
-- If MOD-IO probing starts succeeding after an absence/error period, publish a presence change, refresh the cached relay bitmap from readback, and resume normal sampling without reapplying `modio_boot_policy`
+- If MOD-IO probing starts succeeding after an absence/error period, publish a presence change, reset relay sync to `unknown`, and resume normal sampling without reapplying `modio_boot_policy`
 
 ### Step 4c — `device_config` component
 - NVS-backed source of truth for `api_token`, `poll_interval_ms`, `hostname`, `modio_boot_policy`, and future WiFi credentials
@@ -168,15 +170,17 @@ device context headers so agents can build `device_context` without a sidecar
 ```
 X-FW-Version: 0.3.1
 X-ModIO-Present: true
-X-ModIO-Sync: synchronized|absent
+X-ModIO-Sync: synchronized|unknown|absent
 ```
 
 Add a post-handler hook or helper that injects these headers on success
 responses and on application errors returned after auth succeeds. Do not attach
 them to pre-auth `401/403` responses, since unauthenticated clients do not need
 firmware/hardware metadata. `X-ModIO-Present` and `X-ModIO-Sync` are read from
-`mod_io` component state; once relay-state readback succeeds the sync value
-stays `synchronized` across boots and reconnects. `X-FW-Version` is read from
+`mod_io` component state. `X-ModIO-Sync` is `unknown` after boot or hot
+reattach until firmware applies a full MOD-IO relay mask successfully;
+after that it stays `synchronized` until the board disappears again.
+`X-FW-Version` is read from
 `esp_app_desc_t.version`.
 
 Error format: `{"error": {"code": "RELAY_NOT_FOUND", "message": "...", "status": 404}}`
@@ -524,6 +528,7 @@ robot mode, capabilities is complex/nested and JSON is better here). No
   },
   "error_codes": {
     "MODIO_NOT_PRESENT": {"exit_code": 7, "retryable": false, "remediation": null},
+    "MODIO_STATE_UNKNOWN": {"exit_code": 6, "retryable": false, "remediation": "Apply one full MOD-IO relay mask before single-relay changes"},
     "MODIO_SAMPLE_UNAVAILABLE": {"exit_code": 7, "retryable": true, "remediation": null},
     "RELAY_NOT_FOUND": {"exit_code": 4, "retryable": false, "remediation": null},
     "AUTH_REQUIRED": {"exit_code": 3, "retryable": false, "remediation": null},
@@ -531,13 +536,14 @@ robot mode, capabilities is complex/nested and JSON is better here). No
     "PARTIAL_FAILURE": {"exit_code": 1, "retryable": false, "remediation": null}
   },
   "state_machine": {
-    "modio_sync_states": ["synchronized", "absent"],
+    "modio_sync_states": ["absent", "unknown", "synchronized"],
     "transitions": {
-      "absent -> synchronized": "MOD-IO is physically connected and relay-state readback succeeds",
-      "synchronized -> synchronized": "ESP32 reboots or MOD-IO reconnects and the firmware refreshes relay state from readback",
-      "* -> absent": "MOD-IO is physically disconnected or probe/readback fails"
+      "absent -> unknown": "MOD-IO is physically connected and a documented presence probe succeeds",
+      "unknown -> synchronized": "Firmware applies one full 4-relay MOD-IO mask successfully",
+      "synchronized -> unknown": "ESP32 reboots or MOD-IO disconnects and reconnects before another full-mask write",
+      "* -> absent": "MOD-IO is physically disconnected or probing fails"
     },
-    "boot_hint": "No bulk recovery step is required; the firmware refreshes the authoritative relay bitmap from MOD-IO during init"
+    "boot_hint": "After boot or hot reattach, apply one full MOD-IO relay mask before relying on single-relay changes"
   },
   "environment_variables": {
     "EVB_RELAY_HOST": "Device IP or hostname",

@@ -529,11 +529,72 @@ func TestRelaySetSurfacesModIONotPresentForModioOnlyBatch(t *testing.T) {
 	}
 }
 
+func TestRelaySetRejectsPartialModIOBatchWhenSyncIsUnknown(t *testing.T) {
+	t.Parallel()
+
+	var modioPutCount int
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/relays/modio" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-FW-Version", "0.4.0")
+		w.Header().Set("X-ModIO-Present", "true")
+		w.Header().Set("X-ModIO-Sync", "unknown")
+		_, _ = io.WriteString(
+			w,
+			`{"relays":[{"group":"modio","id":1,"state":false,"sync":"unknown"},{"group":"modio","id":2,"state":false,"sync":"unknown"},{"group":"modio","id":3,"state":false,"sync":"unknown"},{"group":"modio","id":4,"state":false,"sync":"unknown"}]}`,
+		)
+		modioPutCount++
+	}))
+	defer server.Close()
+
+	command := newRootCommand()
+	stdout := &bytes.Buffer{}
+	command.SetOut(stdout)
+	command.SetErr(&bytes.Buffer{})
+	command.SetArgs([]string{
+		"--host", server.URL,
+		"--api-token", "relay-token",
+		"--robot",
+		"--format", "json",
+		"relay", "set", "modio:2=off",
+	})
+
+	err := command.Execute()
+	if err == nil {
+		t.Fatal("Execute() succeeded; want state error")
+	}
+	if got := exitcodes.FromError(err); got != exitcodes.StateError {
+		t.Fatalf("exit code = %d, want %d", got, exitcodes.StateError)
+	}
+	if modioPutCount != 1 {
+		t.Fatalf("modio request count = %d, want 1 GET only", modioPutCount)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if got := payload["exit_code"]; got != float64(6) {
+		t.Fatalf("exit_code = %#v, want 6", got)
+	}
+	errorPayload, ok := payload["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error = %#v; want object", payload["error"])
+	}
+	if got := errorPayload["code"]; got != "MODIO_STATE_UNKNOWN" {
+		t.Fatalf("error.code = %#v, want %q", got, "MODIO_STATE_UNKNOWN")
+	}
+}
+
 func TestRelaySetExpandsAllShorthandAcrossBothRelayGroups(t *testing.T) {
 	t.Parallel()
 
 	var onboardPutPaths []string
-	var modioGetCount int
 	var modioPutCount int
 	var modioStates []bool
 
@@ -547,13 +608,6 @@ func TestRelaySetExpandsAllShorthandAcrossBothRelayGroups(t *testing.T) {
 				return
 			}
 			_, _ = io.WriteString(w, `{"relay":{"group":"onboard","id":2,"state":true}}`)
-		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/relays/modio":
-			modioGetCount++
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(
-				w,
-				`{"relays":[{"group":"modio","id":1,"state":true,"sync":"synchronized"},{"group":"modio","id":2,"state":true,"sync":"synchronized"},{"group":"modio","id":3,"state":true,"sync":"synchronized"},{"group":"modio","id":4,"state":true,"sync":"synchronized"}]}`,
-			)
 		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/relays/modio":
 			modioPutCount++
 			var requestBody struct {
@@ -592,9 +646,6 @@ func TestRelaySetExpandsAllShorthandAcrossBothRelayGroups(t *testing.T) {
 
 	if len(onboardPutPaths) != 2 {
 		t.Fatalf("onboard PUT paths = %#v, want 2 requests", onboardPutPaths)
-	}
-	if modioGetCount != 1 {
-		t.Fatalf("modio GET count = %d, want 1", modioGetCount)
 	}
 	if modioPutCount != 1 {
 		t.Fatalf("modio PUT count = %d, want 1", modioPutCount)

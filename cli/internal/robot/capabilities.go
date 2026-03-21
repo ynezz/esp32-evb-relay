@@ -84,7 +84,7 @@ func BuildCapabilities(root *cobra.Command, version string) (Capabilities, error
 			"3": "auth error",
 			"4": "not found",
 			"5": "bad argument",
-			"6": "state error (reserved for future device-state conflicts)",
+			"6": "state error",
 			"7": "hardware unavailable",
 		},
 		ErrorCodes: map[string]CapabilityError{
@@ -106,6 +106,11 @@ func BuildCapabilities(root *cobra.Command, version string) (Capabilities, error
 				ExitCode:  7,
 				Retryable: false,
 			},
+			"MODIO_STATE_UNKNOWN": {
+				ExitCode:    6,
+				Retryable:   false,
+				Remediation: stringPtr("Use evb-relay relay set with all four modio relays to establish the full MOD-IO state before single-relay changes"),
+			},
 			"MODIO_SAMPLE_UNAVAILABLE": {
 				ExitCode:  7,
 				Retryable: true,
@@ -125,13 +130,14 @@ func BuildCapabilities(root *cobra.Command, version string) (Capabilities, error
 			},
 		},
 		StateMachine: StateMachineCapabilities{
-			ModIOSyncStates: []string{"synchronized", "absent"},
+			ModIOSyncStates: []string{"absent", "unknown", "synchronized"},
 			Transitions: map[string]string{
-				"absent -> synchronized":       "MOD-IO is physically connected and relay-state readback succeeds",
-				"synchronized -> synchronized": "ESP32 reboots or MOD-IO reconnects and the firmware refreshes relay state from readback",
-				"* -> absent":                  "MOD-IO is physically disconnected or probe/readback fails",
+				"absent -> unknown":       "MOD-IO is physically connected and a documented presence probe succeeds",
+				"unknown -> synchronized": "Firmware applies a full 4-relay MOD-IO mask successfully",
+				"synchronized -> unknown": "ESP32 reboots or MOD-IO disconnects and reconnects before another full-mask write",
+				"* -> absent":             "MOD-IO is physically disconnected or probing fails",
 			},
-			BootHint: "No bulk recovery step is required; the firmware refreshes the authoritative relay bitmap from MOD-IO during init",
+			BootHint: "After boot or hot reattach, establish the full MOD-IO state with one bulk relay write before relying on single-relay changes",
 		},
 		EnvironmentVars: []EnvironmentVariable{
 			{Name: appconfig.EnvHost, Description: "Device IP or hostname"},

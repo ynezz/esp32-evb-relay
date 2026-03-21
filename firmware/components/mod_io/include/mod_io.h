@@ -19,6 +19,7 @@ extern "C" {
 
 typedef enum {
     MOD_IO_RELAY_SYNC_ABSENT = 0,
+    MOD_IO_RELAY_SYNC_UNKNOWN,
     MOD_IO_RELAY_SYNC_SYNCHRONIZED,
 } mod_io_relay_sync_t;
 

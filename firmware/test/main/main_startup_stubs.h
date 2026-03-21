@@ -30,6 +30,7 @@ typedef enum {
 
 typedef enum {
     REST_API_MODIO_SYNC_ABSENT = 0,
+    REST_API_MODIO_SYNC_UNKNOWN,
     REST_API_MODIO_SYNC_SYNCHRONIZED,
 } rest_api_modio_sync_t;
 
@@ -67,6 +68,7 @@ typedef struct {
 
 typedef enum {
     MOD_IO_RELAY_SYNC_ABSENT = 0,
+    MOD_IO_RELAY_SYNC_UNKNOWN,
     MOD_IO_RELAY_SYNC_SYNCHRONIZED,
 } mod_io_relay_sync_t;
 
@@ -81,10 +83,12 @@ static inline rest_api_modio_sync_t rest_api_modio_sync_from_driver(mod_io_relay
     switch (relay_sync) {
     case MOD_IO_RELAY_SYNC_ABSENT:
         return REST_API_MODIO_SYNC_ABSENT;
+    case MOD_IO_RELAY_SYNC_UNKNOWN:
+        return REST_API_MODIO_SYNC_UNKNOWN;
     case MOD_IO_RELAY_SYNC_SYNCHRONIZED:
         return REST_API_MODIO_SYNC_SYNCHRONIZED;
     default:
-        return REST_API_MODIO_SYNC_ABSENT;
+        return REST_API_MODIO_SYNC_UNKNOWN;
     }
 }
 
