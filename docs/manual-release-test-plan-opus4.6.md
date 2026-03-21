@@ -33,7 +33,7 @@ Before starting, the agent must verify:
 4. CLI binary is built from the same commit
 5. API token is provisioned and exported as `EVB_RELAY_API_TOKEN`
 6. Device host is exported as `EVB_RELAY_HOST`
-7. Python, Go, and ESP-IDF tooling are installed (`just setup` already run)
+7. Python, Go, `jq`, `curl`, and ESP-IDF tooling are installed (`just setup` already run)
 
 ```bash
 # Environment setup
