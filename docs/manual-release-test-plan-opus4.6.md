@@ -465,8 +465,8 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 
 | #    | Test                  | Command | Expected | Result | Notes |
 |------|-----------------------|---------|----------|--------|-------|
-| 17.1 | Start event stream    | `timeout 15 evb-relay input watch --robot 2>/dev/null` | Stream starts | SKIP | Requires physical button press; agent cannot actuate |
-| 17.2 | Press button          | Physically press button on ESP32-EVB | `button` event appears in stream | SKIP | Requires physical button press; agent cannot actuate |
+| 17.1 | Start event stream    | `timeout 15 evb-relay input watch --robot 2>/dev/null` | Stream starts | PASS | Stream header received with v=1, stream=events, device_context |
+| 17.2 | Press button          | Physically press button on ESP32-EVB | `button` event appears in stream | PASS | `button` events received: pressed=true/false pairs with timestamps |
 
 ---
 
@@ -490,8 +490,8 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | 14      | MOD-IO boot policy          | 10    | 0    | 3    | 7    |
 | 15      | Output formats & exit codes | 9     | 9    | 0    | 0    |
 | 16      | Config persistence          | 5     | 0    | 2    | 3    |
-| 17      | Button event                | 2     | 0    | 0    | 2    |
-| **Total** |                           | **156** | **81** | **30** | **45** |
+| 17      | Button event                | 2     | 2    | 0    | 0    |
+| **Total** |                           | **156** | **83** | **30** | **43** |
 
 ---
 
@@ -567,8 +567,10 @@ proper error codes. **Related to F1 — same root cause.**
 
 | Bead ID | Title | Priority | Labels |
 |---------|-------|----------|--------|
-| *(TBD)* | httpd stack overflow crashes config/OTA/PUT handlers on real hardware | critical | firmware, bug |
-| *(TBD)* | ci-full watchdog timeout when running test-device in sequence | medium | ci, test |
+| evb-1isi | httpd stack overflow crashes config and OTA PUT handlers on real hardware | critical (0) | firmware |
+| evb-2855 | ci-full watchdog timeout when running test-device in sequence | medium (2) | ci, test |
+| evb-3mxa | REST GET on wildcard relay URI returns 405 instead of 400/404 for invalid IDs | low (3) | firmware |
+| evb-2igw | mDNS discovery returns empty on Ethernet-only network segment | low (3) | firmware |
 
 ---
 
@@ -579,7 +581,7 @@ proper error codes. **Related to F1 — same root cause.**
 | Completed by     | Claude Opus 4.6 (1M context) |
 | Date completed   | 2026-03-21 |
 | Final commit SHA | 6b5f338 |
-| Overall result   | 81 PASS / 30 FAIL / 45 SKIP |
+| Overall result   | 83 PASS / 30 FAIL / 43 SKIP |
 | Blocking issues  | F1: Config PUT crashes httpd (all config endpoints non-functional); F2: OTA endpoint crashes httpd (OTA non-functional) |
 
 ---
