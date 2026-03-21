@@ -28,6 +28,9 @@ DEFAULT_MONITOR_BAUD = "115200"
 DEFAULT_REQUEST_TIMEOUT = 5.0
 DEFAULT_DISCOVERY_TIMEOUT = 15.0
 DEFAULT_SERIAL_ENDPOINT_TIMEOUT = 30.0
+DEFAULT_HTTP_READY_TIMEOUT = 30.0
+DEFAULT_HTTP_READY_POLL_SECONDS = 1.0
+DEFAULT_HTTP_READY_REQUEST_TIMEOUT = 3.0
 DEFAULT_BOOT_SETTLE_SECONDS = 3.0
 DEFAULT_CLI_TIMEOUT_SECONDS = 30.0
 DEFAULT_CLI_REQUEST_TIMEOUT = "5s"
@@ -304,6 +307,39 @@ def _restore_safe_relays(http_client: IntegrationHttpClient) -> None:
         response.raise_for_status()
 
 
+def _wait_for_http_ready(http_client: IntegrationHttpClient, timeout_seconds: float) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    last_error: Exception | None = None
+    last_status: int | None = None
+    request_timeout = min(http_client.timeout, DEFAULT_HTTP_READY_REQUEST_TIMEOUT)
+
+    while time.monotonic() < deadline:
+        try:
+            response = http_client.request("GET", "/api/v1/status", timeout=request_timeout)
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            last_error = exc
+        else:
+            try:
+                last_status = response.status_code
+                if response.status_code == 200:
+                    return
+            finally:
+                response.close()
+
+        time.sleep(DEFAULT_HTTP_READY_POLL_SECONDS)
+
+    if last_status is not None:
+        raise RuntimeError(
+            f"HTTP server at {http_client.base_url} did not become ready within "
+            f"{timeout_seconds:.1f}s (last status {last_status})"
+        )
+
+    raise RuntimeError(
+        f"HTTP server at {http_client.base_url} did not become ready within "
+        f"{timeout_seconds:.1f}s (last error: {last_error})"
+    )
+
+
 @pytest.fixture(scope="session")
 def flash_port(pytestconfig: pytest.Config) -> str:
     return _flash_port_from_config(pytestconfig)
@@ -405,6 +441,10 @@ def http_client(auth_token: str, dut_endpoint: DutEndpoint) -> Iterator[Integrat
     )
 
     try:
+        _wait_for_http_ready(
+            client,
+            float(os.environ.get("EVB_HTTP_READY_TIMEOUT_SECONDS", DEFAULT_HTTP_READY_TIMEOUT)),
+        )
         yield client
     finally:
         session.close()

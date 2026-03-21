@@ -11,6 +11,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+import requests
 
 FLASH_SIZE_BYTES = 0x400000
 
@@ -599,6 +600,124 @@ def test_cleanup_ignores_modio_not_present_service_unavailable() -> None:
     module = _load_integration_conftest()
 
     assert 503 in module.IGNORED_CLEANUP_STATUS_CODES
+
+
+def test_wait_for_http_ready_retries_until_status_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_integration_conftest()
+    current_time = {"value": 0.0}
+    attempts: list[float] = []
+
+    class FakeResponse:
+        def __init__(self, status_code: int) -> None:
+            self.status_code = status_code
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    success_response = FakeResponse(200)
+    outcomes: list[object] = [
+        requests.ConnectionError("not ready"),
+        success_response,
+    ]
+
+    def _request(method: str, path: str, **kwargs: object) -> FakeResponse:
+        attempts.append(float(kwargs["timeout"]))
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    client = module.IntegrationHttpClient(
+        base_url="http://192.0.2.10:80",
+        session=object(),
+        timeout=5.0,
+    )
+    monkeypatch.setattr(client, "request", _request)
+    monkeypatch.setattr(module.time, "monotonic", lambda: current_time["value"])
+    monkeypatch.setattr(
+        module.time,
+        "sleep",
+        lambda seconds: current_time.__setitem__("value", current_time["value"] + seconds),
+    )
+
+    module._wait_for_http_ready(client, 5.0)
+
+    assert attempts == [3.0, 3.0]
+    assert success_response.closed is True
+
+
+def test_wait_for_http_ready_reports_last_status_on_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_integration_conftest()
+    current_time = {"value": 0.0}
+    closed_responses: list[int] = []
+
+    class FakeResponse:
+        def __init__(self, status_code: int) -> None:
+            self.status_code = status_code
+
+        def close(self) -> None:
+            closed_responses.append(self.status_code)
+
+    client = module.IntegrationHttpClient(
+        base_url="http://192.0.2.10:80",
+        session=object(),
+        timeout=2.5,
+    )
+    monkeypatch.setattr(
+        client,
+        "request",
+        lambda method, path, **kwargs: FakeResponse(503),
+    )
+    monkeypatch.setattr(module.time, "monotonic", lambda: current_time["value"])
+    monkeypatch.setattr(
+        module.time,
+        "sleep",
+        lambda seconds: current_time.__setitem__("value", current_time["value"] + seconds),
+    )
+
+    with pytest.raises(RuntimeError, match=r"last status 503"):
+        module._wait_for_http_ready(client, 2.0)
+
+    assert closed_responses == [503, 503]
+
+
+def test_http_client_fixture_waits_for_http_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_integration_conftest()
+    wait_calls: list[tuple[str, float, str]] = []
+
+    def _fake_wait(client, timeout_seconds: float) -> None:
+        wait_calls.append(
+            (
+                client.base_url,
+                timeout_seconds,
+                client.session.headers["Authorization"],
+            )
+        )
+
+    monkeypatch.setenv("EVB_HTTP_READY_TIMEOUT_SECONDS", "12.5")
+    monkeypatch.setattr(module, "_wait_for_http_ready", _fake_wait)
+
+    endpoint = module.DutEndpoint(
+        host="esp32-evb-relay.local",
+        ip="192.0.2.10",
+        port=80,
+        base_url="http://192.0.2.10:80",
+    )
+    generator = module.http_client.__wrapped__("token-123", endpoint)
+    client = next(generator)
+
+    try:
+        assert client.base_url == endpoint.base_url
+        assert wait_calls == [("http://192.0.2.10:80", 12.5, "Bearer token-123")]
+    finally:
+        generator.close()
 
 
 def test_partition_table_restores_nvs_size_and_flash_headroom() -> None:
