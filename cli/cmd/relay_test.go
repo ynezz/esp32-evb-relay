@@ -532,7 +532,7 @@ func TestRelaySetSurfacesModIONotPresentForModioOnlyBatch(t *testing.T) {
 func TestRelaySetRejectsPartialModIOBatchWhenSyncIsUnknown(t *testing.T) {
 	t.Parallel()
 
-	var modioPutCount int
+	var modioGetCount int
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/relays/modio" {
@@ -547,7 +547,7 @@ func TestRelaySetRejectsPartialModIOBatchWhenSyncIsUnknown(t *testing.T) {
 			w,
 			`{"relays":[{"group":"modio","id":1,"state":false,"sync":"unknown"},{"group":"modio","id":2,"state":false,"sync":"unknown"},{"group":"modio","id":3,"state":false,"sync":"unknown"},{"group":"modio","id":4,"state":false,"sync":"unknown"}]}`,
 		)
-		modioPutCount++
+		modioGetCount++
 	}))
 	defer server.Close()
 
@@ -570,8 +570,8 @@ func TestRelaySetRejectsPartialModIOBatchWhenSyncIsUnknown(t *testing.T) {
 	if got := exitcodes.FromError(err); got != exitcodes.StateError {
 		t.Fatalf("exit code = %d, want %d", got, exitcodes.StateError)
 	}
-	if modioPutCount != 1 {
-		t.Fatalf("modio request count = %d, want 1 GET only", modioPutCount)
+	if modioGetCount != 1 {
+		t.Fatalf("modio request count = %d, want 1 GET only", modioGetCount)
 	}
 
 	var payload map[string]any
