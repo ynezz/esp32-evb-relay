@@ -110,7 +110,7 @@ Start state: both onboard relays OFF after boot.
 | 4.9 | Relay ON via REST           | `curl -s -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d '{"state":true}' http://$EVB_RELAY_HOST/api/v1/relays/onboard/1` | JSON with `state=true`; HTTP 200 | | |
 | 4.10 | Relay toggle via REST      | `curl -s -X POST -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/relays/onboard/1/toggle` | State toggled; HTTP 200 | | |
 | 4.11 | Relay OFF via REST         | `curl -s -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d '{"state":false}' http://$EVB_RELAY_HOST/api/v1/relays/onboard/1` | `state=false`; HTTP 200 | | |
-| 4.12 | GET onboard relays (REST)  | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/relays/onboard` | JSON array of 2 relays with `id`, `state` | | |
+| 4.12 | GET onboard relays (REST)  | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/relays/onboard` | JSON object with `relays[]`; two onboard relays with `id`, `state` | | |
 | 4.13 | Cleanup: both OFF          | `evb-relay relay set onboard:1=off onboard:2=off` | Both OFF | | |
 
 ---
@@ -131,7 +131,7 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | 5.8 | Batch set via REST          | `curl -s -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d '{"states":[false,true,false,true]}' http://$EVB_RELAY_HOST/api/v1/relays/modio` | HTTP 200; states match request | | |
 | 5.9 | Single relay via REST       | `curl -s -X PUT -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" -H "Content-Type: application/json" -d '{"state":true}' http://$EVB_RELAY_HOST/api/v1/relays/modio/1` | HTTP 200; `state=true` | | |
 | 5.10 | Toggle relay via REST      | `curl -s -X POST -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/relays/modio/1/toggle` | State toggled; HTTP 200 | | |
-| 5.11 | GET modio relays (REST)    | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/relays/modio` | JSON array of 4 relays | | |
+| 5.11 | GET modio relays (REST)    | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/relays/modio` | JSON object with `relays[]`; four MOD-IO relays | | |
 | 5.12 | GET all relays (REST)      | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/relays` | JSON with both onboard (2) and modio (4) relays | | |
 | 5.13 | Relay list shows all       | `evb-relay relay list --format json` | 6 total relays (2 onboard + 4 modio); `modio_present=true`, `modio_sync=synchronized` | | |
 | 5.14 | Cleanup: all MOD-IO OFF    | `evb-relay relay set modio:1=off modio:2=off modio:3=off modio:4=off` | All OFF | | |
@@ -146,10 +146,10 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 | 6.2 | Single digital input        | `evb-relay input digital 1 --format json` | Single input with `id=1`, `state` (boolean) | | |
 | 6.3 | All analog inputs           | `evb-relay input analog --format json` | JSON with 4 inputs; each has `id`, `value` (0-1023); timestamp metadata present | | |
 | 6.4 | Single analog input         | `evb-relay input analog 3 --format json` | Single input with `id=3`, `value` in 0-1023 range | | |
-| 6.5 | Digital inputs via REST     | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/inputs/digital` | JSON array of 4 digital inputs | | |
-| 6.6 | Single digital via REST     | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/inputs/digital/2` | Single input JSON | | |
-| 6.7 | Analog inputs via REST      | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/inputs/analog` | JSON array of 4 analog inputs, values 0-1023 | | |
-| 6.8 | Single analog via REST      | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/inputs/analog/4` | Single input JSON, value 0-1023 | | |
+| 6.5 | Digital inputs via REST     | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/inputs/digital` | JSON object with `sample_ts_ms`, `staleness_ms`, `poll_interval_ms`, and `inputs[]` of 4 digital inputs | | |
+| 6.6 | Single digital via REST     | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/inputs/digital/2` | JSON object with metadata plus `input.id=2` and boolean `input.state` | | |
+| 6.7 | Analog inputs via REST      | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/inputs/analog` | JSON object with metadata plus `inputs[]` of 4 analog inputs, values 0-1023 | | |
+| 6.8 | Single analog via REST      | `curl -s -H "Authorization: Bearer $EVB_RELAY_API_TOKEN" http://$EVB_RELAY_HOST/api/v1/inputs/analog/4` | JSON object with metadata plus `input.id=4`; `input.value` in 0-1023 range | | |
 | 6.9 | Digital plain format        | `evb-relay input digital --format plain` | Plain text output; exit 0 | | |
 | 6.10 | Analog table format        | `evb-relay input analog` | Human-readable table; exit 0 | | |
 
@@ -233,8 +233,8 @@ Prerequisite: MOD-IO attached. Status must show `modio.present=true`.
 
 | #   | Test                        | Command | Expected | Result | Notes |
 |-----|-----------------------------|---------|----------|--------|-------|
-| 11.1 | Build RC binary            | `just build` | Binary at `firmware/build/esp32-evb-relay.bin` (or similar) | | |
-| 11.2 | OTA flash                  | `evb-relay ota flash firmware/build/esp32-evb-relay.bin --format json` | `uploaded_bytes` > 0, `reboot_in_seconds` present; exit 0 | | |
+| 11.1 | Build RC binary            | `just build` | Binary at `firmware/build/evb_relay_firmware.bin` | | |
+| 11.2 | OTA flash                  | `evb-relay ota flash firmware/build/evb_relay_firmware.bin --format json` | `uploaded_bytes` > 0, `reboot_in_seconds` present; exit 0 | | |
 | 11.3 | Wait for reboot            | `sleep 10 && evb-relay status --format json` | Device responds; FW version matches RC | | |
 | 11.4 | Post-OTA relay test        | `evb-relay relay list --format json` | Relays accessible; exit 0 | | |
 | 11.5 | Post-OTA config persisted  | `evb-relay config show --format json` | Config values match pre-OTA settings | | |
