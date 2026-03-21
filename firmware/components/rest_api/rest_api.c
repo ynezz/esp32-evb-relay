@@ -28,6 +28,7 @@
 #include "relay.h"
 #include "relay_events.h"
 #include "rest_api_request_recv.h"
+#include "rest_api_server_config.h"
 #include "rest_api_sse_lifetime.h"
 #include "rest_api_wifi_config_update.h"
 
@@ -3443,7 +3444,7 @@ httpd_handle_t rest_api_get_server(void)
 
 esp_err_t rest_api_start(const rest_api_config_t *config)
 {
-    httpd_config_t server_config = HTTPD_DEFAULT_CONFIG();
+    httpd_config_t server_config;
     httpd_uri_t status_uri = {
         .uri = "/api/v1/status",
         .method = HTTP_GET,
@@ -3570,9 +3571,7 @@ esp_err_t rest_api_start(const rest_api_config_t *config)
         return err;
     }
 
-    server_config.server_port = (config->port != 0U) ? config->port : REST_API_DEFAULT_PORT;
-    server_config.max_uri_handlers = REST_API_URI_HANDLER_COUNT;
-    server_config.uri_match_fn = httpd_uri_match_wildcard;
+    server_config = rest_api_make_httpd_config(config->port, REST_API_URI_HANDLER_COUNT);
 
     err = httpd_start(&s_server, &server_config);
     if (err != ESP_OK) {

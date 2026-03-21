@@ -452,10 +452,18 @@ def test_watchdog_signals_process_group_even_if_parent_already_exited(monkeypatc
 
 def test_rest_api_reserves_uri_slots_for_all_registered_routes() -> None:
     source = (_repo_root() / "firmware/components/rest_api/rest_api.c").read_text(encoding="utf-8")
+    config_source = (
+        _repo_root() / "firmware/components/rest_api/rest_api_server_config.c"
+    ).read_text(encoding="utf-8")
+    header_source = (
+        _repo_root() / "firmware/components/rest_api/rest_api_server_config.h"
+    ).read_text(encoding="utf-8")
     match = re.search(r"#define REST_API_URI_HANDLER_COUNT\s+(\d+)U", source)
 
     assert match is not None
-    assert "server_config.max_uri_handlers = REST_API_URI_HANDLER_COUNT;" in source
+    assert "rest_api_make_httpd_config(config->port, REST_API_URI_HANDLER_COUNT);" in source
+    assert "server_config.max_uri_handlers = max_uri_handlers;" in config_source
+    assert "#define REST_API_HTTPD_STACK_SIZE 8192U" in header_source
 
     registered_routes = len(re.findall(r"httpd_register_uri_handler\(", source))
     assert int(match.group(1)) == registered_routes

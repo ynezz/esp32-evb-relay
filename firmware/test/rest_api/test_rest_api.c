@@ -1,5 +1,6 @@
 #include "rest_api.h"
 #include "rest_api_request_recv.h"
+#include "rest_api_server_config.h"
 #include "rest_api_sse_lifetime.h"
 #include "rest_api_wifi_config_update.h"
 
@@ -14,6 +15,14 @@ typedef struct httpd_req {
     const char *payload;
     size_t payload_offset;
 } httpd_req;
+
+bool httpd_uri_match_wildcard(const char *reference_uri, const char *uri_to_match, size_t match_upto)
+{
+    (void)reference_uri;
+    (void)uri_to_match;
+    (void)match_upto;
+    return false;
+}
 
 int httpd_req_recv(httpd_req_t *req, char *buf, size_t buf_len)
 {
@@ -406,6 +415,16 @@ static void test_rest_api_request_recv_exact_returns_failure_for_socket_errors(v
     TEST_ASSERT_EQUAL_UINT32(1U, req.call_count);
 }
 
+static void test_rest_api_make_httpd_config_sets_explicit_server_stack_size(void)
+{
+    httpd_config_t config = rest_api_make_httpd_config(0U, 18U);
+
+    TEST_ASSERT_EQUAL_UINT32(REST_API_DEFAULT_PORT, config.server_port);
+    TEST_ASSERT_EQUAL_UINT32(REST_API_HTTPD_STACK_SIZE, config.stack_size);
+    TEST_ASSERT_EQUAL_UINT32(18U, config.max_uri_handlers);
+    TEST_ASSERT_EQUAL_PTR(httpd_uri_match_wildcard, config.uri_match_fn);
+}
+
 static void test_rest_api_wifi_config_update_rejects_passphrase_with_cleared_ssid_in_any_order(void)
 {
     rest_api_wifi_config_update_request_t request = {0};
@@ -465,5 +484,6 @@ void test_rest_api_suite(void)
     RUN_TEST(test_rest_api_request_recv_exact_times_out_after_three_consecutive_timeouts);
     RUN_TEST(test_rest_api_request_recv_exact_resets_timeout_budget_after_progress);
     RUN_TEST(test_rest_api_request_recv_exact_returns_failure_for_socket_errors);
+    RUN_TEST(test_rest_api_make_httpd_config_sets_explicit_server_stack_size);
     RUN_TEST(test_rest_api_wifi_config_update_rejects_passphrase_with_cleared_ssid_in_any_order);
 }
