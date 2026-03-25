@@ -100,6 +100,14 @@ type fileConfig struct {
 	Robot    *bool  `toml:"robot"`
 }
 
+var knownFileConfigKeys = []string{
+	"api_token",
+	"format",
+	"host",
+	"robot",
+	"timeout",
+}
+
 func DefaultPath() (string, error) {
 	basePath, err := os.UserConfigDir()
 	if err != nil {
@@ -209,9 +217,10 @@ func loadFile(path string) (partialConfig, error) {
 		}
 		sort.Strings(names)
 		return partialConfig{}, wrapf(ErrorKindInvalid,
-			"unknown keys in %q: %s",
+			"unknown keys in %q: %s; supported keys: %s",
 			path,
-			strings.Join(names, ", "),
+			formatUnknownFileKeys(names),
+			strings.Join(knownFileConfigKeys, ", "),
 		)
 	}
 
@@ -304,4 +313,26 @@ func wrapError(kind ErrorKind, err error) error {
 
 func wrapf(kind ErrorKind, format string, args ...any) error {
 	return Error{Kind: kind, Err: fmt.Errorf(format, args...)}
+}
+
+func formatUnknownFileKeys(names []string) string {
+	formatted := make([]string, 0, len(names))
+	for _, name := range names {
+		if suggestion, ok := suggestFileConfigKey(name); ok {
+			formatted = append(formatted, fmt.Sprintf("%s (did you mean %q?)", name, suggestion))
+			continue
+		}
+		formatted = append(formatted, name)
+	}
+
+	return strings.Join(formatted, ", ")
+}
+
+func suggestFileConfigKey(name string) (string, bool) {
+	switch strings.ToLower(name) {
+	case "hostname":
+		return "host", true
+	default:
+		return "", false
+	}
 }

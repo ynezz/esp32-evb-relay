@@ -168,6 +168,10 @@ format = "table"
 robot = false
 ```
 
+Use `host` in the CLI config file. `hostname` is the device runtime
+setting exposed by `evb-relay config show` / `evb-relay config set`, not
+the local CLI target address key.
+
 ### Device Runtime Configuration
 
 The device exposes the following config keys through the REST API and

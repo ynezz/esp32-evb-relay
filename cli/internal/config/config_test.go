@@ -88,4 +88,25 @@ func TestLoadFileRejectsUnknownKeys(t *testing.T) {
 	if !strings.Contains(err.Error(), "api_tokn") {
 		t.Fatalf("loadFile() error = %q, want offending key name", err.Error())
 	}
+	if !strings.Contains(err.Error(), "supported keys: api_token, format, host, robot, timeout") {
+		t.Fatalf("loadFile() error = %q, want supported-key guidance", err.Error())
+	}
+}
+
+func TestLoadFileSuggestsHostForHostnameKey(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("hostname = \"relay.local\"\n"), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error = %v", err)
+	}
+
+	_, err := loadFile(path)
+	if err == nil {
+		t.Fatal("loadFile() error = nil, want invalid config error")
+	}
+
+	if !strings.Contains(err.Error(), `hostname (did you mean "host"?)`) {
+		t.Fatalf("loadFile() error = %q, want hostname suggestion", err.Error())
+	}
 }
