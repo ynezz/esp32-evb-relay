@@ -5,6 +5,73 @@
 > executing agent fills in the **Result** and **Notes** columns, then
 > commits this file with the completed results.
 
+## 2026-03-25 Rerun Summary
+
+This plan was rerun on **2026-03-25** by **Codex GPT-5** against git
+commit **`9713ff6`** on the current hardware runner
+(`/dev/esp32-evb` -> `/dev/ttyS4`).
+
+### Current metadata
+
+| Field              | Value |
+|--------------------|-------|
+| Firmware version   | 0.0.0-dev |
+| CLI version        | 0.0.0-dev (commit: unknown, built: unknown) |
+| Device IP / host   | 192.168.200.211 |
+| Date               | 2026-03-25 |
+| Git commit (RC)    | 9713ff6 |
+| Ethernet connected | yes |
+| mDNS discoverable  | no |
+| MOD-IO (prod fw)   | reported absent |
+
+### What changed versus the older run below
+
+- `just ci` passed.
+- `just test-device` passed.
+- `just test-integration` passed.
+- `just ci-full` passed.
+- Runtime config updates now work:
+  `evb-relay config set ...` and `evb-relay config wifi ...` both
+  accepted changes and persisted them across reboot.
+- OTA upload now works:
+  `evb-relay ota flash firmware/build/evb_relay_firmware.bin --format json`
+  uploaded the full image and the device came back online.
+- Relay REST edge cases now return HTTP 400/404 instead of resetting the
+  connection.
+
+### Current blockers from the rerun
+
+- **Release blocker:** after a clean production flash plus reprovision,
+  the production firmware consistently reported
+  `modio.present=false` / `modio.sync=absent`.
+  Manual `modio:*` relay and input commands failed with
+  `MODIO_NOT_PRESENT`, even though the on-device test app had just passed
+  MOD-IO coverage on the same runner. This blocks the MOD-IO relay,
+  input, and boot-policy sections for the release image.
+- `evb-relay discover --format json` still returned an empty device list
+  on this network segment.
+- Invalid config values such as `poll_interval_ms=10` currently return
+  `INVALID_CONFIG_VALUE` with exit code `1`, not the documented exit
+  code `5`.
+
+### Manual rerun highlights
+
+- PASS: CLI version and robot capabilities.
+- PASS: status CLI/REST, onboard relay control via CLI and REST.
+- PASS: SSE watch stream, heartbeat, and concurrent SSE clients.
+- PASS: auth behavior for missing, wrong, and valid tokens.
+- PASS: config snapshot updates, WiFi config set/clear, and config
+  persistence across reboot.
+- PASS: OTA upload and post-reboot recovery.
+- PASS: current table/plain/robot output formats for relay listing.
+- SKIP: physical button press was not actuated by the agent.
+
+### Release verdict
+
+**Do not cut the release yet.** The automated gates are green, but the
+production firmware's failure to detect MOD-IO after a clean flash is a
+hardware-feature regression on the release image.
+
 ---
 
 ## Test Run Metadata
