@@ -95,6 +95,8 @@ func apiExitCode(err *APIError) exitcodes.Code {
 	}
 
 	switch err.Status {
+	case http.StatusBadRequest:
+		return exitcodes.BadArgument
 	case http.StatusUnauthorized, http.StatusForbidden:
 		return exitcodes.AuthError
 	case http.StatusNotFound:

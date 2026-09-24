@@ -357,3 +357,54 @@ func TestConfigSetWrapsParseErrorsInRobotMode(t *testing.T) {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
 }
+
+// TestConfigSetDeviceRejectedValueMapsToBadArgumentExitCode is a regression
+// test for evb-1ydi: the 2026-03-25 manual rerun on commit 9713ff6 showed
+// `evb-relay config set poll_interval_ms=10` returning INVALID_CONFIG_VALUE
+// (the device rejects an out-of-range poll interval) with exit code 1
+// (general error) instead of the documented exit code 5 (bad argument);
+// see README.md's "Exit Codes" section. The value parses fine client-side
+// (it is a plain uint32), so the device's HTTP 400 response is what must
+// map to exitcodes.BadArgument.
+func TestConfigSetDeviceRejectedValueMapsToBadArgumentExitCode(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"error":{"code":"INVALID_CONFIG_VALUE","message":"poll_interval_ms must be >= 50","status":400}}`)
+	}))
+	defer server.Close()
+
+	command := newRootCommand()
+	stdout := &bytes.Buffer{}
+	command.SetOut(stdout)
+	command.SetErr(&bytes.Buffer{})
+	command.SetArgs([]string{
+		"--host", server.URL,
+		"--api-token", "cfg-token",
+		"--robot",
+		"--format", "json",
+		"config", "set", "poll_interval_ms=10",
+	})
+
+	err := command.Execute()
+	if err == nil {
+		t.Fatal("Execute() succeeded; want INVALID_CONFIG_VALUE error")
+	}
+	if got := exitcodes.FromError(err); got != exitcodes.BadArgument {
+		t.Fatalf("exit code = %d, want %d (BadArgument)", got, exitcodes.BadArgument)
+	}
+
+	var payload map[string]any
+	if unmarshalErr := json.Unmarshal(stdout.Bytes(), &payload); unmarshalErr != nil {
+		t.Fatalf("json.Unmarshal() error = %v", unmarshalErr)
+	}
+	errorPayload, ok := payload["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error = %#v; want object", payload["error"])
+	}
+	if got := errorPayload["code"]; got != "INVALID_CONFIG_VALUE" {
+		t.Fatalf("error.code = %#v, want %q", got, "INVALID_CONFIG_VALUE")
+	}
+}
