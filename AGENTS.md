@@ -1,8 +1,14 @@
 # AGENTS.md - esp32-evb-relay
 
 Guidelines for AI coding agents working in this codebase. ESP-IDF firmware
-lives in `firmware/`, the Go CLI (`evb-relay`) in `cli/`. Agent-facing
-how-to for build/flash/use/test/release lives in `skills/`.
+lives in `firmware/`, the Go CLI (`evb-relay`) in `cli/`.
+
+Task runbooks live in `skills/` (discovered through the
+`.claude/skills/` and `.agents/skills/` symlinks): `evb-flash`,
+`evb-use`, `evb-test-device` and `evb-release`. Follow the matching skill
+instead of improvising flash, test or release steps. When you change a
+recipe, CLI command, flag or script a skill names, update the skill in
+the same change; `just ci` fails on drift (`tests/repo/test_skills.py`).
 
 ## Backwards Compatibility
 
@@ -16,7 +22,7 @@ code directly.
 **After any firmware code changes, run `just ci` before committing:**
 
 ```bash
-just ci    # format-check + build + host tests + CLI gates + CLI e2e
+just ci    # format-check + build + host tests + CLI gates + CLI e2e + skills drift
 ```
 
 If you changed component behavior, also run `just test-device` when

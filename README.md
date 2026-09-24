@@ -41,9 +41,27 @@ current runner caveats, see
 firmware/   ESP-IDF application and firmware components
 cli/        Go CLI for human and robot operators
 scripts/    Flashing and provisioning helpers
+skills/     Agent skills: flash, use, test and release runbooks
 docs/       Hardware notes, release test plan, and supporting project docs
+tests/      Repo consistency checks (skills drift test)
 tools/      Pre-commit hook and udev helper files
 ```
+
+## Drive It From An Agent
+
+Coding agents (Claude Code, Codex and others that read
+`.claude/skills/` or `.agents/skills/`) pick up the repo skills
+automatically. The canonical copies live in `skills/`:
+
+| Skill | For | Covers |
+|---|---|---|
+| [`evb-flash`](skills/evb-flash/SKILL.md) | users | toolchain, build or download a release, find the serial port, erase and flash, provision the token, recover a boot-looping board |
+| [`evb-use`](skills/evb-use/SKILL.md) | users | discover, status, relays, inputs, config, token rotation, OTA, robot mode and exit codes |
+| [`evb-test-device`](skills/evb-test-device/SKILL.md) | maintainers | test tiers, `just ci`, destructive hardware tests, restoring the bench |
+| [`evb-release`](skills/evb-release/SKILL.md) | maintainers | cut, verify, bench-test and hand over a release |
+
+`just ci` runs `tests/repo/test_skills.py`, which fails when a skill names
+a `just` recipe, CLI command, flag or file that no longer exists.
 
 ## Developer Quickstart
 
@@ -76,7 +94,7 @@ Notes:
   pre-commit hook.
 - `just ci` is the main quality gate. It runs firmware format checks,
   firmware build, host tests, CLI format checks, `golangci-lint`,
-  `go vet`, and CLI tests.
+  `go vet`, CLI tests, and the skills drift test.
 - For firmware C/H edits, run `just format` before committing.
 
 ## Device Quickstart
@@ -374,6 +392,18 @@ test app), and `just test-integration` (Tier 3, HTTP integration against
 flashed production firmware). Before cutting a release, also run the
 manual checklist in
 [`docs/release-test-plan.md`](docs/release-test-plan.md).
+
+### Releases
+
+A single `vX.Y.Z` (or `vX.Y.Z-rc.N`) tag on `main` releases firmware and
+CLI together. The release workflow builds a draft GitHub release with
+merged firmware images, CLI archives, `SHA256SUMS` and build provenance
+attestations; a maintainer bench-tests the draft and publishes it, which
+also tags `cli/vX.Y.Z` for the Go module. An unpublished draft that fails
+may be deleted together with its tag and re-tagged at the same version
+after the fix lands on `main`; a published version is never changed or
+re-tagged. The full runbook is the
+[`evb-release`](skills/evb-release/SKILL.md) skill.
 
 ### Device Test Environment Variables
 
