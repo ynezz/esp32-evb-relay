@@ -41,7 +41,7 @@ current runner caveats, see
 firmware/   ESP-IDF application and firmware components
 cli/        Go CLI for human and robot operators
 scripts/    Flashing and provisioning helpers
-docs/       Hardware notes, QA plan, and supporting project docs
+docs/       Hardware notes, release test plan, and supporting project docs
 tools/      Pre-commit hook and udev helper files
 ```
 
@@ -368,8 +368,12 @@ just test-integration
 `just ci` is the required baseline quality gate after firmware changes.
 Use the hardware-backed commands when the target board is available.
 
-For the full three-tier strategy and per-component coverage goals, see
-[`docs/qa-plan.md`](docs/qa-plan.md).
+Three test tiers: `just test` (Tier 1, host-only unit tests), `just
+test-device` (Tier 2, on-device Unity tests — destructive, reflashes the
+test app), and `just test-integration` (Tier 3, HTTP integration against
+flashed production firmware). Before cutting a release, also run the
+manual checklist in
+[`docs/release-test-plan.md`](docs/release-test-plan.md).
 
 ### Device Test Environment Variables
 
