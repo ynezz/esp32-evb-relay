@@ -198,6 +198,17 @@ def _extract_case_attrs(log: str, case_name: str) -> dict | None:
     return None
 
 
+def _complete_lines(log: str) -> str:
+    # Unity result lines arrive over UART in chunks. Only trust lines that
+    # are newline-terminated, otherwise a partially received
+    # "file:line:name:FAIL: message" line matches and truncates the message.
+    return log[: log.rfind("\n") + 1]
+
+
+def _case_result_received(buffer: bytes, case_name: str) -> bool:
+    return _extract_case_attrs(_complete_lines(remove_asci_color_code(buffer)), case_name) is not None
+
+
 def _prompt_seen(buffer: bytes) -> bool:
     return any(prompt in buffer for prompt in READY_PATTERN_BYTES)
 
@@ -222,8 +233,7 @@ def _case_complete(buffer: bytes, case_name: str) -> bool:
     if any(pattern.search(buffer) for pattern in CRASH_MARKER_PATTERNS):
         return True
 
-    log = remove_asci_color_code(buffer)
-    if _extract_case_attrs(log, case_name) is not None:
+    if _case_result_received(buffer, case_name):
         return True
 
     return _prompt_seen(buffer)
@@ -236,22 +246,35 @@ def _collect_case_result_after_prompt(
     initial_buffer: bytes,
     timeout: float = CASE_RESULT_GRACE_TIMEOUT,
 ) -> bytes:
-    log = remove_asci_color_code(initial_buffer)
-    if (_extract_case_attrs(log, case_name) is not None) or not _prompt_seen(initial_buffer):
+    if _case_result_received(initial_buffer, case_name) or not _prompt_seen(initial_buffer):
         return initial_buffer
 
     try:
         return _serial_read_until(
             ser,
             timeout=timeout,
-            predicate=lambda buffer, name=case_name: _extract_case_attrs(
-                remove_asci_color_code(buffer), name
-            )
-            is not None,
+            predicate=lambda buffer, name=case_name: _case_result_received(buffer, name),
             initial_buffer=initial_buffer,
         )
     except _SerialCaseTimeout as exc:
         return exc.buffer
+
+
+def _format_case_failure_report(case_index: int, case_name: str, attrs: dict, log: str) -> str:
+    location = ""
+    if attrs.get("file") and attrs.get("line"):
+        location = f"{attrs['file']}:{attrs['line']}"
+
+    lines = [
+        f"FAILURE {case_index}: {case_name}",
+        f"  result:   {attrs.get('result', 'UNKNOWN')}",
+        f"  location: {location or 'unknown'}",
+        f"  message:  {(attrs.get('message') or 'none').strip()}",
+        f"----- device log for case {case_index} -----",
+        log.rstrip("\r\n"),
+        f"----- end device log for case {case_index} -----",
+    ]
+    return "\n".join(lines)
 
 
 def _open_case_runner_serial(dut: Dut):
@@ -314,6 +337,11 @@ def _run_all_cases_via_serial(dut: Dut, *, timeout: float, open_serial_port=_ope
                 }
             )
             dut._add_test_case_to_suite(attrs)
+            if attrs.get("result") != "PASS":
+                # The JUnit report alone is not surfaced by `just test-device`;
+                # print the Unity assertion and the case's full UART log so a
+                # device failure can be diagnosed from the captured output.
+                print(_format_case_failure_report(case.index, case.name, attrs, log), flush=True)
             try:
                 _recover_case_input_prompt(ser, timeout=20.0, initial_buffer=raw)
             except _SerialCaseTimeout:

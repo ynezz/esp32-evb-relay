@@ -274,3 +274,68 @@ def test_fail_fast_analyzer_records_unexpected_menu_return() -> None:
     assert "Enter next test, or 'enter' to see menu" in attrs["stdout"]
     assert dut._ignore_first_ready_pattern is True
     assert len(dut.expect_calls) == 1
+
+
+def test_run_all_cases_via_serial_prints_unity_failure_detail(capsys) -> None:
+    dut = _FakeRunnerDut()
+    owned_serial = _FakeSerial(
+        [
+            b"Press ENTER to see the list of tests\r\n",
+            b"Here's the test menu, pick your combo:\r\n(1)\t\"foo\"\r\nEnter test for running.\r\n",
+            b"Running foo...\r\nI (123) rest_api: sse client 3 rejected\r\n",
+            b"./main/test_rest_api_device.c:512:foo:FAIL: Expected 503 Was 200\r\n",
+            b"Enter next test, or 'enter' to see menu\r\n",
+        ]
+    )
+
+    _run_all_cases_via_serial(dut, timeout=0.01, open_serial_port=lambda _dut: owned_serial)
+
+    out = capsys.readouterr().out
+    assert dut.recorded_cases[0]["result"] == "FAIL"
+    assert "FAILURE 1: foo" in out
+    assert "location: ./main/test_rest_api_device.c:512" in out
+    assert "message:  Expected 503 Was 200" in out
+    assert "I (123) rest_api: sse client 3 rejected" in out
+    assert out.index("FAILURE 1: foo") < out.index("END 1: foo -> FAIL")
+
+
+def test_run_all_cases_via_serial_keeps_passing_cases_quiet(capsys) -> None:
+    dut = _FakeRunnerDut()
+    owned_serial = _FakeSerial(
+        [
+            b"Press ENTER to see the list of tests\r\n",
+            b"Here's the test menu, pick your combo:\r\n(1)\t\"foo\"\r\nEnter test for running.\r\n",
+            b"Running foo...\r\nnoisy passing log\r\n./main/test_rest_api_device.c:1:foo:PASS\r\n",
+            b"Enter next test, or 'enter' to see menu\r\n",
+        ]
+    )
+
+    _run_all_cases_via_serial(dut, timeout=0.01, open_serial_port=lambda _dut: owned_serial)
+
+    out = capsys.readouterr().out
+    assert "FAILURE" not in out
+    assert "noisy passing log" not in out
+
+
+def test_run_all_cases_via_serial_waits_for_complete_unity_failure_line(capsys) -> None:
+    dut = _FakeRunnerDut()
+    owned_serial = _FakeSerial(
+        [
+            b"Press ENTER to see the list of tests\r\n",
+            b"Here's the test menu, pick your combo:\r\n(1)\t\"foo\"\r\nEnter test for running.\r\n",
+            b"Running foo...\r\n./main/test_rest_api_device.c:496:foo:FAIL: Expected -1 to be grea",
+            b"ter than 0. Function [qa][rest_api][device]\r\n",
+            b"Enter next test, or 'enter' to see menu\r\n",
+        ]
+    )
+
+    _run_all_cases_via_serial(dut, timeout=0.01, open_serial_port=lambda _dut: owned_serial)
+
+    expected = "Expected -1 to be greater than 0. Function [qa][rest_api][device]"
+    assert dut.recorded_cases[0]["message"].strip() == expected
+    assert f"message:  {expected}" in capsys.readouterr().out
+
+
+def test_case_complete_ignores_partial_unity_result_line() -> None:
+    assert not _case_complete(b"Running foo...\r\n./main/x.c:1:foo:FAIL: Expected -1 to be grea", "foo")
+    assert _case_complete(b"Running foo...\r\n./main/x.c:1:foo:FAIL: Expected -1\r\n", "foo")

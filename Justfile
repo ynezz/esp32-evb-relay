@@ -33,6 +33,8 @@ test: _ensure-python-tools
     {{idf_activate}} cd firmware/test/build && ctest --output-on-failure
     {{venv_python}} -m pytest -p no:cacheprovider \
         firmware/test_integration/test_serial_bootloader_config.py
+    {{venv_python}} -m pytest -p no:cacheprovider \
+        firmware/test_app/pytest_evb_relay_unit.py
 
 cli-test:
     cd cli && mapfile -t packages < <(go list ./... | grep -v '/test_e2e$') && \
