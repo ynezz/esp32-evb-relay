@@ -13,6 +13,10 @@ trim = true
 [git]
 conventional_commits = true
 filter_unconventional = true
+# Only vX.Y.Z(-rc.N) tags are release boundaries. Excludes the cli/vX.Y.Z
+# tags pushed by release-published.yml (see C5) so the CLI's own Go-module
+# tags never get mistaken for changelog releases.
+tag_pattern = '^v[0-9]+\.[0-9]+\.[0-9]+.*$'
 commit_parsers = [
   { message = "^feat", group = "Features" },
   { message = "^fix", group = "Bug Fixes" },
@@ -25,3 +29,12 @@ commit_parsers = [
   { message = "^chore", skip = true },
 ]
 sort_commits = "oldest"
+
+[bump]
+# Explicit 1.x semver semantics for `git-cliff --bumped-version`: feat -> minor,
+# fix/other conventional types -> patch, breaking (`!` or BREAKING CHANGE:) -> major.
+# Both keys already default to true in git-cliff, pinned here so the policy
+# doesn't silently change if the upstream default ever flips.
+features_always_bump_minor = true
+breaking_always_bump_major = true
+initial_tag = "v1.0.0-rc.1"

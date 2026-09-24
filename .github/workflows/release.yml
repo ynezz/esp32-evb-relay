@@ -6,19 +6,70 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  firmware:
-    name: firmware artifact
+  validate-tag:
+    name: validate tag
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Build firmware with release version
+      - name: Validate tag format and ancestry
+        run: |
+          set -euo pipefail
+
+          tag="${GITHUB_REF_NAME}"
+
+          if [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+            echo "::error::Tag '${tag}' does not match ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?\$"
+            exit 1
+          fi
+
+          # Resolve via the tag ref rather than trust $GITHUB_SHA directly:
+          # for an annotated tag that can be the tag object's own SHA
+          # rather than the commit it points at.
+          commit="$(git rev-parse "refs/tags/${tag}^{commit}")"
+
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "${commit}" origin/main; then
+            echo "::error::Commit ${commit} for tag ${tag} is not an ancestor of origin/main"
+            exit 1
+          fi
+
+          echo "Tag ${tag} is valid and on origin/main."
+
+  # Run the full CI suite unconditionally before building release artifacts.
+  # ci.yml's path filters exist to keep PR/push CI fast, but a release must
+  # validate everything regardless of what the tagged commit touched, so
+  # this passes full-run: true (see ci.yml's workflow_call input).
+  ci:
+    name: ci
+    needs: validate-tag
+    # zizmor suggests the newer '$/...' self-repository syntax (GA per
+    # GitHub's 2026-07-30 changelog), but actionlint v1.7.12 doesn't parse
+    # it yet ("not following the format ... nor './path/to/workflow.yml'"),
+    # so this stays on the classic './...' local-reference form.
+    uses: ./.github/workflows/ci.yml
+    with:
+      full-run: true
+
+  firmware:
+    name: firmware artifact
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Build and merge firmware release images
         uses: espressif/esp-idf-ci-action@v1
         env:
           RELEASE_TAG: ${{ github.ref_name }}
@@ -26,18 +77,21 @@ jobs:
           esp_idf_version: v5.4
           target: esp32
           path: firmware
+          # Runs with cwd=firmware inside the action's container, so ../dist
+          # is the repo-root dist/ dir. `idf.py merge-bin` reads
+          # build/flash_args (generated from build/flasher_args.json), so
+          # the bootloader/partition-table/otadata/app offsets below come
+          # from the partition table at build time, not from hardcoded
+          # values in this workflow.
           command: >-
-            bash -lc 'idf.py -DPROJECT_VER="${RELEASE_TAG#v}" build'
-
-      - name: Prepare firmware release assets
-        run: |
-          set -euo pipefail
-
-          mkdir -p dist
-          artifact="esp32-evb-relay-${GITHUB_REF_NAME}.bin"
-
-          cp firmware/build/evb_relay_firmware.bin "dist/${artifact}"
-          sha256sum "dist/${artifact}" > "dist/${artifact}.sha256"
+            bash -lc '
+            set -euo pipefail &&
+            mkdir -p ../dist &&
+            idf.py -DPROJECT_VER="${RELEASE_TAG#v}" build &&
+            idf.py merge-bin -o "../dist/evb-relay-fw-${RELEASE_TAG}-full.bin" -f raw &&
+            cp build/evb_relay_firmware.bin "../dist/evb-relay-fw-${RELEASE_TAG}-ota.bin" &&
+            cp build/evb_relay_firmware.elf "../dist/evb-relay-fw-${RELEASE_TAG}.elf"
+            '
 
       - name: Upload firmware release artifact
         uses: actions/upload-artifact@v4
@@ -48,19 +102,34 @@ jobs:
 
   cli:
     name: cli release
+    needs: ci
     runs-on: ubuntu-latest
+    permissions:
+      # goreleaser creates the GitHub release and uploads the CLI archives
+      # to it, which needs write access; every other job in this workflow
+      # only reads (the top-level default).
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version-file: cli/go.mod
-          cache-dependency-path: cli/go.sum
+          # This job publishes runtime-generated release artifacts, so it
+          # skips the module cache rather than risk consuming one poisoned
+          # by an earlier, less-trusted run.
+          cache: false
 
+      # Creates the GitHub release for this tag (draft: true, prerelease:
+      # auto in cli/.goreleaser.yaml) and uploads the CLI archives to it.
+      # goreleaser is the ONLY step in this workflow that creates the
+      # release object; every later job only uploads assets to or edits
+      # this existing release, so there is no create-vs-create race.
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
         with:
@@ -72,14 +141,16 @@ jobs:
 
   changelog:
     name: changelog
+    needs: validate-tag
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Generate release notes
+      - name: Generate release notes for this tag only
         id: git-cliff
         uses: orhun/git-cliff-action@v4
         with:
@@ -103,6 +174,17 @@ jobs:
       - firmware
       - cli
       - changelog
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    # This job never checks out the repository (it only assembles and
+    # uploads release assets via the API), so gh can't infer the target
+    # repo from a git remote the way it would after actions/checkout.
+    # GH_REPO makes it explicit for every gh invocation below.
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
     steps:
       - name: Download firmware artifact
         uses: actions/download-artifact@v4
@@ -114,17 +196,92 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: release-notes
-          path: dist/changelog
+          path: notes
 
-      - name: Attach firmware assets and publish release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Attach firmware assets to the draft release
         run: |
           set -euo pipefail
 
           tag="${GITHUB_REF_NAME}"
-          notes_file="dist/changelog/release-notes.md"
 
+          # goreleaser (cli job) already created this release as a draft.
           gh release view "${tag}" >/dev/null
           gh release upload "${tag}" dist/firmware/* --clobber
-          gh release edit "${tag}" --notes-file "${notes_file}" --draft=false
+
+      - name: Compute combined SHA256SUMS over every release asset
+        run: |
+          set -euo pipefail
+
+          tag="${GITHUB_REF_NAME}"
+
+          mkdir -p dist/all
+          gh release download "${tag}" --dir dist/all --clobber
+          # Replace goreleaser's cli-only checksums.txt with one combined
+          # SHA256SUMS covering firmware and CLI assets together.
+          rm -f dist/all/checksums.txt
+          gh release delete-asset "${tag}" checksums.txt --yes || true
+
+          (cd dist/all && sha256sum -- * > SHA256SUMS)
+          gh release upload "${tag}" dist/all/SHA256SUMS --clobber
+
+      - name: Attest build provenance for every release asset
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/all/*
+
+      - name: Write release notes with usage header
+        run: |
+          set -euo pipefail
+
+          tag="${GITHUB_REF_NAME}"
+
+          {
+            echo "CLI and firmware of the same version belong together --"
+            echo "always pair a firmware image with the CLI release of the"
+            echo "same tag."
+            echo
+            echo "## Install the CLI"
+            echo
+            echo "Download the archive for your platform from the assets"
+            echo "below and put the \`evb-relay\` binary on your PATH."
+            echo
+            echo "## Flash firmware"
+            echo
+            echo "Full image (bootloader + partition table + otadata + app,"
+            echo "flashed from blank/erased flash, or over an existing image):"
+            echo
+            echo '```'
+            echo "esptool.py --chip esp32 write_flash 0x0 evb-relay-fw-${tag}-full.bin"
+            echo '```'
+            echo
+            echo "OTA upgrade of an already-flashed, reachable board (no"
+            echo "serial connection needed):"
+            echo
+            echo '```'
+            echo "evb-relay ota flash evb-relay-fw-${tag}-ota.bin"
+            echo '```'
+            echo
+            echo "## Verify authenticity"
+            echo
+            echo "Every asset in this release, including \`SHA256SUMS\`,"
+            echo "carries a build provenance attestation:"
+            echo
+            echo '```'
+            echo "gh attestation verify <downloaded-file> --repo ${GITHUB_REPOSITORY}"
+            echo '```'
+            echo
+          } > notes/header.md
+
+          cat notes/header.md notes/release-notes.md > notes/full-notes.md
+
+      - name: Update release notes (release stays draft)
+        run: |
+          set -euo pipefail
+
+          tag="${GITHUB_REF_NAME}"
+
+          # Deliberately does NOT pass --draft=false. Publishing is a manual
+          # step: a maintainer flashes the draft's -full.bin on bench
+          # hardware, runs docs/release-test-plan.md, then publishes via
+          # `gh release edit --draft=false` (see the evb-release skill).
+          gh release edit "${tag}" --notes-file notes/full-notes.md

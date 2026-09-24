@@ -7,6 +7,19 @@ on:
   pull_request:
     branches:
       - main
+  workflow_call:
+    inputs:
+      full-run:
+        description: >-
+          Run every CI job unconditionally, ignoring path filters. Used by
+          release.yml when calling this workflow, since a release build must
+          validate everything regardless of which paths the tagged commit
+          touched. The `inputs` context is empty (not this declared default)
+          on a plain push/pull_request trigger, so normal path filtering
+          applies unless a caller explicitly passes `full-run: true`.
+        type: boolean
+        default: false
+        required: false
 
 permissions:
   contents: read
@@ -17,17 +30,23 @@ jobs:
     name: detect changes
     runs-on: ubuntu-latest
     outputs:
-      firmware: ${{ steps.filter.outputs.firmware }}
-      cli: ${{ steps.filter.outputs.cli }}
-      scripts: ${{ steps.filter.outputs.scripts }}
-      tools: ${{ steps.filter.outputs.tools }}
-      shared: ${{ steps.filter.outputs.shared }}
+      firmware: ${{ inputs.full-run == true || steps.filter.outputs.firmware == 'true' }}
+      cli: ${{ inputs.full-run == true || steps.filter.outputs.cli == 'true' }}
+      scripts: ${{ inputs.full-run == true || steps.filter.outputs.scripts == 'true' }}
+      tools: ${{ inputs.full-run == true || steps.filter.outputs.tools == 'true' }}
+      shared: ${{ inputs.full-run == true || steps.filter.outputs.shared == 'true' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      # Skipped (not errored) on a full-run call: dorny/paths-filter needs a
+      # push/pull_request-shaped event to diff against, which a workflow_call
+      # invocation doesn't provide. The job outputs above already force
+      # 'true' for every category via inputs.full-run, so this step's result
+      # is unused in that case.
       - name: Detect changed paths
         id: filter
+        if: ${{ inputs.full-run != true }}
         uses: dorny/paths-filter@v3
         with:
           filters: |
