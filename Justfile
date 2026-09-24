@@ -82,6 +82,11 @@ test-integration: _ensure-python-tools
         --monitor-port {{serial_port}} \
         --monitor-baud {{serial_baud}}
 
+# Repo consistency checks: skills/ must only name recipes, CLI commands,
+# flags and paths that exist (tests/repo/test_skills.py).
+test-repo: _ensure-python-tools
+    {{venv_python}} -m pytest -p no:cacheprovider tests/repo
+
 format: _ensure-python-tools
     {{venv_astyle_py}} --astyle-version=3.4.7 --style=otbs \
         --attach-namespaces --attach-classes --indent=spaces=4 \
@@ -108,7 +113,7 @@ format-check: _ensure-python-tools
             -g '!firmware/test_app/build/**' \
             -g '!firmware/test_app/managed_components/**')
 
-ci: format-check build test cli-fmt-check cli-lint cli-vet cli-test test-e2e
+ci: format-check build test cli-fmt-check cli-lint cli-vet cli-test test-e2e test-repo
 
 ci-full: ci test-device test-integration
 
