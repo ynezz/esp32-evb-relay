@@ -2,8 +2,11 @@
 docs/olimex-esp32-evb-project
 docs/box/
 __pycache__/
-.venv/
+.venv
 bin/
+
+# Claude Code agent worktrees (.claude/skills/ stays tracked)
+.claude/worktrees/
 
 # bv (beads viewer) local config and caches
 .bv/

@@ -1,0 +1,1 @@
+../../../skills/evb-test-device/SKILL.md
