@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/mdns"
@@ -27,6 +29,10 @@ const (
 
 var queryMDNS = mdns.QueryContext
 
+// listInterfaces is overridden in tests to avoid depending on the host's
+// real network interfaces.
+var listInterfaces = net.Interfaces
+
 var discoverNoResultsNext = []string{
 	"Check the device serial console or DHCP lease table for the IP address.",
 	"Retry discovery from a network segment that forwards mDNS multicast.",
@@ -39,33 +45,48 @@ type discoverDevice struct {
 	TXT      []string `json:"txt"`
 }
 
+type discoverInterfaceError struct {
+	Interface string `json:"interface"`
+	Error     string `json:"error"`
+}
+
 type discoverResult struct {
-	Devices []discoverDevice `json:"devices"`
+	Devices         []discoverDevice         `json:"devices"`
+	InterfaceErrors []discoverInterfaceError `json:"interface_errors,omitempty"`
 }
 
 func newDiscoverCommand() *cobra.Command {
+	var interfaceName string
+
 	command := &cobra.Command{
 		Use:   "discover",
 		Short: "Browse for EVB relay devices via mDNS",
 		Args:  cobra.NoArgs,
-		RunE:  runDiscover,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runDiscover(cmd, args, interfaceName)
+		},
 	}
 
+	command.Flags().StringVar(&interfaceName, "interface", "", "Query only this network interface instead of every up, multicast-capable interface")
+
 	robot.AnnotateCommand(command, robot.CommandCapability{
+		Flags: []string{"--format", "--timeout", "--robot", "--interface"},
 		OutputFields: []string{
 			"devices[].hostname",
 			"devices[].ip",
 			"devices[].port",
 			"devices[].txt",
+			"interface_errors[].interface",
+			"interface_errors[].error",
 		},
-		Errors:  []string{"NETWORK_ERROR"},
+		Errors:  []string{"NETWORK_ERROR", "BAD_ARGUMENT"},
 		Example: "evb-relay discover",
 	})
 
 	return command
 }
 
-func runDiscover(cmd *cobra.Command, _ []string) error {
+func runDiscover(cmd *cobra.Command, _ []string, interfaceName string) error {
 	runtime, ok := ConfigFromContext(cmd)
 	if !ok {
 		return exitcodes.Wrap(exitcodes.GeneralError, errors.New("runtime config is unavailable"))
@@ -77,7 +98,7 @@ func runDiscover(cmd *cobra.Command, _ []string) error {
 	}
 
 	startedAt := time.Now()
-	result, err := discoverDevices(cmd.Context(), timeout)
+	result, err := discoverDevices(cmd.Context(), timeout, interfaceName)
 	elapsed := time.Since(startedAt)
 	warnings, next := discoverAdvice(result, err)
 
@@ -106,45 +127,171 @@ func runDiscover(cmd *cobra.Command, _ []string) error {
 }
 
 func discoverAdvice(result discoverResult, err error) ([]string, []string) {
-	if err != nil || len(result.Devices) > 0 {
-		return nil, nil
+	var warnings []string
+	for _, interfaceError := range result.InterfaceErrors {
+		warnings = append(warnings, fmt.Sprintf(
+			"mDNS query failed on interface %s: %s", interfaceError.Interface, interfaceError.Error,
+		))
 	}
 
-	return []string{"No EVB relay devices were discovered via mDNS on this network segment."},
-		append([]string(nil), discoverNoResultsNext...)
+	if err != nil || len(result.Devices) > 0 {
+		return warnings, nil
+	}
+
+	warnings = append(warnings, "No EVB relay devices were discovered via mDNS on this network segment.")
+	return warnings, append([]string(nil), discoverNoResultsNext...)
 }
 
-func discoverDevices(ctx context.Context, timeout time.Duration) (discoverResult, error) {
+// discoverInterfaces returns the network interfaces mDNS queries should run
+// on. When interfaceName is non-empty, only that interface is used
+// (regardless of its flags). Otherwise every up, multicast-capable,
+// non-loopback interface is returned.
+func discoverInterfaces(interfaceName string) ([]net.Interface, error) {
+	all, err := listInterfaces()
+	if err != nil {
+		return nil, fmt.Errorf("list network interfaces: %w", err)
+	}
+
+	interfaceName = strings.TrimSpace(interfaceName)
+	if interfaceName != "" {
+		for _, iface := range all {
+			if iface.Name == interfaceName {
+				return []net.Interface{iface}, nil
+			}
+		}
+		return nil, fmt.Errorf("interface %q not found", interfaceName)
+	}
+
+	usable := make([]net.Interface, 0, len(all))
+	for _, iface := range all {
+		if isDiscoverableInterface(iface) {
+			usable = append(usable, iface)
+		}
+	}
+
+	return usable, nil
+}
+
+func isDiscoverableInterface(iface net.Interface) bool {
+	if iface.Flags&net.FlagUp == 0 {
+		return false
+	}
+	if iface.Flags&net.FlagLoopback != 0 {
+		return false
+	}
+	if iface.Flags&net.FlagMulticast == 0 {
+		return false
+	}
+	return true
+}
+
+type discoverQueryOutcome struct {
+	interfaceName string
+	entries       []*mdns.ServiceEntry
+	err           error
+}
+
+func discoverDevices(ctx context.Context, timeout time.Duration, interfaceName string) (discoverResult, error) {
 	if timeout <= 0 {
 		return discoverResult{}, exitcodes.Wrap(exitcodes.BadArgument, errors.New("timeout must be greater than zero"))
+	}
+
+	interfaces, err := discoverInterfaces(interfaceName)
+	if err != nil {
+		return discoverResult{}, exitcodes.Wrap(exitcodes.BadArgument, err)
+	}
+	if len(interfaces) == 0 {
+		return discoverResult{}, exitcodes.Wrap(exitcodes.NetworkError, errors.New(
+			"no up, multicast-capable, non-loopback network interfaces found; use --interface to target one explicitly",
+		))
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	outcomes := make(chan discoverQueryOutcome, len(interfaces))
+	var wg sync.WaitGroup
+	for _, iface := range interfaces {
+		wg.Add(1)
+		go func(iface net.Interface) {
+			defer wg.Done()
+			outcomes <- queryDiscoverInterface(queryCtx, iface, timeout)
+		}(iface)
+	}
+
+	go func() {
+		wg.Wait()
+		close(outcomes)
+	}()
+
+	var allEntries []*mdns.ServiceEntry
+	var interfaceErrors []discoverInterfaceError
+	for outcome := range outcomes {
+		if outcome.err != nil {
+			interfaceErrors = append(interfaceErrors, discoverInterfaceError{
+				Interface: outcome.interfaceName,
+				Error:     outcome.err.Error(),
+			})
+			continue
+		}
+		allEntries = append(allEntries, outcome.entries...)
+	}
+
+	sort.Slice(interfaceErrors, func(left, right int) bool {
+		return interfaceErrors[left].Interface < interfaceErrors[right].Interface
+	})
+
+	result := discoverResult{
+		Devices:         collectDiscoverDevices(allEntries),
+		InterfaceErrors: interfaceErrors,
+	}
+
+	if len(interfaceErrors) == len(interfaces) {
+		return result, exitcodes.Wrap(exitcodes.NetworkError, fmt.Errorf(
+			"mdns query failed on all %d interface(s): %s",
+			len(interfaces), summarizeInterfaceErrors(interfaceErrors),
+		))
+	}
+
+	return result, nil
+}
+
+func queryDiscoverInterface(ctx context.Context, iface net.Interface, timeout time.Duration) discoverQueryOutcome {
 	entries := make(chan *mdns.ServiceEntry, 32)
 	params := mdns.DefaultParams(discoverServiceName)
 	params.Timeout = timeout
 	params.Entries = entries
 	params.Logger = log.New(io.Discard, "", 0)
+	params.Interface = &iface
 
-	errCh := make(chan error, 1)
+	collected := make([]*mdns.ServiceEntry, 0)
+	done := make(chan struct{})
 	go func() {
-		errCh <- queryMDNS(queryCtx, params)
-		close(entries)
+		for entry := range entries {
+			collected = append(collected, entry)
+		}
+		close(done)
 	}()
 
-	result := discoverResult{
-		Devices: collectDiscoverDevices(entries),
-	}
+	err := queryMDNS(ctx, params)
+	close(entries)
+	<-done
 
-	return result, <-errCh
+	return discoverQueryOutcome{interfaceName: iface.Name, entries: collected, err: err}
 }
 
-func collectDiscoverDevices(entries <-chan *mdns.ServiceEntry) []discoverDevice {
+func summarizeInterfaceErrors(errs []discoverInterfaceError) string {
+	parts := make([]string, 0, len(errs))
+	for _, current := range errs {
+		parts = append(parts, fmt.Sprintf("%s: %s", current.Interface, current.Error))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func collectDiscoverDevices(entries []*mdns.ServiceEntry) []discoverDevice {
 	devicesByKey := make(map[string]discoverDevice)
 
-	for entry := range entries {
+	for _, entry := range entries {
 		device, ok := discoverDeviceFromEntry(entry)
 		if !ok {
 			continue

@@ -135,8 +135,16 @@ diagnostics, see [`docs/hardware-reference.md`](docs/hardware-reference.md).
 The CLI can discover devices over mDNS, query status, change relays,
 read inputs, and perform OTA updates.
 
+`discover` queries every up, multicast-capable, non-loopback network
+interface concurrently by default, which matters on multi-NIC hosts
+(Ethernet + WiFi + bridges/VPNs). Use `--interface <name>` to query a
+single interface instead; a failure on one interface (e.g. a bridge
+with no multicast route) is reported per-interface without aborting
+the rest of the query.
+
 ```bash
 ./bin/evb-relay discover
+./bin/evb-relay discover --interface eth0
 
 ./bin/evb-relay -H esp32-evb-relay.local -k "$EVB_RELAY_API_TOKEN" status
 
