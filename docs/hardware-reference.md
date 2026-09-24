@@ -3,7 +3,9 @@
 ## ESP32-EVB Board
 
 - **Chip:** ESP32-D0WD (revision v1.0)
-- **MAC:** `bc:dd:c2:f2:aa:19`
+- **MAC:** burned in per-unit — never hardcode one MAC as *the* board
+  address. Bench unit example (ynezz's bench): base `ec:c9:ff:bc:98:f4`,
+  Ethernet `ec:c9:ff:bc:98:f7`.
 - **Flash:** 4 MB
 - **Preferred serial alias:** `/dev/esp32-evb`
 - **Serial baud:** 115200
@@ -37,18 +39,34 @@
 
 ### Serial Device Naming
 
-- The runner may present the ESP32-EVB serial adapter as a QEMU-injected
-  PCI 16550A serial adapter, typically `/dev/ttyS*` in guest passthrough.
+- Prefer the stable alias `/dev/esp32-evb` for flashing and monitoring
+  wherever a udev rule provides it.
 - Do not hardcode `/dev/ttyUSB0` or any other transient device path in
-  repo defaults, CI, or runner notes.
-- Prefer the stable guest-side udev alias `/dev/esp32-evb` for the
-  current single-port runner.
+  repo defaults, CI, or runner notes — go through the alias.
 - Reserve `/dev/esp32-evb-flash` and `/dev/esp32-evb-console` for
-  setups that really expose separate flash/control and live-UART paths.
-- An example guest-side rule file lives at
-  [`tools/udev/99-esp32-evb-qemu-serial.rules.example`](../tools/udev/99-esp32-evb-qemu-serial.rules.example).
-- That example rule matches the QEMU PCI passthrough identity used by this runner
-  and creates the single-port `/dev/esp32-evb` alias.
+  setups that really expose separate flash/control and live-UART paths
+  (`EVB_FLASH_PORT` / `EVB_SERIAL_PORT` in the `Justfile`).
+- See "CI Runner (QEMU Passthrough)" below for the self-hosted CI
+  runner's specific serial-naming quirks — they do not apply to a board
+  plugged directly into a bench machine over USB.
+
+### USB Serial and Download Mode
+
+- On real hardware over USB, the board's CH340 USB-serial adapter drives
+  EN/GPIO0 automatically (auto-reset). `esptool`'s default
+  `--before default_reset --after hard_reset` sequence reliably enters
+  and leaves ROM download mode with no physical BOOT-button press
+  needed.
+- The Olimex board docs separately note that ESP32-EVB does not expose a
+  dedicated BOOT-button header by default; manual forced boot-mode
+  selection (only needed if the USB auto-reset path is ever unavailable)
+  requires a hardware rework around resistors `R46` and `R14`. That
+  rework note is about the missing physical button, not the USB
+  auto-reset circuit, which works fine as shipped.
+- `scripts/check-download-mode.sh` probes ROM download mode with a
+  minimal esptool `chip_id` call and runs automatically before
+  `scripts/flash.sh`, `scripts/provision.sh`, `just test-device`, and
+  `just test-integration`, so serial regressions fail fast.
 
 ### Flashing
 
@@ -83,15 +101,29 @@ just test-device
 # Low-level flash (esptool, use --no-stub to avoid stub crashes)
 python3 -m esptool --no-stub --chip esp32 --port /dev/esp32-evb \
   write_flash 0x10000 <binary.bin>
+
+# Full erase for board recovery — erase_flash needs the flasher stub.
+# Do NOT pass --no-stub here; the ROM loader's erase path is unreliable.
+python3 -m esptool --chip esp32 --port /dev/esp32-evb erase_flash
 ```
 
-### Current Runner Caveat
+---
 
-- The self-hosted runners expose the board as a PCI 16550A adapter in this
-  QEMU passthrough setup.
-- The guest currently exposes no `/dev/serial/by-id` aliases, so the
-  repo-standard `/dev/esp32-evb` alias should be created with a guest-side
-  udev rule.
+## CI Runner (QEMU Passthrough)
+
+> The rest of this section is specific to the self-hosted GitHub Actions
+> runner, which exposes the ESP32-EVB over QEMU PCI passthrough instead
+> of a direct USB connection. None of it applies to a board plugged
+> directly into a bench machine.
+
+- The self-hosted runner exposes the board as a PCI 16550A serial
+  adapter under QEMU passthrough, typically `/dev/ttyS*` in guest
+  passthrough — not a direct USB CH340 connection.
+- The guest exposes no `/dev/serial/by-id` aliases, so the
+  repo-standard `/dev/esp32-evb` alias must be created with a
+  guest-side udev rule matching the QEMU PCI passthrough identity. An
+  example rule file lives at
+  [`tools/udev/99-esp32-evb-qemu-serial.rules.example`](../tools/udev/99-esp32-evb-qemu-serial.rules.example).
 - On 2026-03-18, one QEMU guest observation had the board appear as
   `/dev/ttyS4`. Keep this as historical diagnostics, not an operational
   default, and rely on `/dev/esp32-evb` whenever possible.
@@ -99,15 +131,9 @@ python3 -m esptool --no-stub --chip esp32 --port /dev/esp32-evb \
   matcher works when that transport is in use.
 - Runnable commands in this repo should continue to use
   `/dev/esp32-evb`, not a transient `/dev/ttyS*` node.
-- The image flashed after restoring download-mode access reports
-  app version `0.0.0-dev` and reaches Ethernet DHCP successfully before
-  starting the REST API.
-- The bundled Olimex board docs state that ESP32-EVB boards do not expose
-  BOOT-button functionality by default. Manual forced boot mode requires
-  a hardware rework around resistors `R46` and `R14`.
-- `scripts/check-download-mode.sh` still runs before `scripts/flash.sh`,
-  `scripts/provision.sh`, `just test-device`, and `just test-integration`
-  so serial regressions fail fast with a clearer signature.
+- The image flashed after restoring download-mode access on this runner
+  reports app version `0.0.0-dev` and reaches Ethernet DHCP successfully
+  before starting the REST API.
 
 ---
 
