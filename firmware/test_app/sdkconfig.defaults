@@ -7,3 +7,9 @@ CONFIG_PARTITION_TABLE_TWO_OTA=y
 CONFIG_UNITY_ENABLE_IDF_TEST_RUNNER=y
 CONFIG_ESP_TASK_WDT_EN=n
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+# The REST API device tests run the HTTP client and server on the same
+# lwIP stack over loopback, so every connection costs two sockets
+# (client + accepted) on top of httpd's listen and control sockets. The
+# SSE client-limit case holds 4 SSE streams plus one rejected extra
+# connection: 2 + 2 * 5 = 12 sockets, above the default budget of 10.
+CONFIG_LWIP_MAX_SOCKETS=16

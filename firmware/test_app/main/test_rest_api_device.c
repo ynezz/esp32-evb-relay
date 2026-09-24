@@ -22,6 +22,26 @@
 #include "rest_api.h"
 #include "unity.h"
 
+/* Mirrors REST_API_SSE_MAX_CLIENTS in rest_api.c. */
+#define TEST_REST_API_SSE_MAX_CLIENTS 4U
+/* httpd keeps a listening socket and a UDP control socket. */
+#define TEST_HTTPD_INTERNAL_SOCKETS 2U
+
+/* The loopback SSE tests own both ends of every connection, so saturating
+ * the SSE client limit and probing one extra client needs two lwIP sockets
+ * per connection on top of httpd's own sockets. */
+/* esp_ota_begin() erases the whole image region synchronously before the
+ * OTA handler consumes any request body, so the uploading client makes no
+ * progress until the erase completes. On the ESP32-EVB flash this takes
+ * 1.83-1.96 s for the ~469 KB test image, which left only tens of
+ * milliseconds against the generic 2 s request timeout. Size the upload
+ * socket timeout for worst-case block-erase times instead. */
+#define TEST_OTA_UPLOAD_SOCKET_TIMEOUT_S 10
+
+_Static_assert(CONFIG_LWIP_MAX_SOCKETS >=
+               (TEST_HTTPD_INTERNAL_SOCKETS + (2U * (TEST_REST_API_SSE_MAX_CLIENTS + 1U))),
+               "test_app lwIP socket budget cannot hold the SSE client-limit loopback test");
+
 static void ensure_tcpip_ready(void)
 {
     static bool tcpip_ready;
@@ -556,7 +576,7 @@ static void perform_partition_upload_request(uint16_t port,
         .sin_addr.s_addr = htonl(INADDR_LOOPBACK),
     };
     struct timeval timeout = {
-        .tv_sec = 2,
+        .tv_sec = TEST_OTA_UPLOAD_SOCKET_TIMEOUT_S,
         .tv_usec = 0,
     };
     int sock;
@@ -1417,14 +1437,14 @@ TEST_CASE("rest_api device cleanup closes tracked client sockets", "[qa][rest_ap
 TEST_CASE("rest_api device enforces the SSE client limit", "[qa][rest_api][device]")
 {
     static const uint16_t test_port = 18097U;
-    static const size_t max_sse_clients = 4U;
+    static const size_t max_sse_clients = TEST_REST_API_SSE_MAX_CLIENTS;
     static const rest_api_config_t config = {
         .port = test_port,
         .auth_handler = allow_auth_handler,
         .status_provider = status_provider,
     };
     char response[1024];
-    int sockets[4];
+    int sockets[TEST_REST_API_SSE_MAX_CLIENTS];
     int extra_sock = -1;
 
     memset(sockets, 0xFF, sizeof(sockets));
@@ -1456,14 +1476,14 @@ TEST_CASE("rest_api device releases SSE slots after abrupt client disconnect",
           "[qa][rest_api][device]")
 {
     static const uint16_t test_port = 18101U;
-    static const size_t max_sse_clients = 4U;
+    static const size_t max_sse_clients = TEST_REST_API_SSE_MAX_CLIENTS;
     static const rest_api_config_t config = {
         .port = test_port,
         .auth_handler = allow_auth_handler,
         .status_provider = status_provider,
     };
     char response[1024];
-    int sockets[4];
+    int sockets[TEST_REST_API_SSE_MAX_CLIENTS];
     int replacement_sock = -1;
 
     memset(sockets, 0xFF, sizeof(sockets));
