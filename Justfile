@@ -128,8 +128,9 @@ setup:
         pytest-embedded-serial-esp \
         pytest-embedded-idf \
         requests
-    cp tools/pre-commit-hook.sh .git/hooks/pre-commit
-    chmod +x .git/hooks/pre-commit
+    hook_path="$(git rev-parse --git-path hooks)/pre-commit" && \
+        cp tools/pre-commit-hook.sh "${hook_path}" && \
+        chmod +x "${hook_path}"
 
 clean:
     rm -rf firmware/build firmware/test/build \
