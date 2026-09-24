@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"example.com/esp32-evb-relay/cli/internal/exitcodes"
+	"github.com/ynezz/esp32-evb-relay/cli/internal/exitcodes"
 )
 
 func TestInputWatchOutputsNDJSONStream(t *testing.T) {

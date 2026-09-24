@@ -8,9 +8,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	appconfig "example.com/esp32-evb-relay/cli/internal/config"
-	"example.com/esp32-evb-relay/cli/internal/exitcodes"
-	"example.com/esp32-evb-relay/cli/internal/robot"
+	appconfig "github.com/ynezz/esp32-evb-relay/cli/internal/config"
+	"github.com/ynezz/esp32-evb-relay/cli/internal/exitcodes"
+	"github.com/ynezz/esp32-evb-relay/cli/internal/robot"
 )
 
 type configContextKey struct{}

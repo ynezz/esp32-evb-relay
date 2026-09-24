@@ -10,11 +10,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"example.com/esp32-evb-relay/cli/client"
-	appconfig "example.com/esp32-evb-relay/cli/internal/config"
-	"example.com/esp32-evb-relay/cli/internal/exitcodes"
-	outputformat "example.com/esp32-evb-relay/cli/internal/format"
-	"example.com/esp32-evb-relay/cli/internal/robot"
+	"github.com/ynezz/esp32-evb-relay/cli/client"
+	appconfig "github.com/ynezz/esp32-evb-relay/cli/internal/config"
+	"github.com/ynezz/esp32-evb-relay/cli/internal/exitcodes"
+	outputformat "github.com/ynezz/esp32-evb-relay/cli/internal/format"
+	"github.com/ynezz/esp32-evb-relay/cli/internal/robot"
 )
 
 const statusCommandName = "status"

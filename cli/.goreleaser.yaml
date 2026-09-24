@@ -20,9 +20,9 @@ builds:
     ldflags:
       - >-
         -s -w
-        -X example.com/esp32-evb-relay/cli/cmd.Version={{ .Version }}
-        -X example.com/esp32-evb-relay/cli/cmd.Commit={{ .Commit }}
-        -X example.com/esp32-evb-relay/cli/cmd.Date={{ .CommitDate }}
+        -X github.com/ynezz/esp32-evb-relay/cli/cmd.Version={{ .Version }}
+        -X github.com/ynezz/esp32-evb-relay/cli/cmd.Commit={{ .Commit }}
+        -X github.com/ynezz/esp32-evb-relay/cli/cmd.Date={{ .CommitDate }}
     mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:

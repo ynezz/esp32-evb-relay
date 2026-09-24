@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"example.com/esp32-evb-relay/cli/internal/exitcodes"
+	"github.com/ynezz/esp32-evb-relay/cli/internal/exitcodes"
 )
 
 const apiBasePath = "/api/v1"

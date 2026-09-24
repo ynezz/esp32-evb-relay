@@ -13,8 +13,8 @@ import (
 	"github.com/hashicorp/mdns"
 	"github.com/spf13/cobra"
 
-	appconfig "example.com/esp32-evb-relay/cli/internal/config"
-	"example.com/esp32-evb-relay/cli/internal/exitcodes"
+	appconfig "github.com/ynezz/esp32-evb-relay/cli/internal/config"
+	"github.com/ynezz/esp32-evb-relay/cli/internal/exitcodes"
 )
 
 func withVersionMetadata(version string, commit string, date string, fn func()) {

@@ -6,8 +6,8 @@ import (
 	"net/url"
 	"strings"
 
-	"example.com/esp32-evb-relay/cli/client"
-	"example.com/esp32-evb-relay/cli/internal/exitcodes"
+	"github.com/ynezz/esp32-evb-relay/cli/client"
+	"github.com/ynezz/esp32-evb-relay/cli/internal/exitcodes"
 )
 
 const (

@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	appconfig "example.com/esp32-evb-relay/cli/internal/config"
-	outputformat "example.com/esp32-evb-relay/cli/internal/format"
+	appconfig "github.com/ynezz/esp32-evb-relay/cli/internal/config"
+	outputformat "github.com/ynezz/esp32-evb-relay/cli/internal/format"
 )
 
 const capabilityAnnotationKey = "robot.capability"

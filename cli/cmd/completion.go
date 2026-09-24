@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"example.com/esp32-evb-relay/cli/internal/robot"
+	"github.com/ynezz/esp32-evb-relay/cli/internal/robot"
 )
 
 func newCompletionCommand() *cobra.Command {

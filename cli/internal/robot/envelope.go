@@ -10,9 +10,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"example.com/esp32-evb-relay/cli/internal/exitcodes"
-	outputformat "example.com/esp32-evb-relay/cli/internal/format"
-	"example.com/esp32-evb-relay/cli/internal/toon"
+	"github.com/ynezz/esp32-evb-relay/cli/internal/exitcodes"
+	outputformat "github.com/ynezz/esp32-evb-relay/cli/internal/format"
+	"github.com/ynezz/esp32-evb-relay/cli/internal/toon"
 )
 
 const EnvelopeVersion = 1

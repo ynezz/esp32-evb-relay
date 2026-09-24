@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"example.com/esp32-evb-relay/cli/internal/exitcodes"
+	"github.com/ynezz/esp32-evb-relay/cli/internal/exitcodes"
 )
 
 func TestConfigShowOutputsJSON(t *testing.T) {

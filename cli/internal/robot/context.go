@@ -1,6 +1,6 @@
 package robot
 
-import "example.com/esp32-evb-relay/cli/client"
+import "github.com/ynezz/esp32-evb-relay/cli/client"
 
 type DeviceContext struct {
 	ModIOPresent    *bool  `json:"modio_present,omitempty"`

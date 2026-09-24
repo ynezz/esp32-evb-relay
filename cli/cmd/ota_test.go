@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	appconfig "example.com/esp32-evb-relay/cli/internal/config"
-	"example.com/esp32-evb-relay/cli/internal/exitcodes"
+	appconfig "github.com/ynezz/esp32-evb-relay/cli/internal/config"
+	"github.com/ynezz/esp32-evb-relay/cli/internal/exitcodes"
 )
 
 func TestOTAFlashUploadsBinaryAndOutputsJSON(t *testing.T) {

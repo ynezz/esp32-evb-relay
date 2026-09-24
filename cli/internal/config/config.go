@@ -12,7 +12,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	outputformat "example.com/esp32-evb-relay/cli/internal/format"
+	outputformat "github.com/ynezz/esp32-evb-relay/cli/internal/format"
 )
 
 const (

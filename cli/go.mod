@@ -1,4 +1,4 @@
-module example.com/esp32-evb-relay/cli
+module github.com/ynezz/esp32-evb-relay/cli
 
 go 1.24.4
 
