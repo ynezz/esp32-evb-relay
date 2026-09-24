@@ -36,13 +36,14 @@ DEFAULT_CLI_TIMEOUT_SECONDS = 30.0
 DEFAULT_CLI_REQUEST_TIMEOUT = "5s"
 PARTTOOL_ESPTOOL_ARGS = ("--esptool-args", "no-stub")
 ETHERNET_IP_LOG_PATTERN = re.compile(r"Ethernet got IP: ip=(\d+\.\d+\.\d+\.\d+)")
-SAFE_OFF_PATHS = (
-    "/api/v1/relays/onboard/1",
-    "/api/v1/relays/onboard/2",
-    "/api/v1/relays/modio/1",
-    "/api/v1/relays/modio/2",
-    "/api/v1/relays/modio/3",
-    "/api/v1/relays/modio/4",
+# MOD-IO relay state cannot be read back from the board, so the firmware
+# rejects per-relay writes with 409 MODIO_STATE_UNKNOWN until a full-mask
+# write has established a known state (e.g. right after boot). Restore the
+# MOD-IO relays with one full-mask write, which is valid in every sync state.
+SAFE_OFF_REQUESTS = (
+    ("/api/v1/relays/onboard/1", {"state": False}),
+    ("/api/v1/relays/onboard/2", {"state": False}),
+    ("/api/v1/relays/modio", {"states": [False, False, False, False]}),
 )
 IGNORED_CLEANUP_STATUS_CODES = {404, 405, 501, 503}
 _USE_DEFAULT_TOKEN = object()
@@ -298,9 +299,9 @@ def _resolve_dut_endpoint(
 
 
 def _restore_safe_relays(http_client: IntegrationHttpClient) -> None:
-    for path in SAFE_OFF_PATHS:
+    for path, body in SAFE_OFF_REQUESTS:
         try:
-            response = http_client.request("PUT", path, json={"state": False})
+            response = http_client.request("PUT", path, json=body)
         except requests.RequestException:
             continue
 

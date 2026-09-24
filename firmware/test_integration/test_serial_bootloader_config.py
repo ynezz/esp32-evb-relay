@@ -634,6 +634,44 @@ def test_cleanup_ignores_modio_not_present_service_unavailable() -> None:
     assert 503 in module.IGNORED_CLEANUP_STATUS_CODES
 
 
+def test_restore_safe_relays_succeeds_while_modio_sync_is_unknown() -> None:
+    module = _load_integration_conftest()
+
+    class FakeResponse:
+        def __init__(self, status_code: int) -> None:
+            self.status_code = status_code
+
+        def raise_for_status(self) -> None:
+            if self.status_code >= 400:
+                raise requests.HTTPError(f"{self.status_code} for PUT")
+
+    class FreshBootDevice:
+        """Mirrors firmware semantics right after boot: MOD-IO sync unknown."""
+
+        def __init__(self) -> None:
+            self.modio_sync_known = False
+            self.requests: list[tuple[str, str, object]] = []
+
+        def request(self, method: str, path: str, **kwargs: object) -> FakeResponse:
+            body = kwargs.get("json")
+            self.requests.append((method, path, body))
+            if path == "/api/v1/relays/modio":
+                self.modio_sync_known = True
+                return FakeResponse(200)
+            if path.startswith("/api/v1/relays/modio/") and not self.modio_sync_known:
+                return FakeResponse(409)
+            return FakeResponse(200)
+
+    device = FreshBootDevice()
+
+    module._restore_safe_relays(device)
+
+    assert ("PUT", "/api/v1/relays/modio", {"states": [False, False, False, False]}) in device.requests
+    assert not any(path.startswith("/api/v1/relays/modio/") for _, path, _ in device.requests)
+    assert ("PUT", "/api/v1/relays/onboard/1", {"state": False}) in device.requests
+    assert ("PUT", "/api/v1/relays/onboard/2", {"state": False}) in device.requests
+
+
 def test_wait_for_http_ready_retries_until_status_succeeds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
