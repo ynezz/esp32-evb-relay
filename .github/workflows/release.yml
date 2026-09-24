@@ -83,21 +83,26 @@ jobs:
           esp_idf_version: v5.4
           target: esp32
           path: firmware
+          # The action runs `docker run ... /bin/bash -c '<command>'`:
+          # step env does not reach the container unless forwarded here,
+          # and a single quote inside `command` would end that quoted
+          # string early. tests/repo/test_workflows.py checks both.
+          extra_docker_args: -e RELEASE_TAG
           # Runs with cwd=firmware inside the action's container, so ../dist
           # is the repo-root dist/ dir. `idf.py merge-bin` reads
           # build/flash_args (generated from build/flasher_args.json), so
           # the bootloader/partition-table/otadata/app offsets below come
           # from the partition table at build time, not from hardcoded
-          # values in this workflow.
+          # values in this workflow. merge-bin runs esptool from build/, so
+          # its -o path must be absolute, not relative to firmware/.
           command: >-
-            bash -lc '
             set -euo pipefail &&
+            test -n "${RELEASE_TAG}" &&
             mkdir -p ../dist &&
             idf.py -DPROJECT_VER="${RELEASE_TAG#v}" build &&
-            idf.py merge-bin -o "../dist/evb-relay-fw-${RELEASE_TAG}-full.bin" -f raw &&
+            idf.py merge-bin -o "${PWD}/../dist/evb-relay-fw-${RELEASE_TAG}-full.bin" -f raw &&
             cp build/evb_relay_firmware.bin "../dist/evb-relay-fw-${RELEASE_TAG}-ota.bin" &&
             cp build/evb_relay_firmware.elf "../dist/evb-relay-fw-${RELEASE_TAG}.elf"
-            '
 
       - name: Upload firmware release artifact
         uses: actions/upload-artifact@v4

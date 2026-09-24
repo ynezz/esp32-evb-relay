@@ -80,3 +80,45 @@ def test_caller_grants_called_workflow_permissions(caller, job_id, caller_perms,
             if level > granted(caller_granted, scope):
                 missing.append(f"{called.name} {where} wants {scope}: {perms[scope]}")
     assert not missing, f"{caller} job '{job_id}' does not grant: " + "; ".join(missing)
+
+
+def esp_idf_ci_steps() -> list[tuple[str, dict]]:
+    steps = []
+    for path in sorted(WORKFLOWS_DIR.glob("*.yml")):
+        for job_id, job in (load(path).get("jobs") or {}).items():
+            for step in job.get("steps") or []:
+                if step.get("uses", "").startswith("espressif/esp-idf-ci-action@"):
+                    steps.append((f"{path.name}:{job_id}:{step.get('name', '?')}", step))
+    return steps
+
+
+ESP_IDF_STEPS = esp_idf_ci_steps()
+
+
+# esp-idf-ci-action runs `docker run ... /bin/bash -c '<command>'` and only
+# passes IDF_TARGET into the container. The release firmware job broke on
+# both counts: a quoted `bash -lc '...'` command ("bash: -c: option requires
+# an argument") and a step env var the container never saw.
+@pytest.mark.parametrize("where,step", ESP_IDF_STEPS, ids=[s[0] for s in ESP_IDF_STEPS])
+def test_esp_idf_ci_action_command_survives_docker_wrapping(where, step):
+    command = step["with"]["command"]
+    assert "'" not in command, f"{where}: single quote in command breaks the action's bash -c '...'"
+
+    forwarded = step["with"].get("extra_docker_args", "").split()
+    for name in step.get("env") or {}:
+        if f"${name}" in command or f"${{{name}" in command:
+            assert "-e" in forwarded and (
+                name in forwarded or any(a.startswith(f"{name}=") for a in forwarded)
+            ), f"{where}: command uses ${name} but extra_docker_args does not pass -e {name}"
+
+
+# `idf.py merge-bin` runs esptool with cwd=build/, so a relative -o lands
+# under build/ (the first fixed release run died with "FileNotFoundError:
+# ... '../dist/evb-relay-fw-v1.0.0-rc.1-full.bin'").
+@pytest.mark.parametrize("where,step", ESP_IDF_STEPS, ids=[s[0] for s in ESP_IDF_STEPS])
+def test_esp_idf_merge_bin_output_is_absolute(where, step):
+    words = step["with"]["command"].split()
+    for i, word in enumerate(words):
+        if word == "merge-bin" and "-o" in words[i:]:
+            out = words[words.index("-o", i) + 1].strip('"')
+            assert out.startswith(("/", "${PWD}", "$PWD")), f"{where}: merge-bin -o {out} is relative"
