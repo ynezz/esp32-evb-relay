@@ -55,6 +55,12 @@ jobs:
     # it yet ("not following the format ... nor './path/to/workflow.yml'"),
     # so this stays on the classic './...' local-reference form.
     uses: ./.github/workflows/ci.yml
+    # A called workflow can only narrow the caller's GITHUB_TOKEN, never
+    # widen it. ci.yml asks for pull-requests: read (dorny/paths-filter),
+    # so this job must grant it or GitHub rejects the whole run at startup.
+    permissions:
+      contents: read
+      pull-requests: read
     with:
       full-run: true
 
