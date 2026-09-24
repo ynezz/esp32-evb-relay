@@ -1,0 +1,53 @@
+name: release-published
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  tag-cli:
+    name: tag cli release
+    runs-on: ubuntu-latest
+    # types: [published] already excludes drafts (a draft never fires this
+    # event), but the check is kept explicit since the whole point of this
+    # workflow is to never touch a draft release.
+    if: ${{ github.event.release.draft == false }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          # Deliberately NOT persist-credentials: false -- the push step
+          # below relies on the credential this leaves configured.
+
+      - name: Push cli/<tag> at the release commit
+        env:
+          # Passed through env instead of interpolated directly into the
+          # script below, so the tag name is never expanded as shell code
+          # by GitHub's template engine (avoids script injection via a
+          # crafted tag name).
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+
+          tag="${TAG}"
+          cli_tag="cli/${tag}"
+          sha="$(git rev-parse "refs/tags/${tag}^{commit}")"
+
+          existing_sha="$(git ls-remote --tags origin "refs/tags/${cli_tag}" | cut -f1)"
+          if [ -n "${existing_sha}" ]; then
+            if [ "${existing_sha}" = "${sha}" ]; then
+              echo "Tag ${cli_tag} already points at ${sha}; nothing to do."
+              exit 0
+            fi
+            echo "::error::Tag ${cli_tag} already exists at ${existing_sha}, expected ${sha}. Published releases are immutable, refusing to move it."
+            exit 1
+          fi
+
+          git tag "${cli_tag}" "${sha}"
+          git push origin "refs/tags/${cli_tag}"
+          echo "Pushed ${cli_tag} -> ${sha}"
