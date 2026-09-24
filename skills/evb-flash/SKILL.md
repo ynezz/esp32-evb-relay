@@ -21,6 +21,10 @@ Check what is present before installing anything:
 | Python venv | `test -x .venv/bin/python` | create with `just setup` |
 | ASan/UBSan runtimes | `rpm -q libasan libubsan` | Fedora only, for `just test`; `sudo dnf install libasan libubsan` |
 
+After switching ESP-IDF versions, delete stale build trees
+(`rm -rf firmware/build firmware/test/build`): CMake caches the old
+toolchain path and fails with "Tool doesn't match supported version".
+
 `scripts/flash.sh` and `scripts/provision.sh` source `scripts/lib/idf-env.sh`
 to activate ESP-IDF themselves: if `idf.py` is already on `PATH` this is a
 no-op, otherwise they source `export.sh` from `$IDF_PATH` (or
