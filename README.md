@@ -104,9 +104,6 @@ alias if you have one configured. The examples below assume
 `/dev/esp32-evb`.
 
 ```bash
-export IDF_PATH=/path/to/esp-idf
-source "$IDF_PATH/export.sh"
-
 ./scripts/flash.sh --port /dev/esp32-evb
 ./scripts/provision.sh --port /dev/esp32-evb --generate
 
@@ -117,9 +114,11 @@ cd cli && go build -o ../bin/evb-relay .
 ../bin/evb-relay -H esp32-evb-relay.local -k "<token>" relay list
 ```
 
-`scripts/provision.sh` prints the provisioned API token. Store it and
-reuse it through `--api-token`, `EVB_RELAY_API_TOKEN`, or the CLI config
-file.
+`scripts/flash.sh` and `scripts/provision.sh` source ESP-IDF's
+`export.sh` themselves (using `IDF_PATH` if set, otherwise
+`~/esp/esp-idf`), so no manual `export IDF_PATH=...` step is required
+before running them. Set `IDF_PATH` first only if ESP-IDF lives
+somewhere else.
 
 If you are running hardware-backed checks instead of a manual flash
 loop, use `just test-device`. For port aliasing and download-mode

@@ -22,13 +22,9 @@ EOF
 }
 
 require_idf() {
-    if [[ -z "${IDF_PATH:-}" ]]; then
-        echo "IDF_PATH must be set before running scripts/flash.sh" >&2
-        exit 1
-    fi
-
-    # shellcheck source=/dev/null
-    source "${IDF_PATH}/export.sh" >/dev/null 2>&1
+    # shellcheck source=SCRIPTDIR/lib/idf-env.sh
+    source "${script_dir}/lib/idf-env.sh"
+    idf_env_activate || exit 1
 }
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

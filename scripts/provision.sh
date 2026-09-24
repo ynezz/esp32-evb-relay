@@ -31,12 +31,9 @@ die() {
 }
 
 require_idf() {
-    if [[ -z "${IDF_PATH:-}" ]]; then
-        die "IDF_PATH must be set before running scripts/provision.sh"
-    fi
-
-    # shellcheck source=/dev/null
-    source "${IDF_PATH}/export.sh" >/dev/null 2>&1
+    # shellcheck source=SCRIPTDIR/lib/idf-env.sh
+    source "${script_dir}/lib/idf-env.sh"
+    idf_env_activate || exit 1
 }
 
 generate_token() {
