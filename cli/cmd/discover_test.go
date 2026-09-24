@@ -6,12 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/hashicorp/mdns"
 
-	"example.com/esp32-evb-relay/cli/internal/exitcodes"
+	"github.com/ynezz/esp32-evb-relay/cli/internal/exitcodes"
 )
 
 // defaultTestInterface is the single fake up/multicast-capable interface
@@ -468,6 +469,123 @@ func TestDiscoverSurfacesPerInterfaceErrorsWithoutFailingTheRun(t *testing.T) {
 	warnings, ok := payload["warnings"].([]any)
 	if !ok || len(warnings) == 0 {
 		t.Fatalf("warnings = %#v, want a per-interface warning", payload["warnings"])
+	}
+}
+
+func TestDiscoverHumanOutputSuppressesInterfaceErrorsWhenDeviceFound(t *testing.T) {
+	defer stubInterfaces(t, []net.Interface{
+		{Name: "eth0", Flags: net.FlagUp | net.FlagMulticast},
+		{Name: "virbr0", Flags: net.FlagUp | net.FlagMulticast},
+	})()
+
+	restore := stubMDNSQuery(t, func(_ context.Context, params *mdns.QueryParam) error {
+		if params.Interface.Name == "virbr0" {
+			return errors.New("sendto: network is unreachable")
+		}
+		params.Entries <- &mdns.ServiceEntry{
+			Host:       "relay-a.local.",
+			AddrV4:     net.ParseIP("192.168.1.50"),
+			Port:       80,
+			InfoFields: []string{"board=esp32-evb"},
+		}
+		return nil
+	})
+	defer restore()
+
+	command := newRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	command.SetOut(stdout)
+	command.SetErr(stderr)
+	command.SetArgs([]string{"--format", "json", "discover"})
+
+	if err := command.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if got := stderr.String(); strings.Contains(got, "mDNS query failed on interface") {
+		t.Fatalf("stderr = %q, want no per-interface failure noise once a device was found", got)
+	}
+}
+
+func TestDiscoverHumanOutputShowsInterfaceErrorsWhenNoDeviceFound(t *testing.T) {
+	defer stubInterfaces(t, []net.Interface{
+		{Name: "eth0", Flags: net.FlagUp | net.FlagMulticast},
+		{Name: "virbr0", Flags: net.FlagUp | net.FlagMulticast},
+	})()
+
+	restore := stubMDNSQuery(t, func(_ context.Context, params *mdns.QueryParam) error {
+		if params.Interface.Name == "virbr0" {
+			return errors.New("sendto: network is unreachable")
+		}
+		return nil
+	})
+	defer restore()
+
+	command := newRootCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	command.SetOut(stdout)
+	command.SetErr(stderr)
+	command.SetArgs([]string{"--format", "json", "discover"})
+
+	if err := command.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	want := "mDNS query failed on interface virbr0: sendto: network is unreachable"
+	if got := stderr.String(); !strings.Contains(got, want) {
+		t.Fatalf("stderr = %q, want it to contain %q when no device was found", got, want)
+	}
+}
+
+func TestDiscoverRobotOutputKeepsInterfaceErrorsWhenDeviceFound(t *testing.T) {
+	defer stubInterfaces(t, []net.Interface{
+		{Name: "eth0", Flags: net.FlagUp | net.FlagMulticast},
+		{Name: "virbr0", Flags: net.FlagUp | net.FlagMulticast},
+	})()
+
+	restore := stubMDNSQuery(t, func(_ context.Context, params *mdns.QueryParam) error {
+		if params.Interface.Name == "virbr0" {
+			return errors.New("sendto: network is unreachable")
+		}
+		params.Entries <- &mdns.ServiceEntry{
+			Host:       "relay-a.local.",
+			AddrV4:     net.ParseIP("192.168.1.50"),
+			Port:       80,
+			InfoFields: []string{"board=esp32-evb"},
+		}
+		return nil
+	})
+	defer restore()
+
+	command := newRootCommand()
+	stdout := &bytes.Buffer{}
+	command.SetOut(stdout)
+	command.SetErr(&bytes.Buffer{})
+	command.SetArgs([]string{"--robot", "--format", "json", "discover"})
+
+	if err := command.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	warnings, ok := payload["warnings"].([]any)
+	if !ok || len(warnings) != 1 {
+		t.Fatalf("warnings = %#v, want the per-interface warning to survive in robot mode", payload["warnings"])
+	}
+
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("data = %#v; want object", payload["data"])
+	}
+	interfaceErrors, ok := data["interface_errors"].([]any)
+	if !ok || len(interfaceErrors) != 1 {
+		t.Fatalf("interface_errors = %#v; want one entry", data["interface_errors"])
 	}
 }
 

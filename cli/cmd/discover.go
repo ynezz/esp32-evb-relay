@@ -116,7 +116,7 @@ func runDiscover(cmd *cobra.Command, _ []string, interfaceName string) error {
 		return err
 	}
 
-	for _, warning := range warnings {
+	for _, warning := range discoverHumanWarnings(result, warnings) {
 		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), warning)
 	}
 	for _, step := range next {
@@ -124,6 +124,22 @@ func runDiscover(cmd *cobra.Command, _ []string, interfaceName string) error {
 	}
 
 	return outputformat.Output(cmd.OutOrStdout(), result, runtime.Format)
+}
+
+// discoverHumanWarnings trims per-interface mDNS failure warnings from
+// human-readable stderr once at least one device was found. Those
+// failures are routine noise on hosts with bridges that have no route to
+// the device's network (virbr0, docker0, podman0) and would otherwise
+// bury a successful result. When no device was found, every warning
+// (including per-interface failures) is still shown, since they are then
+// the most useful diagnostic. Robot mode is unaffected: it always gets
+// the full warnings list, and interface_errors in the JSON data is
+// populated either way.
+func discoverHumanWarnings(result discoverResult, warnings []string) []string {
+	if len(result.Devices) > 0 {
+		return nil
+	}
+	return warnings
 }
 
 func discoverAdvice(result discoverResult, err error) ([]string, []string) {
