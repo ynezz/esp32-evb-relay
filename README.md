@@ -105,13 +105,13 @@ alias if you have one configured. The examples below assume
 
 ```bash
 ./scripts/flash.sh --port /dev/esp32-evb
-./scripts/provision.sh --port /dev/esp32-evb --generate
+./scripts/provision.sh --port /dev/esp32-evb --generate --token-file ~/.config/evb-relay/token
 
 cd cli && go build -o ../bin/evb-relay .
 
 ../bin/evb-relay discover
-../bin/evb-relay -H esp32-evb-relay.local -k "<token>" status
-../bin/evb-relay -H esp32-evb-relay.local -k "<token>" relay list
+../bin/evb-relay -H esp32-evb-relay.local -k "$(cat ~/.config/evb-relay/token)" status
+../bin/evb-relay -H esp32-evb-relay.local -k "$(cat ~/.config/evb-relay/token)" relay list
 ```
 
 `scripts/flash.sh` and `scripts/provision.sh` source ESP-IDF's
@@ -119,6 +119,12 @@ cd cli && go build -o ../bin/evb-relay .
 `~/esp/esp-idf`), so no manual `export IDF_PATH=...` step is required
 before running them. Set `IDF_PATH` first only if ESP-IDF lives
 somewhere else.
+
+`scripts/provision.sh` does not print the API token by default. Use
+`--token-file <path>` to have it write the token to a file (created
+with mode `0600`), `--print-token` to print it to stdout instead, or
+both. Reuse the token through `--api-token`, `EVB_RELAY_API_TOKEN`, or
+the CLI config file.
 
 If you are running hardware-backed checks instead of a manual flash
 loop, use `just test-device`. For port aliasing and download-mode

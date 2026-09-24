@@ -18,10 +18,20 @@ Options:
   --generate            Generate a random 32-hex-character API token.
                         This is the default when no token mode is given.
   --clear               Remove the stored API token.
+  --token-file <path>   Write the provisioned token to this file (mode
+                        0600) instead of printing it. Not valid with
+                        --clear.
+  --print-token         Print the provisioned token to stdout. By
+                        default the token value is not displayed, only
+                        a confirmation that provisioning succeeded. Not
+                        valid with --clear.
   -h, --help            Show this help text.
 
 The script preserves the currently stored device_cfg keys instead of
 writing a fresh NVS partition from defaults.
+
+By default the provisioned/rotated token is never printed or logged.
+Use --token-file, --print-token, or both to retrieve it.
 EOF
 }
 
@@ -51,6 +61,8 @@ port="${EVB_FLASH_PORT:-${EVB_SERIAL_PORT:-/dev/esp32-evb}}"
 baud="${EVB_FLASH_BAUD:-115200}"
 token=""
 mode="generate"
+token_file=""
+print_token=0
 
 while (($# > 0)); do
     case "$1" in
@@ -73,6 +85,14 @@ while (($# > 0)); do
         ;;
     --clear)
         mode="clear"
+        shift
+        ;;
+    --token-file)
+        token_file="${2:?missing value for --token-file}"
+        shift 2
+        ;;
+    --print-token)
+        print_token=1
         shift
         ;;
     -h|--help)
@@ -99,6 +119,19 @@ if [[ "${mode}" != "clear" ]]; then
     if [[ "${token}" =~ [[:space:]] ]]; then
         die "token must not contain whitespace"
     fi
+else
+    if [[ -n "${token_file}" ]]; then
+        die "--token-file cannot be used with --clear"
+    fi
+    if ((print_token)); then
+        die "--print-token cannot be used with --clear"
+    fi
+fi
+
+if [[ -n "${token_file}" ]]; then
+    token_file_dir="$(dirname "${token_file}")"
+    mkdir -p "${token_file_dir}"
+    chmod 0700 "${token_file_dir}"
 fi
 
 require_idf
@@ -217,5 +250,20 @@ python3 "${parttool_py}" \
 if [[ "${mode}" == "clear" ]]; then
     echo "Cleared API token on ${port}"
 else
-    echo "Provisioned API token on ${port}: ${token}"
+    if [[ -n "${token_file}" ]]; then
+        (
+            umask 077
+            printf '%s\n' "${token}" > "${token_file}"
+        )
+        chmod 0600 "${token_file}"
+        echo "Provisioned API token on ${port}; wrote it to ${token_file} (mode 0600)"
+    else
+        echo "Provisioned API token on ${port}"
+    fi
+
+    if ((print_token)); then
+        echo "Token: ${token}"
+    elif [[ -z "${token_file}" ]]; then
+        echo "provision.sh: token not printed; re-run with --print-token or --token-file <path> to retrieve it" >&2
+    fi
 fi
