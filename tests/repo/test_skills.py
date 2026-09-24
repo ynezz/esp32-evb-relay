@@ -3,12 +3,6 @@
 Every command, recipe, flag and path a skill tells an agent to use must
 exist in this checkout. When this fails, fix the skill (or the thing it
 describes) in the same change that caused the drift.
-
-Lines carrying a pending-sync marker (``<!-- sync: <bead ids> -->``) are
-excluded from the command/flag/path checks, together with the paragraph
-that follows the marker, so a skill can flag text that waits on
-in-flight work without breaking the gate. Resolve the markers when that
-work lands.
 """
 
 import json
@@ -28,7 +22,6 @@ SHARED_DIR = SKILLS_DIR / "_shared"
 DISCOVERY_DIRS = (ROOT / ".agents" / "skills", ROOT / ".claude" / "skills")
 MAX_SKILL_LINES = 200
 
-SYNC_MARKER = re.compile(r"<!--\s*sync:[^>]*-->")
 # Repo-relative paths a skill may point at. Build outputs (firmware/build,
 # bin/, dist/) are deliberately not checked: they exist only after a build.
 REPO_PATH = re.compile(
@@ -68,22 +61,6 @@ def frontmatter(text: str) -> dict[str, str]:
             raise AssertionError(f"frontmatter line is not 'key: value': {line!r}")
         fields[key.strip()] = value.strip()
     return fields
-
-
-def checked_text(text: str) -> str:
-    """Drop sync-marker lines and the paragraph that follows each marker."""
-    out: list[str] = []
-    skipping = False
-    for line in text.splitlines():
-        if SYNC_MARKER.search(line):
-            skipping = True
-            continue
-        if skipping:
-            if line.strip() == "":
-                skipping = False
-            continue
-        out.append(line)
-    return "\n".join(out)
 
 
 def code_spans(text: str) -> list[str]:
@@ -219,7 +196,7 @@ def test_no_orphan_discovery_entries(discovery):
 @pytest.mark.parametrize("doc", skill_docs(), ids=rel)
 def test_just_recipes_exist(doc):
     mentioned = set()
-    for span in code_spans(checked_text(doc.read_text())):
+    for span in code_spans(doc.read_text()):
         mentioned.update(JUST_RECIPE.findall(" " + span))
     missing = sorted(mentioned - just_recipes())
     assert not missing, (
@@ -233,7 +210,7 @@ def test_evb_relay_commands_and_flags_exist(doc, cli):
     commands, flags = cli
     groups = {c.split()[0] for c in commands if " " in c}
     problems = []
-    for span in code_spans(checked_text(doc.read_text())):
+    for span in code_spans(doc.read_text()):
         for args in evb_relay_invocations(span):
             words: list[str] = []
             skip_value = False
@@ -271,9 +248,7 @@ def test_evb_relay_commands_and_flags_exist(doc, cli):
 
 @pytest.mark.parametrize("doc", skill_docs(), ids=rel)
 def test_repo_paths_exist(doc):
-    missing = sorted(
-        {p for p in REPO_PATH.findall(checked_text(doc.read_text())) if not (ROOT / p).exists()}
-    )
+    missing = sorted({p for p in REPO_PATH.findall(doc.read_text()) if not (ROOT / p).exists()})
     assert not missing, (
         f"{rel(doc)} points at repo paths that do not exist: {missing}; "
         "fix the path or the skill (paths are relative to the repo root)"

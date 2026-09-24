@@ -15,16 +15,18 @@ Check what is present before installing anything:
 
 | Need | Check | Notes |
 | --- | --- | --- |
-| ESP-IDF v5.4.3 | `ls ~/esp/esp-idf/export.sh` or `echo $IDF_PATH` | only for building or for `esptool.py`; `just` recipes source `$IDF_PATH/export.sh` themselves (default `~/esp/esp-idf`) |
+| ESP-IDF v5.4.3 | `idf.py --version` (must print `v5.4.3`, matching `firmware/dependencies.lock`) | only for building or for `esptool.py`; `just` recipes and `scripts/flash.sh`/`scripts/provision.sh` auto-source `$IDF_PATH/export.sh` (default `~/esp/esp-idf`) if `idf.py` is not already on `PATH` |
 | `just` | `just --version` | |
 | Go 1.25+ | `go version` | builds the `evb-relay` CLI |
 | Python venv | `test -x .venv/bin/python` | create with `just setup` |
 | ASan/UBSan runtimes | `rpm -q libasan libubsan` | Fedora only, for `just test`; `sudo dnf install libasan libubsan` |
 
-<!-- sync: evb-qv50.17/.19/.20 -->
-The helper scripts under `scripts/` need ESP-IDF on the environment. If
-one stops with an `IDF_PATH` error, `export IDF_PATH=~/esp/esp-idf` (or
-wherever ESP-IDF lives) and rerun; see the script's `--help`.
+`scripts/flash.sh` and `scripts/provision.sh` source `scripts/lib/idf-env.sh`
+to activate ESP-IDF themselves: if `idf.py` is already on `PATH` this is a
+no-op, otherwise they source `export.sh` from `$IDF_PATH` (or
+`~/esp/esp-idf`). If a script still stops with an `idf.py is not on PATH`
+error, ESP-IDF is not installed at either location; export `IDF_PATH` to
+point at your checkout and rerun.
 
 Build the CLI once: `cd cli && go build -o ../bin/evb-relay .`, then use
 `./bin/evb-relay`, or install a release archive (below).
@@ -100,11 +102,13 @@ scripts/provision.sh --port <port> --token "<value>"   # a chosen token
 scripts/provision.sh --port <port> --clear             # remove the token
 ```
 
-<!-- sync: evb-qv50.17/.19/.20 -->
-How the generated token is handed back (stdout, or a file) is changing;
-check `scripts/provision.sh --help`. Treat the token as a secret: do not
-echo it into logs, commits or chat. Keep it in `EVB_RELAY_API_TOKEN` or
-the CLI config file (`~/.config/evb-relay/config.toml`, key `api_token`).
+By default the token is never printed or logged; the script only confirms
+success. Retrieve it with `--token-file <path>` (written mode 0600) and/or
+`--print-token` (prints it to stdout), e.g.
+`scripts/provision.sh --port <port> --generate --token-file /tmp/evb-token`.
+Treat the token as a secret: do not echo it into logs, commits or chat.
+Keep it in `EVB_RELAY_API_TOKEN` or the CLI config file
+(`~/.config/evb-relay/config.toml`, key `api_token`).
 
 With the board already on the network and a valid token, rotate it
 without serial: `evb-relay config set api_token=<new>`.

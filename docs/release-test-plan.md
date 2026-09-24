@@ -1,9 +1,12 @@
 # Manual Pre-Release Test Plan
 
+> **This file is a template — never commit results into it.**
 > Agent-executable checklist for validating the full CLI + firmware
-> feature set against real hardware before cutting a release. The
-> executing agent fills in the **Result** and **Notes** columns, then
-> commits this file with the completed results.
+> feature set against real hardware before cutting a release, run from
+> `skills/evb-release` Step 6. Before starting, copy this file outside
+> the repo (e.g. `/tmp/evb-release-$V/test-plan.md`) and fill in the
+> **Result** and **Notes** columns of the copy. This checked-in copy
+> stays blank for the next release.
 
 ## Test Run Metadata
 
@@ -509,27 +512,21 @@ Fill in after completing all sections.
 
 ## Agent Instructions
 
-1. Complete **all prerequisite steps** (Steps 0–6) before proceeding
-2. Fill in the **Test Run Metadata** table before starting tests
-3. Execute each test in order; fill **Result** (`PASS` / `FAIL` /
+1. Copy this template outside the repo (e.g.
+   `/tmp/evb-release-$V/test-plan.md`, per `skills/evb-release` Step 6)
+   and do every step below in that copy, not in `docs/release-test-plan.md`
+2. Complete **all prerequisite steps** (Steps 0–6) before proceeding
+3. Fill in the **Test Run Metadata** table before starting tests
+4. Execute each test in order; fill **Result** (`PASS` / `FAIL` /
    `SKIP`) and **Notes** (actual output, error messages, observations)
-4. If a test fails, record the failure details and continue — do not
+5. If a test fails, record the failure details and continue — do not
    stop the run; file a bead for any newly discovered issue
-5. Tests marked with physical actions (MOD-IO disconnect, button
+6. Tests marked with physical actions (MOD-IO disconnect, button
    press) should be marked `SKIP` if the agent cannot perform them,
    with a note explaining why
-6. After completing all sections, fill in the **Results Summary** table
-7. Fill in the **Sign-Off** table
-8. Commit this file with the completed results:
-   ```bash
-   git add docs/release-test-plan.md
-   git -c commit.gpgsign=false commit -s -m "$(cat <<'EOF'
-   test: execute manual pre-release test plan
-
-   Run the 156-test pre-release validation checklist against real
-   hardware covering all 17 functional areas.
-
-   Results: N PASS / N FAIL / N SKIP
-   EOF
-   )"
-   ```
+7. After completing all sections, fill in the **Results Summary** table
+8. Fill in the **Sign-Off** table
+9. Do not commit the filled-in copy into this repo. Hand the totals
+   (PASS/FAIL/SKIP, and every FAIL by test ID) to ynezz per
+   `skills/evb-release` Step 7; `docs/release-test-plan.md` here stays
+   the blank template for the next release.

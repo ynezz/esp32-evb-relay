@@ -6,7 +6,11 @@ description: Run the esp32-evb-relay test tiers as a maintainer. Use when asked 
 # Test esp32-evb-relay on host and hardware
 
 Run from the repo root after `just setup` (creates `.venv`, installs
-pytest-embedded and astyle, installs the pre-commit hook).
+pytest-embedded and astyle, installs the pre-commit hook). Before any
+tier that builds firmware (gate, 1, 2, 3), check `idf.py --version`
+prints `v5.4.3`, matching `firmware/dependencies.lock`; `just` recipes
+and `scripts/flash.sh`/`scripts/provision.sh` auto-source it from
+`$IDF_PATH` (default `~/esp/esp-idf`) if it is not already on `PATH`.
 
 ## Tiers
 
@@ -60,9 +64,13 @@ pytest-embedded and astyle, installs the pre-commit hook).
 
 Example: `EVB_SERIAL_PORT=/dev/serial/by-id/<id> EVB_PYTEST_ARGS="-v" just test-device`.
 
-<!-- sync: evb-qv50.17/.19/.20 -->
-The Tier 2 runner is being reworked; if a recipe or knob above behaves
-differently, `just --list` and the `Justfile` are authoritative.
+Tier 2's owned-serial case runner (`firmware/test_app/pytest_evb_relay.py`)
+now surfaces failures instead of just START/END lines: every non-PASS case
+prints a `FAILURE <n>: <name>` block with the Unity `result`, `location`
+(file:line) and `message`, followed by the full device log between
+`----- device log for case <n> -----` markers. Passing cases stay quiet.
+If a recipe or knob above still behaves differently, `just --list` and the
+`Justfile` are authoritative.
 
 ## When a hardware run fails
 
@@ -76,6 +84,11 @@ differently, `just --list` and the `Justfile` are authoritative.
   `skills/_shared/device-address.md`.
 - Tests must leave onboard relays OFF and MOD-IO all-off, and must not
   depend on order or leftover state. A test that breaks this is a bug.
+- MOD-IO I2C can wedge: bus timeouts persist even after a driver bus
+  reset, and `status` keeps reporting MOD-IO absent. This is a hardware
+  lockup, not a code bug; the only recovery is a physical power cycle of
+  the MOD-IO module (or the whole board). Agents cannot do this — stop
+  and ask the human to power-cycle the hardware.
 
 ## Afterwards: restore the bench
 

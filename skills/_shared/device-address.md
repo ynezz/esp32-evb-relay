@@ -11,10 +11,10 @@ plain HTTP on port 80 under `/api/v1`.
 
 1. The user or environment already names it: `EVB_RELAY_HOST`, `-H`, or
    `host` in the CLI config file. Use that.
-2. `evb-relay discover` browses mDNS and lists devices with their IPs.
-   <!-- sync: evb-qv50.17/.19/.20 -->
-   Discovery options (interface selection, all-interface browsing) are
-   being reworked; check `evb-relay discover --help` for the current flags.
+2. `evb-relay discover` queries every up, multicast-capable interface by
+   default and lists devices with their IPs. On a host with bridges that
+   have no route to the device's network (`virbr0`, `docker0`, `podman0`),
+   limit to one interface with `evb-relay discover --interface <name>`.
 3. mDNS finds nothing: it is often blocked, not broken. Sandboxed or
    containerized agent shells, VPNs and separate VLANs drop multicast.
    Ask the user for the IP, or read it from the DHCP server or router,
