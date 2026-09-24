@@ -1,10 +1,15 @@
 .ntm
 docs/olimex-esp32-evb-project
+docs/box/
 __pycache__/
 .venv/
+bin/
 
 # bv (beads viewer) local config and caches
 .bv/
+
+# br (beads_rust) local export history
+.beads/.br_history/
 
 # ESP-IDF generated artifacts
 firmware/sdkconfig
